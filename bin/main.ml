@@ -23,12 +23,13 @@ let run_grpc_server ~port =
 let run_both_servers ~http_port ~grpc_port =
   Eio_main.run @@ fun env ->
   let net = Eio.Stdenv.net env in
+  let clock = Eio.Stdenv.clock env in
   Eio.Switch.run @@ fun sw ->
   Eio.Fiber.both
     (fun () ->
       let server = Figma_mcp.Tools.create_figma_server () in
       let config = { Figma_mcp.Protocol_eio.default_config with port = http_port } in
-      Figma_mcp.Protocol_eio.run ~sw ~net config server)
+      Figma_mcp.Protocol_eio.run ~sw ~net ~clock config server)
     (fun () ->
       Figma_mcp.Grpc_server.serve ~sw ~env ~port:grpc_port ())
 

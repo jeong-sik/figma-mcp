@@ -60,6 +60,18 @@ module Response = struct
     ] in
     let response = Httpun.Response.create ~headers `No_content in
     Httpun.Reqd.respond_with_string reqd response ""
+
+  (** SSE streaming response for MCP streamable-http protocol *)
+  let sse_stream reqd ~on_write =
+    let headers = Httpun.Headers.of_list [
+      ("content-type", "text/event-stream");
+      ("cache-control", "no-cache");
+      ("connection", "keep-alive");
+      ("access-control-allow-origin", "*");
+    ] in
+    let response = Httpun.Response.create ~headers `OK in
+    let body = Httpun.Reqd.respond_with_streaming reqd response in
+    on_write body
 end
 
 module Request = struct
@@ -106,6 +118,14 @@ let process_mcp_request_sync (server : Mcp_protocol.mcp_server) body_str =
         `Null Mcp_protocol.parse_error msg None in
       Yojson.Safe.to_string err_response
 
+(** ============== SSE Helpers ============== *)
+
+(** Send SSE event and flush immediately *)
+let send_sse_event body ~event ~data =
+  let msg = sprintf "event: %s\ndata: %s\n\n" event data in
+  Httpun.Body.Writer.write_string body msg;
+  Httpun.Body.Writer.flush body ignore
+
 (** ============== HTTP Handlers ============== *)
 
 let health_handler _request reqd =
@@ -121,6 +141,26 @@ let mcp_post_handler server _request reqd =
   Request.read_body_async reqd (fun body_str ->
     let response_str = process_mcp_request_sync server body_str in
     Response.json response_str reqd
+  )
+
+(** MCP SSE handler for streamable-http protocol (GET /mcp) *)
+let mcp_sse_handler ~clock _request reqd =
+  Response.sse_stream reqd ~on_write:(fun body ->
+    (* Send initial endpoint event (MCP protocol requirement) *)
+    send_sse_event body ~event:"endpoint" ~data:"/mcp";
+
+    (* Keep connection alive with periodic pings *)
+    let rec ping_loop () =
+      try
+        Eio.Time.sleep clock 15.0;
+        let timestamp = string_of_float (Unix.gettimeofday ()) in
+        send_sse_event body ~event:"ping" ~data:timestamp;
+        ping_loop ()
+      with _ ->
+        (* Client disconnected or error - close the body *)
+        Httpun.Body.Writer.close body
+    in
+    ping_loop ()
   )
 
 (** ============== Plugin Bridge Handlers ============== *)
@@ -233,7 +273,7 @@ let plugin_status_handler _request reqd =
 
 (** ============== Router ============== *)
 
-let route_request server request reqd =
+let route_request ~clock server request reqd =
   let path = Request.path request in
   let meth = Request.method_ request in
 
@@ -246,6 +286,10 @@ let route_request server request reqd =
 
   | `GET, "/" ->
       Response.text (sprintf "🎨 %s MCP Server (Eio)" Mcp_protocol.server_name) reqd
+
+  | `GET, "/mcp" ->
+      (* SSE stream for MCP streamable-http protocol *)
+      mcp_sse_handler ~clock request reqd
 
   | `GET, "/plugin/status" ->
       plugin_status_handler request reqd
@@ -267,11 +311,11 @@ let route_request server request reqd =
 
 (** ============== httpun-eio Server ============== *)
 
-let make_request_handler server =
+let make_request_handler ~clock server =
   fun _client_addr gluten_reqd ->
     let reqd = gluten_reqd.Gluten.Reqd.reqd in
     let request = Httpun.Reqd.request reqd in
-    route_request server request reqd
+    route_request ~clock server request reqd
 
 let error_handler _client_addr ?request:_ error start_response =
   let response_body = start_response Httpun.Headers.empty in
@@ -285,8 +329,8 @@ let error_handler _client_addr ?request:_ error start_response =
   Httpun.Body.Writer.close response_body
 
 (** Run HTTP server with Eio *)
-let run ~sw ~net config server =
-  let request_handler = make_request_handler server in
+let run ~sw ~net ~clock config server =
+  let request_handler = make_request_handler ~clock server in
   let ip = match Ipaddr.of_string config.host with
     | Ok addr -> Eio.Net.Ipaddr.of_raw (Ipaddr.to_octets addr)
     | Error _ -> Eio.Net.Ipaddr.V4.loopback
@@ -297,7 +341,8 @@ let run ~sw ~net config server =
   eprintf "🎨 %s MCP Server (Eio)\n" Mcp_protocol.server_name;
   eprintf "   Protocol: %s\n" Mcp_protocol.protocol_version;
   eprintf "   HTTP:     http://%s:%d\n" config.host config.port;
-  eprintf "   MCP:      http://%s:%d/mcp\n%!" config.host config.port;
+  eprintf "   MCP:      GET  /mcp -> SSE stream (streamable-http)\n";
+  eprintf "             POST /mcp -> JSON-RPC requests\n%!";
 
   let rec accept_loop () =
     let flow, client_addr = Eio.Net.accept ~sw socket in
@@ -322,5 +367,6 @@ let run ~sw ~net config server =
 let start_server ?(config = default_config) server =
   Eio_main.run @@ fun env ->
   let net = Eio.Stdenv.net env in
+  let clock = Eio.Stdenv.clock env in
   Eio.Switch.run @@ fun sw ->
-  run ~sw ~net config server
+  run ~sw ~net ~clock config server
