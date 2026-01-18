@@ -51,7 +51,29 @@ let invalid_params = -32602
 let internal_error = -32603
 
 (** ============== 서버 정보 ============== *)
-let protocol_version = "2025-11-25"
+let supported_protocol_versions = [
+  "2024-11-05";
+  "2025-03-26";
+  "2025-11-25";
+]
+
+let default_protocol_version = "2025-11-25"
+
+let normalize_protocol_version version =
+  if List.mem version supported_protocol_versions then version
+  else default_protocol_version
+
+let protocol_version_from_params params =
+  match params with
+  | Some (`Assoc _ as p) ->
+      (try
+        match List.assoc_opt "protocolVersion" (match p with `Assoc lst -> lst | _ -> []) with
+        | Some (`String v) -> v
+        | _ -> default_protocol_version
+       with _ -> default_protocol_version)
+  | _ -> default_protocol_version
+
+let protocol_version = default_protocol_version  (* for backward compat *)
 let server_name = "figma-mcp"
 let server_version = "0.1.0"
 
@@ -251,9 +273,11 @@ HTML (❌): <span>등록하기</span>  <!-- partial/modified! -->
 ```
 |}
 
-let handle_initialize _params : Yojson.Safe.t =
+let handle_initialize params : Yojson.Safe.t =
+  let client_version = protocol_version_from_params params in
+  let negotiated_version = normalize_protocol_version client_version in
   `Assoc [
-    ("protocolVersion", `String protocol_version);
+    ("protocolVersion", `String negotiated_version);
     ("capabilities", `Assoc [
       ("tools", `Assoc []);
       ("resources", `Assoc [("listChanged", `Bool false)]);

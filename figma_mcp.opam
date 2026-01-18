@@ -4,16 +4,23 @@ version: "0.1.0"
 synopsis: "Figma MCP Server - OCaml 5.x Native with gRPC Streaming"
 description:
   "Type-safe Figma JSON parser with MCP protocol support and gRPC streaming for large files"
+maintainer: ["Jeongsik Yun"]
+authors: ["Jeongsik Yun"]
+license: "MIT"
+homepage: "https://github.com/jeong-sik/figma-mcp"
+bug-reports: "https://github.com/jeong-sik/figma-mcp/issues"
 depends: [
-  "ocaml" {>= "5.0"}
-  "dune" {>= "3.0"}
-  "yojson"
-  "cohttp-lwt-unix"
-  "lwt"
-  "uri"
-  "cmdliner"
-  "grpc-direct"
-  "grpc-direct-core"
+  "ocaml" {>= "5.1"}
+  "dune" {>= "3.13" & >= "3.13"}
+  "mcp_protocol" {>= "0.1.0"}
+  "grpc-direct" {>= "0.1.0"}
+  "yojson" {>= "2.0"}
+  "cohttp-lwt-unix" {>= "5.0"}
+  "lwt" {>= "5.6"}
+  "uri" {>= "4.2"}
+  "cmdliner" {>= "1.1"}
+  "eio" {>= "1.0"}
+  "ppx_deriving_yojson" {>= "3.6"}
   "odoc" {with-doc}
 ]
 build: [
@@ -30,3 +37,4 @@ build: [
     "@doc" {with-doc}
   ]
 ]
+dev-repo: "git+https://github.com/jeong-sik/figma-mcp.git"
