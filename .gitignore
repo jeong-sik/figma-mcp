@@ -30,3 +30,5 @@ plugin/dist/
 # Downloaded release binary
 figma-mcp-macos-arm64
 figma-mcp-linux-x64
+# Track the local release artifact
+!figma-mcp-macos-arm64

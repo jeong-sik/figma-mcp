@@ -107,7 +107,7 @@ let cmd =
     `P "CLI Codegen:";
     `Pre "  cat figma.json | figma-mcp -f fidelity";
   ] in
-  let info = Cmd.info "figma-mcp" ~version:"0.3.0" ~doc ~man in
+  let info = Cmd.info "figma-mcp" ~version:"0.3.1" ~doc ~man in
   Cmd.v info Term.(const run $ format_arg $ components_arg $ server_arg $ port_arg $ grpc_port_arg)
 
 let () = exit (Cmd.eval cmd)
