@@ -3,7 +3,7 @@
     Solves: "7MB JSON crashing Claude Code" problem
     Uses: grpc-direct (OCaml 5.x native gRPC library)
 
-    Expected compression: 7MB JSON → ~700KB protobuf+gzip (90% reduction)
+    Expected compression when gzip is enabled: 7MB JSON → ~700KB protobuf+gzip (90% reduction)
 *)
 
 open Printf
@@ -19,8 +19,8 @@ let max_chunk_size = 64 * 1024  (* 64KB per chunk *)
     compression vs JSON text. *)
 
 module Proto = struct
-  (** Identity compression - placeholder for real gzip compression
-      TODO: Add camlzip dependency for actual gzip compression *)
+  (** Identity compression - placeholder for real gzip compression.
+      TODO: Add camlzip dependency for actual gzip compression. *)
   let compress s = s
 
   (** Encode a string with length prefix (varint + bytes) *)
@@ -39,23 +39,31 @@ module Proto = struct
     Buffer.add_string buf s;
     Buffer.contents buf
 
-  (** Decode a length-prefixed string *)
+  (** Decode a length-prefixed string safely. *)
   let decode_string bytes offset =
-    let len = ref 0 in
-    let shift = ref 0 in
-    let pos = ref offset in
-    (* Read varint *)
-    let continue = ref true in
-    while !continue do
-      let b = Char.code (String.get bytes !pos) in
-      len := !len lor ((b land 0x7f) lsl !shift);
-      shift := !shift + 7;
-      incr pos;
-      continue := b land 0x80 <> 0
-    done;
-    (* Read string *)
-    let s = String.sub bytes !pos !len in
-    (s, !pos + !len)
+    let total_len = String.length bytes in
+    if offset < 0 || offset >= total_len then
+      Error "decode_string: offset out of bounds"
+    else
+      let rec read_varint pos shift acc =
+        if pos >= total_len then
+          Error "decode_string: truncated varint"
+        else if shift > 28 then
+          Error "decode_string: varint too long"
+        else
+          let b = Char.code (String.get bytes pos) in
+          let acc' = acc lor ((b land 0x7f) lsl shift) in
+          if b land 0x80 = 0 then Ok (acc', pos + 1)
+          else read_varint (pos + 1) (shift + 7) acc'
+      in
+      match read_varint offset 0 0 with
+      | Error _ as err -> err
+      | Ok (len, pos) ->
+          let end_pos = pos + len in
+          if len < 0 || end_pos > total_len then
+            Error "decode_string: truncated string"
+          else
+            Ok (String.sub bytes pos len, end_pos)
 
   (** Write a varint to buffer *)
   let write_varint buf n =
@@ -76,7 +84,7 @@ module Proto = struct
     Buffer.add_string buf (encode_string node_id);
     (* Field 2: depth (varint) *)
     Buffer.add_char buf '\x10';  (* field 2, wire type 0 *)
-    Buffer.add_char buf (Char.chr depth);
+    write_varint buf depth;
     (* Field 3: parent_id (string) *)
     Buffer.add_char buf '\x1a';  (* field 3, wire type 2 *)
     Buffer.add_string buf (encode_string parent_id);

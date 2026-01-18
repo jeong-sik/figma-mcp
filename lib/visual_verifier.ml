@@ -513,7 +513,8 @@ let result_to_json result =
 let create_evolution_dir () =
   let timestamp = Unix.gettimeofday () in
   let dir = sprintf "/tmp/figma-evolution/run_%d" (int_of_float (timestamp *. 1000.0)) in
-  let _ = Sys.command (sprintf "mkdir -p %s/html" dir) in
+  let html_dir = Filename.concat dir "html" in
+  let _ = Sys.command (sprintf "mkdir -p %s" (Filename.quote html_dir)) in
   dir
 
 (** HTML을 파일로 저장 *)
@@ -527,7 +528,7 @@ let save_html ~dir ~step html =
 (** PNG를 evolution 디렉토리로 복사 *)
 let save_png ~dir ~step ~src_png =
   let dst = sprintf "%s/step%d_render.png" dir step in
-  let _ = Sys.command (sprintf "cp '%s' '%s'" src_png dst) in
+  let _ = Sys.command (sprintf "cp %s %s" (Filename.quote src_png) (Filename.quote dst)) in
   dst
 
 (** Visual Feedback Loop 실행
@@ -554,7 +555,9 @@ let verify_visual
 
   (* Figma 원본도 evolution 디렉토리에 복사 *)
   let _ = if save_evolution then
-    Sys.command (sprintf "cp '%s' '%s/figma_original.png'" figma_png evo_dir) |> ignore
+    Sys.command (sprintf "cp %s %s"
+      (Filename.quote figma_png)
+      (Filename.quote (Filename.concat evo_dir "figma_original.png"))) |> ignore
   in
 
   let rec loop iteration current_html corrections history =

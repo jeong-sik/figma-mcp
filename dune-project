@@ -1,6 +1,6 @@
 (lang dune 3.13)
 (name figma_mcp)
-(version 0.1.0)
+(version 0.3.1)
 
 (generate_opam_files true)
 
