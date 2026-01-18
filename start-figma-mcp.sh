@@ -35,6 +35,10 @@ for arg in "$@"; do
   fi
 done
 
+# Resolve executable path
+# Priority: 1. Release binary  2. Workspace build  3. Local build  4. Installed  5. Auto-download
+RELEASE_BINARY="$SCRIPT_DIR/figma-mcp-macos-arm64"
+
 # Select binary based on mode
 if [ "$HTTP_MODE" = true ]; then
   # HTTP mode: use main.exe (supports --port)
@@ -51,19 +55,36 @@ fi
 INSTALLED_EXE="$(command -v figma-mcp-server || true)"
 FIGMA_EXE=""
 
-if [ -x "$WORKSPACE_EXE" ]; then
+# 1. Pre-downloaded release binary (HTTP mode only - release is HTTP server)
+if [ "$HTTP_MODE" = true ] && [ -x "$RELEASE_BINARY" ]; then
+  FIGMA_EXE="$RELEASE_BINARY"
+# 2. Workspace build
+elif [ -x "$WORKSPACE_EXE" ]; then
   FIGMA_EXE="$WORKSPACE_EXE"
+# 3. Local build
 elif [ -x "$LOCAL_EXE" ]; then
   FIGMA_EXE="$LOCAL_EXE"
+# 4. System-installed (stdio only)
 elif [ -n "$INSTALLED_EXE" ] && [ "$HTTP_MODE" = false ]; then
   FIGMA_EXE="$INSTALLED_EXE"
 fi
 
-# Build if needed (requires dune on PATH)
+# 5. Auto-download from GitHub releases if nothing found (HTTP mode only)
+if [ -z "$FIGMA_EXE" ] && [ "$HTTP_MODE" = true ]; then
+  echo "No binary found. Downloading from GitHub releases..." >&2
+  RELEASE_URL="https://github.com/jeong-sik/figma-mcp/releases/latest/download/figma-mcp-macos-arm64"
+  if curl -fsSL -o "$RELEASE_BINARY" "$RELEASE_URL" 2>/dev/null; then
+    chmod +x "$RELEASE_BINARY"
+    FIGMA_EXE="$RELEASE_BINARY"
+    echo "Downloaded: $RELEASE_BINARY" >&2
+  fi
+fi
+
+# Fallback: build from source
 if [ -z "$FIGMA_EXE" ]; then
   echo "Building figma-mcp (bin/$BINARY_NAME)..." >&2
   if ! command -v dune >/dev/null 2>&1; then
-    echo "Error: dune not found. Install dune or build figma-mcp binary first." >&2
+    echo "Error: dune not found. Install dune or download binary manually." >&2
     exit 1
   fi
   dune build "./bin/$BINARY_NAME" >&2
@@ -73,7 +94,7 @@ if [ -z "$FIGMA_EXE" ]; then
   elif [ -x "$LOCAL_EXE" ]; then
     FIGMA_EXE="$LOCAL_EXE"
   else
-    echo "Error: build succeeded but $BINARY_NAME not found." >&2
+    echo "Error: build failed." >&2
     exit 1
   fi
 fi

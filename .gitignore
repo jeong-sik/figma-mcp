@@ -26,3 +26,7 @@ plugin/dist/
 *.png
 *.jpg
 *.svg
+
+# Downloaded release binary
+figma-mcp-macos-arm64
+figma-mcp-linux-x64
