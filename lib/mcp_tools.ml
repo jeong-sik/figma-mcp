@@ -1,0 +1,3791 @@
+(** Figma MCP Tools 정의 *)
+
+open Mcp_protocol
+open Printf
+
+(** ============== JSON → DSL 변환 (Figma_mcp 순환 의존 방지) ============== *)
+let process_json_string ~format json_str =
+  try
+    let json = Yojson.Safe.from_string json_str in
+    Ok (match format with
+        | "fidelity" | "pixel" | "accuracy" -> Figma_codegen.generate_fidelity json
+        | "raw" -> Yojson.Safe.pretty_to_string json
+        | "html" -> (
+            let node_json =
+              match Figma_api.extract_document json with
+              | Some d -> d
+              | None -> json
+            in
+            match Figma_parser.parse_json node_json with
+            | None -> "Failed to parse JSON for HTML output"
+            | Some node -> Figma_codegen.generate_html node
+          )
+        | _ -> "Unknown format (use fidelity, raw, or html)")
+  with
+  | Yojson.Json_error _ -> Error "Failed to parse JSON"
+
+(** ============== JSON Schema 헬퍼 ============== *)
+
+let string_prop ?(required=false) desc : Yojson.Safe.t =
+  ignore required;
+  `Assoc [("type", `String "string"); ("description", `String desc)]
+
+let number_prop desc : Yojson.Safe.t =
+  `Assoc [("type", `String "number"); ("description", `String desc)]
+
+let bool_prop desc : Yojson.Safe.t =
+  `Assoc [("type", `String "boolean"); ("description", `String desc)]
+
+let enum_prop options desc : Yojson.Safe.t =
+  `Assoc [
+    ("type", `String "string");
+    ("enum", `List (List.map (fun s -> `String s) options));
+    ("description", `String desc);
+  ]
+
+let array_prop desc : Yojson.Safe.t =
+  `Assoc [
+    ("type", `String "array");
+    ("description", `String desc);
+  ]
+
+let object_schema props required : Yojson.Safe.t =
+  `Assoc [
+    ("type", `String "object");
+    ("properties", `Assoc props);
+    ("required", `List (List.map (fun s -> `String s) required));
+  ]
+
+(** ============== Tool 정의 ============== *)
+
+let tool_figma_codegen : tool_def = {
+  name = "figma_codegen";
+  description = "Figma JSON을 정확도 우선 Fidelity DSL로 변환합니다.";
+  input_schema = object_schema [
+    ("json", string_prop "Figma JSON 데이터 (document 노드 또는 전체 응답)");
+    ("format", enum_prop ["fidelity"; "raw"; "html"] "출력 포맷: fidelity (정확도 우선), raw (원본 JSON), html (HTML 프리뷰)");
+  ] ["json"];
+}
+
+let tool_figma_get_file : tool_def = {
+  name = "figma_get_file";
+  description = "Figma 파일 데이터를 가져와 Fidelity DSL로 변환합니다.";
+  input_schema = object_schema [
+    ("file_key", string_prop "Figma 파일 키 (URL에서 추출: figma.com/file/KEY/...)");
+    ("token", string_prop "Figma Personal Access Token");
+    ("format", enum_prop ["fidelity"; "raw"; "html"] "출력 포맷 (기본값: fidelity)");
+    ("depth", number_prop "트리 깊이 제한 (Figma API depth 파라미터)");
+    ("geometry", enum_prop ["paths"] "벡터 경로 포함 (geometry=paths)");
+    ("plugin_data", string_prop "plugin_data 파라미터 (쉼표 구분 plugin ID 또는 shared)");
+    ("version", string_prop "특정 파일 버전 ID");
+  ] ["file_key"; "token"];
+}
+
+let tool_figma_get_file_meta : tool_def = {
+  name = "figma_get_file_meta";
+  description = "Figma 파일의 컴포넌트/스타일 메타데이터를 반환합니다.";
+  input_schema = object_schema [
+    ("file_key", string_prop "Figma 파일 키");
+    ("token", string_prop "Figma Personal Access Token");
+    ("version", string_prop "특정 파일 버전 ID");
+  ] ["file_key"; "token"];
+}
+
+let tool_figma_list_screens : tool_def = {
+  name = "figma_list_screens";
+  description = "Figma 파일 내 모든 화면(Frame/Component) 목록을 반환합니다.";
+  input_schema = object_schema [
+    ("file_key", string_prop "Figma 파일 키");
+    ("token", string_prop "Figma Personal Access Token");
+  ] ["file_key"; "token"];
+}
+
+let tool_figma_get_node : tool_def = {
+  name = "figma_get_node";
+  description = "특정 노드 ID의 데이터를 가져와 Fidelity DSL로 변환합니다.";
+  input_schema = object_schema [
+    ("file_key", string_prop "Figma 파일 키");
+    ("node_id", string_prop "노드 ID (예: 123:456)");
+    ("token", string_prop "Figma Personal Access Token");
+    ("format", enum_prop ["fidelity"; "raw"; "html"] "출력 포맷");
+    ("depth", number_prop "트리 깊이 제한 (Figma API depth 파라미터)");
+    ("geometry", enum_prop ["paths"] "벡터 경로 포함 (geometry=paths)");
+    ("plugin_data", string_prop "plugin_data 파라미터 (쉼표 구분 plugin ID 또는 shared)");
+    ("version", string_prop "특정 파일 버전 ID");
+  ] ["file_key"; "node_id"; "token"];
+}
+
+let tool_figma_get_node_with_image : tool_def = {
+  name = "figma_get_node_with_image";
+  description = "특정 노드의 Fidelity DSL과 이미지 URL을 동시에 반환합니다.";
+  input_schema = object_schema [
+    ("file_key", string_prop "Figma 파일 키");
+    ("node_id", string_prop "노드 ID (예: 123:456)");
+    ("token", string_prop "Figma Personal Access Token");
+    ("format", enum_prop ["fidelity"; "raw"; "html"] "DSL 출력 포맷 (기본값: fidelity)");
+    ("image_format", enum_prop ["png"; "jpg"; "svg"; "pdf"] "이미지 포맷 (기본값: png)");
+    ("scale", number_prop "스케일 (1-4, 기본값: 1)");
+    ("use_absolute_bounds", bool_prop "효과 포함한 렌더 바운즈 사용 여부");
+    ("download", bool_prop "이미지 다운로드 여부 (기본값: false)");
+    ("save_dir", string_prop "다운로드 저장 경로 (기본값: ~/me/download/figma-assets)");
+    ("depth", number_prop "트리 깊이 제한 (Figma API depth 파라미터)");
+    ("geometry", enum_prop ["paths"] "벡터 경로 포함 (geometry=paths)");
+    ("plugin_data", string_prop "plugin_data 파라미터 (쉼표 구분 plugin ID 또는 shared)");
+    ("version", string_prop "특정 파일 버전 ID");
+  ] ["file_key"; "node_id"; "token"];
+}
+
+let tool_figma_get_node_bundle : tool_def = {
+  name = "figma_get_node_bundle";
+  description = "정확도 극대화 번들: 노드 DSL + 렌더 이미지 + 메타/변수/이미지 fills/플러그인 보강을 한번에 반환합니다.";
+  input_schema = object_schema [
+    ("file_key", string_prop "Figma 파일 키");
+    ("node_id", string_prop "노드 ID (예: 123:456)");
+    ("token", string_prop "Figma Personal Access Token");
+    ("format", enum_prop ["fidelity"; "raw"; "html"] "DSL 출력 포맷 (기본값: fidelity)");
+    ("image_format", enum_prop ["png"; "jpg"; "svg"; "pdf"] "이미지 포맷 (기본값: png)");
+    ("scale", number_prop "스케일 (1-4, 기본값: 1)");
+    ("use_absolute_bounds", bool_prop "효과 포함한 렌더 바운즈 사용 여부");
+    ("download", bool_prop "이미지/에셋 다운로드 여부 (기본값: false)");
+    ("save_dir", string_prop "다운로드 저장 경로 (기본값: ~/me/download/figma-assets)");
+    ("include_raw", bool_prop "node_raw 포함 여부 (기본값: true)");
+    ("include_meta", bool_prop "file meta 포함 여부 (기본값: true)");
+    ("include_variables", bool_prop "변수/해석 포함 여부 (기본값: true)");
+    ("include_image_fills", bool_prop "image fills 포함 여부 (기본값: true)");
+    ("include_plugin", bool_prop "플러그인 스냅샷 포함 여부 (기본값: false)");
+    ("include_plugin_variables", bool_prop "플러그인 변수 보강 포함 여부 (기본값: false)");
+    ("include_plugin_image", bool_prop "플러그인 이미지(base64) 포함 여부 (기본값: false)");
+    ("plugin_image_format", enum_prop ["png"; "jpg"; "svg"; "pdf"] "플러그인 이미지 포맷 (기본값: png)");
+    ("plugin_image_scale", number_prop "플러그인 이미지 스케일 (기본값: 1)");
+    ("plugin_channel_id", string_prop "플러그인 채널 ID (옵션)");
+    ("plugin_timeout_ms", number_prop "플러그인 응답 대기 시간 (기본값: 20000)");
+    ("depth", number_prop "트리 깊이 제한 (Figma API depth 파라미터)");
+    ("geometry", enum_prop ["paths"] "벡터 경로 포함 (geometry=paths)");
+    ("plugin_data", string_prop "plugin_data 파라미터 (쉼표 구분 plugin ID 또는 shared)");
+    ("version", string_prop "특정 파일 버전 ID");
+  ] ["file_key"; "node_id"; "token"];
+}
+
+(** 경량 구조 요약 - 큰 노드를 탐색할 때 전체 로드 없이 구조 파악 *)
+let tool_figma_get_node_summary : tool_def = {
+  name = "figma_get_node_summary";
+  description = "노드의 경량 구조 요약을 반환합니다. 전체 콘텐츠 없이 자식 노드 목록, 타입, 예상 크기만 포함하여 대형 노드 탐색에 적합합니다.";
+  input_schema = object_schema [
+    ("file_key", string_prop "Figma 파일 키");
+    ("node_id", string_prop "노드 ID (예: 123:456)");
+    ("token", string_prop "Figma Personal Access Token");
+    ("max_children", number_prop "반환할 최대 자식 수 (기본값: 50)");
+    ("version", string_prop "특정 파일 버전 ID");
+  ] ["file_key"; "node_id"; "token"];
+}
+
+(** 깊이 범위별 청크 로드 - 대형 노드를 점진적으로 로드 *)
+let tool_figma_get_node_chunk : tool_def = {
+  name = "figma_get_node_chunk";
+  description = "특정 깊이 범위의 노드 데이터만 가져옵니다. 대형 노드를 점진적으로 로드할 때 사용합니다. depth_start=0, depth_end=2면 루트부터 2단계까지만 반환.";
+  input_schema = object_schema [
+    ("file_key", string_prop "Figma 파일 키");
+    ("node_id", string_prop "노드 ID (예: 123:456)");
+    ("token", string_prop "Figma Personal Access Token");
+    ("depth_start", number_prop "시작 깊이 (기본값: 0)");
+    ("depth_end", number_prop "종료 깊이 (기본값: 2)");
+    ("format", enum_prop ["fidelity"; "raw"; "html"] "출력 포맷 (기본값: fidelity)");
+    ("include_styles", bool_prop "스타일 정의 포함 여부 (기본값: false)");
+    ("version", string_prop "특정 파일 버전 ID");
+  ] ["file_key"; "node_id"; "token"];
+}
+
+let tool_figma_fidelity_loop : tool_def = {
+  name = "figma_fidelity_loop";
+  description = "DSL coverage 기반 fidelity 점수가 목표 미달이면 depth/geometry를 올리며 재조회합니다.";
+  input_schema = object_schema [
+    ("file_key", string_prop "Figma 파일 키");
+    ("node_id", string_prop "노드 ID (예: 123:456)");
+    ("token", string_prop "Figma Personal Access Token");
+    ("target_score", number_prop "목표 fidelity score (0-1, 기본값: 0.92)");
+    ("start_depth", number_prop "초기 depth (기본값: 4)");
+    ("depth_step", number_prop "depth 증가폭 (기본값: 4)");
+    ("max_depth", number_prop "최대 depth (기본값: 20)");
+    ("max_attempts", number_prop "최대 시도 횟수 (기본값: 4)");
+    ("geometry", enum_prop ["paths"] "벡터 경로 포함 (geometry=paths)");
+    ("plugin_data", string_prop "plugin_data 파라미터 (쉼표 구분 plugin ID 또는 shared)");
+    ("format", enum_prop ["fidelity"] "현재 fidelity만 지원");
+    ("include_meta", bool_prop "파일 메타 포함 여부 (기본값: true)");
+    ("include_variables", bool_prop "변수/해석 포함 여부 (기본값: true)");
+    ("include_image_fills", bool_prop "image fills 포함 여부 (기본값: true)");
+    ("include_plugin", bool_prop "플러그인 스냅샷 포함 여부 (기본값: false)");
+    ("include_plugin_variables", bool_prop "플러그인 변수 보강 포함 여부 (기본값: false)");
+    ("plugin_channel_id", string_prop "플러그인 채널 ID (옵션)");
+    ("plugin_depth", number_prop "플러그인 depth (기본값: 6)");
+    ("plugin_timeout_ms", number_prop "플러그인 응답 대기 시간 (기본값: 20000)");
+  ] ["file_key"; "node_id"; "token"];
+}
+
+let tool_figma_image_similarity : tool_def = {
+  name = "figma_image_similarity";
+  description = "렌더 이미지 SSIM/PSNR 비교로 정확도를 평가합니다.";
+  input_schema = object_schema [
+    ("file_key", string_prop "Figma 파일 키");
+    ("node_a_id", string_prop "기준 노드 ID");
+    ("node_b_id", string_prop "비교 노드 ID");
+    ("token", string_prop "Figma Personal Access Token");
+    ("format", enum_prop ["png"; "jpg"] "이미지 포맷 (기본값: png)");
+    ("start_scale", number_prop "시작 스케일 (기본값: 1)");
+    ("max_scale", number_prop "최대 스케일 (기본값: start_scale)");
+    ("scale_step", number_prop "스케일 증가폭 (기본값: 1)");
+    ("target_ssim", number_prop "목표 SSIM (0-1, 옵션)");
+    ("use_absolute_bounds", bool_prop "효과 포함한 렌더 바운즈 사용 여부");
+    ("version", string_prop "특정 파일 버전 ID");
+    ("save_dir", string_prop "이미지 저장 경로 (기본값: ~/me/download/figma-assets/compare)");
+  ] ["file_key"; "node_a_id"; "node_b_id"; "token"];
+}
+
+(** Visual Feedback Loop - 코드 생성 및 시각적 검증 *)
+let tool_figma_verify_visual : tool_def = {
+  name = "figma_verify_visual";
+  description = "코드를 생성하고 Figma 렌더와 비교하여 시각적 정확도(SSIM)와 텍스트 정확도를 검증합니다. SSIM과 TEXT 모두 통과해야 overall_passed=true. SSIM < target_ssim이면 자동으로 CSS를 조정합니다. 진화 과정은 자동으로 /tmp/figma-evolution/run_*에 저장됩니다.";
+  input_schema = object_schema [
+    ("file_key", string_prop "Figma 파일 키");
+    ("node_id", string_prop "노드 ID (예: 123:456)");
+    ("token", string_prop "Figma Personal Access Token");
+    ("html", string_prop "검증할 HTML 코드 (없으면 자동 생성)");
+    ("target_ssim", number_prop "목표 SSIM (0-1, 기본값: 0.95)");
+    ("max_iterations", number_prop "최대 반복 횟수 (기본값: 3)");
+    ("width", number_prop "뷰포트 너비 (기본값: 375)");
+    ("height", number_prop "뷰포트 높이 (기본값: 812)");
+    ("version", string_prop "특정 파일 버전 ID");
+    ("mode", enum_prop ["full"; "structure"; "icons"; "text"; "layout"] "비교 모드: full(전체), structure(레이아웃만), icons(아이콘만), text(텍스트만), layout(박스/컨테이너)");
+    ("checkpoints", string_prop "사용자 정의 체크포인트 JSON 배열 [{name, x, y, width, height}]");
+  ] ["file_key"; "node_id"; "token"];
+}
+
+(** Region-based comparison - 영역별 상세 비교 *)
+let tool_figma_compare_regions : tool_def = {
+  name = "figma_compare_regions";
+  description = "두 이미지의 특정 영역들을 비교합니다. 아이콘, 헤더, 푸터 등 개별 요소의 정확도를 측정할 때 사용합니다.";
+  input_schema = object_schema [
+    ("image_a", string_prop "기준 이미지 경로 (Figma 렌더)");
+    ("image_b", string_prop "비교 이미지 경로 (HTML 렌더)");
+    ("regions", string_prop "비교할 영역 JSON 배열 [{name, x, y, width, height}]");
+    ("output_dir", string_prop "결과 저장 디렉토리 (기본값: /tmp/figma-evolution/regions)");
+    ("generate_diff", bool_prop "차이 이미지 생성 여부 (기본값: true)");
+  ] ["image_a"; "image_b"; "regions"];
+}
+
+(** Evolution Report - 진화 과정 리포트 조회 *)
+let tool_figma_evolution_report : tool_def = {
+  name = "figma_evolution_report";
+  description = "Visual Feedback Loop의 진화 과정 리포트를 조회합니다. run_dir 없이 호출하면 최근 실행 목록을 반환하고, run_dir를 지정하면 해당 실행의 상세 리포트를 생성합니다.";
+  input_schema = object_schema [
+    ("run_dir", string_prop "Evolution 디렉토리 경로 (예: /tmp/figma-evolution/run_1234567890). 없으면 최근 실행 목록 반환");
+    ("generate_image", bool_prop "비교 이미지 자동 생성 여부 (기본값: true)");
+  ] [];
+}
+
+(** Compare Elements - 색상/박스 확장 메트릭 비교 *)
+let tool_figma_compare_elements : tool_def = {
+  name = "figma_compare_elements";
+  description = "두 요소(색상 또는 박스)의 확장 메트릭을 비교합니다. 색상: OKLab, CIEDE2000, RGB Euclidean. 박스: IoU, GIoU, DIoU. Figma 시안과 구현체 비교에 유용합니다.";
+  input_schema = object_schema [
+    ("type", enum_prop ["color"; "box"; "full"] "비교 타입: color(색상), box(박스), full(둘 다)");
+    ("color1", string_prop "첫 번째 색상 (#RRGGBB 또는 rgb(r,g,b))");
+    ("color2", string_prop "두 번째 색상 (#RRGGBB 또는 rgb(r,g,b))");
+    ("box1", string_prop "첫 번째 박스 (x,y,w,h 형식)");
+    ("box2", string_prop "두 번째 박스 (x,y,w,h 형식)");
+  ] ["type"];
+}
+
+let tool_figma_export_image : tool_def = {
+  name = "figma_export_image";
+  description = "노드를 이미지로 내보내기 위한 URL을 반환합니다.";
+  input_schema = object_schema [
+    ("file_key", string_prop "Figma 파일 키");
+    ("node_ids", string_prop "노드 ID들 (쉼표 구분)");
+    ("token", string_prop "Figma Personal Access Token");
+    ("format", enum_prop ["png"; "jpg"; "svg"; "pdf"] "이미지 포맷");
+    ("scale", number_prop "스케일 (1-4, 기본값: 1)");
+    ("use_absolute_bounds", bool_prop "효과 포함한 렌더 바운즈 사용 여부");
+    ("version", string_prop "특정 파일 버전 ID");
+    ("download", bool_prop "이미지 다운로드 여부 (기본값: false)");
+    ("save_dir", string_prop "다운로드 저장 경로 (기본값: ~/me/download/figma-assets)");
+  ] ["file_key"; "node_ids"; "token"];
+}
+
+let tool_figma_get_image_fills : tool_def = {
+  name = "figma_get_image_fills";
+  description = "파일 내 이미지 채움(image fills) 원본 URL 맵을 반환합니다.";
+  input_schema = object_schema [
+    ("file_key", string_prop "Figma 파일 키");
+    ("token", string_prop "Figma Personal Access Token");
+    ("version", string_prop "특정 파일 버전 ID");
+    ("download", bool_prop "이미지 다운로드 여부 (기본값: false)");
+    ("save_dir", string_prop "다운로드 저장 경로 (기본값: ~/me/download/figma-assets)");
+  ] ["file_key"; "token"];
+}
+
+let tool_figma_get_nodes : tool_def = {
+  name = "figma_get_nodes";
+  description = "여러 노드 ID의 데이터를 한 번에 가져옵니다.";
+  input_schema = object_schema [
+    ("file_key", string_prop "Figma 파일 키");
+    ("node_ids", string_prop "노드 ID들 (쉼표 구분: 1:2,3:4)");
+    ("token", string_prop "Figma Personal Access Token");
+    ("format", enum_prop ["raw"; "fidelity"; "html"] "출력 포맷 (기본값: raw)");
+    ("depth", number_prop "트리 깊이 제한");
+    ("geometry", enum_prop ["paths"] "벡터 경로 포함 (geometry=paths)");
+    ("plugin_data", string_prop "plugin_data 파라미터 (쉼표 구분 plugin ID 또는 shared)");
+    ("version", string_prop "특정 파일 버전 ID");
+  ] ["file_key"; "node_ids"; "token"];
+}
+
+let tool_figma_get_file_versions : tool_def = {
+  name = "figma_get_file_versions";
+  description = "파일 버전 목록을 조회합니다.";
+  input_schema = object_schema [
+    ("file_key", string_prop "Figma 파일 키");
+    ("token", string_prop "Figma Personal Access Token");
+  ] ["file_key"; "token"];
+}
+
+let tool_figma_get_file_comments : tool_def = {
+  name = "figma_get_file_comments";
+  description = "파일 코멘트 목록을 조회합니다.";
+  input_schema = object_schema [
+    ("file_key", string_prop "Figma 파일 키");
+    ("token", string_prop "Figma Personal Access Token");
+  ] ["file_key"; "token"];
+}
+
+let tool_figma_post_comment : tool_def = {
+  name = "figma_post_comment";
+  description = "파일에 코멘트를 추가합니다.";
+  input_schema = object_schema [
+    ("file_key", string_prop "Figma 파일 키");
+    ("token", string_prop "Figma Personal Access Token");
+    ("message", string_prop "코멘트 내용");
+    ("x", number_prop "캔버스 좌표 x (client_meta)");
+    ("y", number_prop "캔버스 좌표 y (client_meta)");
+    ("node_id", string_prop "연결할 노드 ID (옵션)");
+  ] ["file_key"; "token"; "message"; "x"; "y"];
+}
+
+let tool_figma_get_file_components : tool_def = {
+  name = "figma_get_file_components";
+  description = "파일의 컴포넌트 목록을 조회합니다.";
+  input_schema = object_schema [
+    ("file_key", string_prop "Figma 파일 키");
+    ("token", string_prop "Figma Personal Access Token");
+  ] ["file_key"; "token"];
+}
+
+let tool_figma_get_team_components : tool_def = {
+  name = "figma_get_team_components";
+  description = "팀의 컴포넌트 목록을 조회합니다.";
+  input_schema = object_schema [
+    ("team_id", string_prop "팀 ID");
+    ("token", string_prop "Figma Personal Access Token");
+  ] ["team_id"; "token"];
+}
+
+let tool_figma_get_file_component_sets : tool_def = {
+  name = "figma_get_file_component_sets";
+  description = "파일의 컴포넌트 셋 목록을 조회합니다.";
+  input_schema = object_schema [
+    ("file_key", string_prop "Figma 파일 키");
+    ("token", string_prop "Figma Personal Access Token");
+  ] ["file_key"; "token"];
+}
+
+let tool_figma_get_team_component_sets : tool_def = {
+  name = "figma_get_team_component_sets";
+  description = "팀의 컴포넌트 셋 목록을 조회합니다.";
+  input_schema = object_schema [
+    ("team_id", string_prop "팀 ID");
+    ("token", string_prop "Figma Personal Access Token");
+  ] ["team_id"; "token"];
+}
+
+let tool_figma_get_file_styles : tool_def = {
+  name = "figma_get_file_styles";
+  description = "파일의 스타일 목록을 조회합니다.";
+  input_schema = object_schema [
+    ("file_key", string_prop "Figma 파일 키");
+    ("token", string_prop "Figma Personal Access Token");
+  ] ["file_key"; "token"];
+}
+
+let tool_figma_get_team_styles : tool_def = {
+  name = "figma_get_team_styles";
+  description = "팀의 스타일 목록을 조회합니다.";
+  input_schema = object_schema [
+    ("team_id", string_prop "팀 ID");
+    ("token", string_prop "Figma Personal Access Token");
+  ] ["team_id"; "token"];
+}
+
+let tool_figma_get_component : tool_def = {
+  name = "figma_get_component";
+  description = "컴포넌트 키로 상세 정보를 조회합니다.";
+  input_schema = object_schema [
+    ("component_key", string_prop "컴포넌트 키");
+    ("token", string_prop "Figma Personal Access Token");
+  ] ["component_key"; "token"];
+}
+
+let tool_figma_get_component_set : tool_def = {
+  name = "figma_get_component_set";
+  description = "컴포넌트 셋 키로 상세 정보를 조회합니다.";
+  input_schema = object_schema [
+    ("component_set_key", string_prop "컴포넌트 셋 키");
+    ("token", string_prop "Figma Personal Access Token");
+  ] ["component_set_key"; "token"];
+}
+
+let tool_figma_get_style : tool_def = {
+  name = "figma_get_style";
+  description = "스타일 키로 상세 정보를 조회합니다.";
+  input_schema = object_schema [
+    ("style_key", string_prop "스타일 키");
+    ("token", string_prop "Figma Personal Access Token");
+  ] ["style_key"; "token"];
+}
+
+(** ============== Plugin Bridge 도구 ============== *)
+
+let tool_figma_plugin_connect : tool_def = {
+  name = "figma_plugin_connect";
+  description = "Figma Plugin 채널을 생성하거나 연결합니다.";
+  input_schema = object_schema [
+    ("channel_id", string_prop "기존 채널 ID (옵션)");
+  ] [];
+}
+
+let tool_figma_plugin_use_channel : tool_def = {
+  name = "figma_plugin_use_channel";
+  description = "기본 채널 ID를 설정합니다.";
+  input_schema = object_schema [
+    ("channel_id", string_prop "채널 ID");
+  ] ["channel_id"];
+}
+
+let tool_figma_plugin_status : tool_def = {
+  name = "figma_plugin_status";
+  description = "현재 연결된 플러그인 채널 상태를 확인합니다.";
+  input_schema = object_schema [] [];
+}
+
+let tool_figma_plugin_read_selection : tool_def = {
+  name = "figma_plugin_read_selection";
+  description = "플러그인에서 현재 선택된 노드 정보를 가져옵니다.";
+  input_schema = object_schema [
+    ("channel_id", string_prop "채널 ID (옵션)");
+    ("depth", number_prop "자식 탐색 깊이 (기본값: 6)");
+    ("timeout_ms", number_prop "응답 대기 시간 (기본값: 20000)");
+  ] [];
+}
+
+let tool_figma_plugin_get_node : tool_def = {
+  name = "figma_plugin_get_node";
+  description = "플러그인에서 특정 노드 정보를 가져옵니다.";
+  input_schema = object_schema [
+    ("channel_id", string_prop "채널 ID (옵션)");
+    ("node_id", string_prop "노드 ID (예: 123:456)");
+    ("depth", number_prop "자식 탐색 깊이 (기본값: 6)");
+    ("timeout_ms", number_prop "응답 대기 시간 (기본값: 20000)");
+  ] ["node_id"];
+}
+
+let tool_figma_plugin_export_node_image : tool_def = {
+  name = "figma_plugin_export_node_image";
+  description = "플러그인 exportAsync로 노드 이미지를 base64로 반환합니다.";
+  input_schema = object_schema [
+    ("channel_id", string_prop "채널 ID (옵션)");
+    ("node_id", string_prop "노드 ID (예: 123:456)");
+    ("format", enum_prop ["png"; "jpg"; "svg"; "pdf"] "이미지 포맷 (기본값: png)");
+    ("scale", number_prop "스케일 (기본값: 1)");
+    ("timeout_ms", number_prop "응답 대기 시간 (기본값: 20000)");
+  ] ["node_id"];
+}
+
+let tool_figma_plugin_get_variables : tool_def = {
+  name = "figma_plugin_get_variables";
+  description = "플러그인 Variables API로 로컬 변수/컬렉션을 가져옵니다.";
+  input_schema = object_schema [
+    ("channel_id", string_prop "채널 ID (옵션)");
+    ("timeout_ms", number_prop "응답 대기 시간 (기본값: 20000)");
+  ] [];
+}
+
+let tool_figma_plugin_apply_ops : tool_def = {
+  name = "figma_plugin_apply_ops";
+  description = "플러그인으로 노드 생성/수정/삭제 작업을 요청합니다.";
+  input_schema = object_schema [
+    ("channel_id", string_prop "채널 ID (옵션)");
+    ("ops", array_prop "작업 목록 (create/update/delete 오브젝트 배열)");
+    ("timeout_ms", number_prop "응답 대기 시간 (기본값: 20000)");
+  ] ["ops"];
+}
+
+(** ============== Phase 1: 탐색 도구 ============== *)
+
+let tool_figma_parse_url : tool_def = {
+  name = "figma_parse_url";
+  description = "Figma URL에서 team_id, project_id, file_key, node_id를 추출합니다. API 호출 없이 로컬에서 파싱합니다.";
+  input_schema = object_schema [
+    ("url", string_prop "Figma URL (팀/프로젝트/파일/노드 페이지 모두 지원)");
+  ] ["url"];
+}
+
+let tool_figma_get_me : tool_def = {
+  name = "figma_get_me";
+  description = "현재 인증된 사용자 정보를 반환합니다.";
+  input_schema = object_schema [
+    ("token", string_prop "Figma Personal Access Token");
+  ] ["token"];
+}
+
+let tool_figma_list_projects : tool_def = {
+  name = "figma_list_projects";
+  description = "팀의 모든 프로젝트 목록을 반환합니다.";
+  input_schema = object_schema [
+    ("team_id", string_prop "팀 ID (URL에서 추출 또는 figma_parse_url 사용)");
+    ("token", string_prop "Figma Personal Access Token");
+  ] ["team_id"; "token"];
+}
+
+let tool_figma_list_files : tool_def = {
+  name = "figma_list_files";
+  description = "프로젝트의 모든 파일 목록을 반환합니다.";
+  input_schema = object_schema [
+    ("project_id", string_prop "프로젝트 ID");
+    ("token", string_prop "Figma Personal Access Token");
+  ] ["project_id"; "token"];
+}
+
+let tool_figma_get_variables : tool_def = {
+  name = "figma_get_variables";
+  description = "파일의 디자인 토큰/변수를 반환합니다 (색상, 타이포, 간격 등).";
+  input_schema = object_schema [
+    ("file_key", string_prop "Figma 파일 키");
+    ("token", string_prop "Figma Personal Access Token");
+    ("format", enum_prop ["summary"; "raw"; "resolved"] "출력 포맷 (기본값: summary)");
+  ] ["file_key"; "token"];
+}
+
+(** ============== Phase 2: 고급 쿼리 도구 ============== *)
+
+let tool_figma_query : tool_def = {
+  name = "figma_query";
+  description = "노드를 조건으로 필터링합니다. SQL WHERE처럼 type, 크기, 색상 등으로 검색합니다.";
+  input_schema = object_schema [
+    ("file_key", string_prop "Figma 파일 키");
+    ("token", string_prop "Figma Personal Access Token");
+    ("node_id", string_prop "시작 노드 ID (생략시 전체 파일)");
+    ("type", string_prop "노드 타입 필터 (FRAME, TEXT, COMPONENT 등, 쉼표 구분)");
+    ("width_min", number_prop "최소 너비");
+    ("width_max", number_prop "최대 너비");
+    ("height_min", number_prop "최소 높이");
+    ("height_max", number_prop "최대 높이");
+    ("color", string_prop "색상 필터 (hex, 예: #FF0000)");
+    ("name", string_prop "이름 패턴 (substring 매칭)");
+    ("depth", number_prop "탐색 깊이 (1=자식만, 2=손자까지, 생략=무제한)");
+    ("limit", number_prop "결과 개수 제한");
+  ] ["file_key"; "token"];
+}
+
+let tool_figma_search : tool_def = {
+  name = "figma_search";
+  description = "텍스트 내용이나 이름으로 노드를 검색합니다.";
+  input_schema = object_schema [
+    ("file_key", string_prop "Figma 파일 키");
+    ("token", string_prop "Figma Personal Access Token");
+    ("query", string_prop "검색어 (텍스트 내용 또는 노드 이름)");
+    ("search_in", enum_prop ["name"; "text"; "both"] "검색 대상 (기본값: both)");
+    ("limit", number_prop "결과 개수 제한 (기본값: 20)");
+  ] ["file_key"; "token"; "query"];
+}
+
+let tool_figma_compare : tool_def = {
+  name = "figma_compare";
+  description = "두 노드(또는 Web/Mobile 컴포넌트)를 비교하여 일관성을 검사합니다. 크기, 색상, 타이포그래피, 레이아웃 차이를 분석합니다.";
+  input_schema = object_schema [
+    ("file_key", string_prop "Figma 파일 키");
+    ("token", string_prop "Figma Personal Access Token");
+    ("node_a_id", string_prop "첫 번째 노드 ID (예: 100:200)");
+    ("node_b_id", string_prop "두 번째 노드 ID");
+    ("mode", enum_prop ["single"; "batch"] "비교 모드: single (단일 쌍), batch (Web/Mobile 일괄 매칭)");
+    ("web_prefix", string_prop "Web 노드 이름 접두사 (batch 모드)");
+    ("mobile_prefix", string_prop "Mobile 노드 이름 접두사 (batch 모드)");
+  ] ["file_key"; "token"];
+}
+
+let tool_figma_tree : tool_def = {
+  name = "figma_tree";
+  description = "Figma 노드 트리를 시각적으로 표시합니다. ASCII 트리, 들여쓰기, 압축 포맷 지원.";
+  input_schema = object_schema [
+    ("file_key", string_prop "Figma 파일 키");
+    ("token", string_prop "Figma Personal Access Token");
+    ("node_id", string_prop "시작 노드 ID (생략시 전체 문서)");
+    ("style", enum_prop ["ascii"; "indent"; "compact"] "출력 스타일 (기본값: ascii)");
+    ("max_depth", number_prop "최대 깊이 (기본값: 무제한)");
+    ("show_size", enum_prop ["true"; "false"] "크기 표시 (기본값: true)");
+    ("show_stats", enum_prop ["true"; "false"] "통계 포함 (기본값: false)");
+  ] ["file_key"; "token"];
+}
+
+let tool_figma_stats : tool_def = {
+  name = "figma_stats";
+  description = "Figma 파일의 디자인 통계를 분석합니다. 색상, 폰트, 크기, 컴포넌트 사용 현황.";
+  input_schema = object_schema [
+    ("file_key", string_prop "Figma 파일 키");
+    ("token", string_prop "Figma Personal Access Token");
+    ("node_id", string_prop "분석 시작 노드 ID (생략시 전체 문서)");
+  ] ["file_key"; "token"];
+}
+
+let tool_figma_export_tokens : tool_def = {
+  name = "figma_export_tokens";
+  description = "Figma 파일에서 디자인 토큰을 추출합니다. CSS, Tailwind, JSON, Semantic DSL 포맷 지원.";
+  input_schema = object_schema [
+    ("file_key", string_prop "Figma 파일 키");
+    ("token", string_prop "Figma Personal Access Token");
+    ("format", enum_prop ["css"; "tailwind"; "json"; "semantic"] "출력 포맷 (기본값: css). semantic=UIFormer 스타일 DSL");
+    ("node_id", string_prop "추출 시작 노드 ID (생략시 전체 문서)");
+  ] ["file_key"; "token"];
+}
+
+(** 캐시 관리 도구 *)
+let tool_figma_cache_stats : tool_def = {
+  name = "figma_cache_stats";
+  description = "노드 캐시 통계를 조회합니다. L1(메모리) + L2(파일) 캐시 엔트리 수, TTL 설정 등.";
+  input_schema = object_schema [] [];
+}
+
+let tool_figma_cache_invalidate : tool_def = {
+  name = "figma_cache_invalidate";
+  description = "노드 캐시를 무효화합니다. file_key와 node_id로 범위 지정 가능.";
+  input_schema = object_schema [
+    ("file_key", string_prop "무효화할 파일 키 (생략시 전체)");
+    ("node_id", string_prop "무효화할 노드 ID (생략시 해당 파일 전체)");
+  ] [];
+}
+
+(** ============== 모든 도구 목록 ============== *)
+
+let all_tools = [
+  (* 기존 도구 *)
+  tool_figma_codegen;
+  tool_figma_get_file;
+  tool_figma_get_file_meta;
+  tool_figma_list_screens;
+  tool_figma_get_node;
+  tool_figma_get_node_with_image;
+  tool_figma_get_node_bundle;
+  tool_figma_get_node_summary;
+  tool_figma_get_node_chunk;
+  tool_figma_fidelity_loop;
+  tool_figma_image_similarity;
+  tool_figma_verify_visual;
+  tool_figma_compare_regions;
+  tool_figma_evolution_report;
+  tool_figma_compare_elements;
+  tool_figma_export_image;
+  tool_figma_get_image_fills;
+  tool_figma_get_nodes;
+  tool_figma_get_file_versions;
+  tool_figma_get_file_comments;
+  tool_figma_post_comment;
+  tool_figma_get_file_components;
+  tool_figma_get_team_components;
+  tool_figma_get_file_component_sets;
+  tool_figma_get_team_component_sets;
+  tool_figma_get_file_styles;
+  tool_figma_get_team_styles;
+  tool_figma_get_component;
+  tool_figma_get_component_set;
+  tool_figma_get_style;
+  tool_figma_plugin_connect;
+  tool_figma_plugin_use_channel;
+  tool_figma_plugin_status;
+  tool_figma_plugin_read_selection;
+  tool_figma_plugin_get_node;
+  tool_figma_plugin_export_node_image;
+  tool_figma_plugin_get_variables;
+  tool_figma_plugin_apply_ops;
+  (* Phase 1: 탐색 도구 *)
+  tool_figma_parse_url;
+  tool_figma_get_me;
+  tool_figma_list_projects;
+  tool_figma_list_files;
+  tool_figma_get_variables;
+  (* Phase 2: 고급 쿼리 *)
+  tool_figma_query;
+  tool_figma_search;
+  tool_figma_compare;
+  (* Phase 3: 분석/추출 *)
+  tool_figma_tree;
+  tool_figma_stats;
+  tool_figma_export_tokens;
+  (* 캐시 관리 *)
+  tool_figma_cache_stats;
+  tool_figma_cache_invalidate;
+]
+
+(** ============== Tool 핸들러 구현 ============== *)
+
+let member key json =
+  match json with
+  | `Assoc lst -> List.assoc_opt key lst
+  | _ -> None
+
+let get_string key json =
+  match member key json with
+  | Some (`String s) -> Some s
+  | _ -> None
+
+let get_json key json =
+  member key json
+
+let get_bool key json =
+  match member key json with
+  | Some (`Bool b) -> Some b
+  | _ -> None
+
+let get_string_or key default json =
+  match member key json with
+  | Some (`String s) -> s
+  | _ -> default
+
+let get_float key json =
+  match member key json with
+  | Some (`Float f) -> Some f
+  | Some (`Int i) -> Some (float_of_int i)
+  | _ -> None
+
+let get_int key json =
+  match member key json with
+  | Some (`Int i) -> Some i
+  | Some (`Float f) -> Some (int_of_float f)
+  | _ -> None
+
+let get_float_or key default json =
+  match get_float key json with
+  | Some f -> f
+  | None -> default
+
+let get_bool_or key default json =
+  match get_bool key json with
+  | Some b -> b
+  | None -> default
+
+let resolve_channel_id args =
+  match get_string "channel_id" args with
+  | Some id -> Ok id
+  | None ->
+      (match Figma_plugin_bridge.get_default_channel () with
+       | Some id -> Ok id
+       | None -> Error "Missing channel_id. Run figma_plugin_connect or figma_plugin_use_channel.")
+
+let plugin_wait ~channel_id ~command_id ~timeout_ms =
+  match Figma_plugin_bridge.wait_for_result ~channel_id ~command_id ~timeout_ms with
+  | Some result -> Ok result
+  | None -> Error "Plugin timeout waiting for response"
+
+let assoc_or_empty json =
+  match json with
+  | `Assoc lst -> lst
+  | _ -> []
+
+let list_member key json =
+  match member key json with
+  | Some (`List lst) -> Some lst
+  | _ -> None
+
+let count_assoc_fields json =
+  match json with
+  | `Assoc lst -> List.length lst
+  | _ -> 0
+
+let count_list_items json =
+  match json with
+  | `List lst -> List.length lst
+  | _ -> 0
+
+let coverage_for_section json section_key missing_key weight =
+  let present = member section_key json |> Option.value ~default:`Null |> count_assoc_fields in
+  let missing = member missing_key json |> Option.value ~default:(`List []) |> count_list_items in
+  let total = present + missing in
+  let score = if total = 0 then 1.0 else (float_of_int present /. float_of_int total) in
+  (score, present, missing, total, weight)
+
+let fidelity_sections = [
+  ("meta", "meta_missing", 0.4);
+  ("structure", "structure_missing", 1.2);
+  ("geometry", "geometry_missing", 1.2);
+  ("vector", "vector_missing", 1.0);
+  ("layout", "layout_missing", 2.0);
+  ("paint", "paint_missing", 2.0);
+  ("effects", "effects_missing", 1.0);
+  ("text", "text_missing", 1.2);
+  ("text_segments", "text_segments_missing", 1.0);
+  ("instance", "instance_missing", 0.8);
+  ("variables", "variables_missing", 0.6);
+  ("variables_resolved", "variables_resolved_missing", 0.6);
+  ("assets", "assets_missing", 0.8);
+  ("plugin", "plugin_missing", 0.8);
+]
+
+let override_section ?score ~present ~missing ~total () =
+  let score =
+    match score with
+    | Some s -> s
+    | None -> if total = 0 then 1.0 else (float_of_int present /. float_of_int total)
+  in
+  (score, present, missing, total)
+
+let fidelity_score_with_overrides json overrides =
+  let override_for section = List.assoc_opt section overrides in
+  let fold (score_sum, weight_sum, details, missing_total) (section, missing_key, weight) =
+    let (score, present, missing, total) =
+      match override_for section with
+      | Some override -> override
+      | None ->
+          let (score, present, missing, total, _) =
+            coverage_for_section json section missing_key weight
+          in
+          (score, present, missing, total)
+    in
+    let detail =
+      `Assoc [
+        ("score", `Float score);
+        ("present", `Int present);
+        ("missing", `Int missing);
+        ("total", `Int total);
+        ("weight", `Float weight);
+      ]
+    in
+    (score_sum +. (score *. weight),
+     weight_sum +. weight,
+     (section, detail) :: details,
+     missing_total + missing)
+  in
+  let (score_sum, weight_sum, details, missing_total) =
+    List.fold_left fold (0.0, 0.0, [], 0) fidelity_sections
+  in
+  let overall = if weight_sum = 0.0 then 1.0 else score_sum /. weight_sum in
+  let detail_json = `Assoc (List.rev details) in
+  (overall, missing_total, detail_json)
+
+let fidelity_score_of_dsl json =
+  fidelity_score_with_overrides json []
+
+let string_list_of_json json =
+  match json with
+  | `List items ->
+      items
+      |> List.filter_map (function `String s -> Some s | _ -> None)
+  | _ -> []
+
+let image_refs_of_dsl json =
+  match member "assets" json with
+  | Some (`Assoc fields) ->
+      (match List.assoc_opt "image_refs" fields with
+       | Some v -> string_list_of_json v
+       | None -> [])
+  | _ -> []
+
+let image_fill_map image_fills =
+  match image_fills with
+  | `Assoc fields -> (
+      match List.assoc_opt "images" fields with
+      | Some (`Assoc items) -> items
+      | _ -> [])
+  | _ -> []
+
+let variables_counts variables =
+  let assoc_len json =
+    match json with
+    | `Assoc items -> List.length items
+    | _ -> 0
+  in
+  match variables with
+  | `Assoc fields when List.assoc_opt "error" fields <> None ->
+      (1, 0)
+  | `Assoc fields ->
+      let raw_vars =
+        match List.assoc_opt "variables" fields with
+        | Some v -> assoc_len v
+        | None -> 0
+      in
+      let resolved =
+        match List.assoc_opt "resolved" fields with
+        | Some v -> assoc_len v
+        | None -> 0
+      in
+      (raw_vars, resolved)
+  | _ -> (0, 0)
+
+let plugin_ok plugin_snapshot =
+  match plugin_snapshot with
+  | `Assoc fields -> (
+      match List.assoc_opt "ok" fields with
+      | Some (`Bool b) -> b
+      | _ -> false)
+  | _ -> false
+
+let rec count_text_segments json =
+  match json with
+  | `Assoc fields ->
+      let self_count =
+        match List.assoc_opt "text" fields with
+        | Some (`Assoc text_fields) -> (
+            match List.assoc_opt "segments" text_fields with
+            | Some (`List segments) -> List.length segments
+            | _ -> 0)
+        | _ -> 0
+      in
+      let child_count =
+        match List.assoc_opt "children" fields with
+        | Some (`List children) ->
+            List.fold_left (fun acc child -> acc + count_text_segments child) 0 children
+        | _ -> 0
+      in
+      self_count + child_count
+  | `List items ->
+      List.fold_left (fun acc item -> acc + count_text_segments item) 0 items
+  | _ -> 0
+
+let rec count_text_nodes_dsl json =
+  match json with
+  | `Assoc fields ->
+      let self_count =
+        match List.assoc_opt "meta" fields with
+        | Some (`Assoc meta_fields) -> (
+            match List.assoc_opt "type" meta_fields with
+            | Some (`String "TEXT") -> 1
+            | _ -> 0)
+        | _ -> 0
+      in
+      let child_count =
+        match List.assoc_opt "children" fields with
+        | Some (`List children) ->
+            List.fold_left (fun acc child -> acc + count_text_nodes_dsl child) 0 children
+        | _ -> 0
+      in
+      self_count + child_count
+  | `List items ->
+      List.fold_left (fun acc item -> acc + count_text_nodes_dsl item) 0 items
+  | _ -> 0
+
+let rec count_text_nodes_with_segments json =
+  match json with
+  | `Assoc fields ->
+      let self_count =
+        match List.assoc_opt "text" fields with
+        | Some (`Assoc text_fields) -> (
+            match List.assoc_opt "segments" text_fields with
+            | Some (`List _) -> 1
+            | _ -> 0)
+        | _ -> 0
+      in
+      let child_count =
+        match List.assoc_opt "children" fields with
+        | Some (`List children) ->
+            List.fold_left (fun acc child -> acc + count_text_nodes_with_segments child) 0 children
+        | _ -> 0
+      in
+      self_count + child_count
+  | `List items ->
+      List.fold_left (fun acc item -> acc + count_text_nodes_with_segments item) 0 items
+  | _ -> 0
+
+let plugin_text_nodes_with_segments plugin_snapshot =
+  match plugin_snapshot with
+  | `Assoc fields -> (
+      match List.assoc_opt "payload" fields with
+      | Some payload -> count_text_nodes_with_segments payload
+      | _ -> 0)
+  | _ -> 0
+
+let fidelity_score_of_bundle ~dsl_json ~variables ~image_fills ~plugin_snapshot ~include_variables ~include_image_fills ~include_plugin =
+  let overrides = [] in
+  let overrides =
+    if include_image_fills then
+      let refs = image_refs_of_dsl dsl_json in
+      if refs = [] then
+        overrides
+      else
+        let fill_map = image_fill_map image_fills in
+        let present =
+          List.fold_left (fun acc ref ->
+            match List.assoc_opt ref fill_map with
+            | Some (`String _) -> acc + 1
+            | _ -> acc
+          ) 0 refs
+        in
+        let total = List.length refs in
+        let missing = max 0 (total - present) in
+        ("assets", override_section ~present ~missing ~total ()) :: overrides
+    else overrides
+  in
+  let overrides =
+    if include_plugin && plugin_ok plugin_snapshot then
+      let total_text_nodes = count_text_nodes_dsl dsl_json in
+      if total_text_nodes = 0 then
+        overrides
+      else
+        let present = plugin_text_nodes_with_segments plugin_snapshot in
+        let present = min present total_text_nodes in
+        ("text_segments", override_section ~present ~missing:(max 0 (total_text_nodes - present)) ~total:total_text_nodes ()) :: overrides
+    else overrides
+  in
+  let overrides =
+    if include_variables then
+      let (total, present) = variables_counts variables in
+      if total = 0 then
+        overrides
+      else
+        ("variables_resolved", override_section ~present ~missing:(max 0 (total - present)) ~total ()) :: overrides
+    else overrides
+  in
+  let overrides =
+    if include_plugin then
+      let present = if plugin_ok plugin_snapshot then 1 else 0 in
+      ("plugin", override_section ~present ~missing:(1 - present) ~total:1 ()) :: overrides
+    else overrides
+  in
+  fidelity_score_with_overrides dsl_json overrides
+
+let default_asset_dir () =
+  match Sys.getenv_opt "FIGMA_MCP_ASSET_DIR" with
+  | Some dir -> dir
+  | None ->
+      (match Sys.getenv_opt "ME_ROOT" with
+       | Some root -> root ^ "/download/figma-assets"
+       | None ->
+           (match Sys.getenv_opt "HOME" with
+            | Some home -> home ^ "/me/download/figma-assets"
+            | None -> "/tmp/figma-assets"))
+
+let default_compare_dir () =
+  default_asset_dir () ^ "/compare"
+
+let sanitize_node_id id =
+  let buf = Bytes.of_string id in
+  Bytes.iteri (fun i c ->
+    if c = ':' then Bytes.set buf i '_'
+  ) buf;
+  Bytes.to_string buf
+
+let strip_query url =
+  match String.index_opt url '?' with
+  | Some i -> String.sub url 0 i
+  | None -> url
+
+let file_ext_from_url url =
+  let base = strip_query url |> Filename.basename in
+  let ext = Filename.extension base in
+  if ext = "" then ".img" else ext
+
+let is_http_url s =
+  String.length s >= 4 && String.sub s 0 4 = "http"
+
+let resolve_variables json =
+  let member_opt key json =
+    match json with
+    | `Assoc lst -> List.assoc_opt key lst
+    | _ -> None
+  in
+  let string_opt key json =
+    match member_opt key json with
+    | Some (`String s) -> Some s
+    | _ -> None
+  in
+  let meta = match member_opt "meta" json with
+    | Some m -> m
+    | None -> `Null
+  in
+  let collections = match member_opt "variableCollections" meta with
+    | Some v -> v
+    | None -> `Null
+  in
+  let variables = match member_opt "variables" meta with
+    | Some v -> v
+    | None -> `Null
+  in
+  let collection_map = assoc_or_empty collections in
+  let default_mode_id_for collection_id =
+    match List.assoc_opt collection_id collection_map with
+    | Some col -> string_opt "defaultModeId" col
+    | None -> None
+  in
+  let default_mode_name_for collection_id default_mode_id =
+    match List.assoc_opt collection_id collection_map with
+    | Some col ->
+        (match list_member "modes" col with
+         | Some modes ->
+             let find_name = function
+               | `Assoc fields -> (
+                   match List.assoc_opt "modeId" fields, List.assoc_opt "name" fields with
+                   | Some (`String mid), Some (`String name) when mid = default_mode_id -> Some name
+                   | _ -> None)
+               | _ -> None
+             in
+             List.find_map find_name modes
+         | None -> None)
+    | None -> None
+  in
+  let resolved =
+    match variables with
+    | `Assoc vars ->
+        `Assoc (List.map (fun (var_id, var_json) ->
+          let collection_id = string_opt "variableCollectionId" var_json in
+          let default_mode_id = Option.bind collection_id default_mode_id_for in
+          let default_mode_name =
+            match (collection_id, default_mode_id) with
+            | Some cid, Some mid -> default_mode_name_for cid mid
+            | _ -> None
+          in
+          let values_by_mode = match member_opt "valuesByMode" var_json with
+            | Some v -> v
+            | None -> `Null
+          in
+          let default_value =
+            match (default_mode_id, values_by_mode) with
+            | Some mode_id, `Assoc values ->
+                (match List.assoc_opt mode_id values with
+                 | Some v -> v
+                 | None -> `Null)
+            | None, `Assoc values ->
+                (match values with
+                 | (_, v) :: _ -> v
+                 | [] -> `Null)
+            | _ -> `Null
+          in
+          let resolved_json =
+            `Assoc [
+              ("name", (match string_opt "name" var_json with Some s -> `String s | None -> `Null));
+              ("resolvedType", (match string_opt "resolvedType" var_json with Some s -> `String s | None -> `Null));
+              ("collectionId", (match collection_id with Some s -> `String s | None -> `Null));
+              ("defaultModeId", (match default_mode_id with Some s -> `String s | None -> `Null));
+              ("defaultModeName", (match default_mode_name with Some s -> `String s | None -> `Null));
+              ("defaultValue", default_value);
+              ("valuesByMode", values_by_mode);
+            ]
+          in
+          (var_id, resolved_json)
+        ) vars)
+    | _ -> `Null
+  in
+  `Assoc [
+    ("collections", collections);
+    ("variables", variables);
+    ("resolved", resolved);
+  ]
+
+let plugin_payload_if_ok plugin_result =
+  match plugin_result with
+  | `Assoc fields -> (
+      match List.assoc_opt "ok" fields, List.assoc_opt "payload" fields with
+      | Some (`Bool true), Some payload -> Some payload
+      | _ -> None)
+  | _ -> None
+
+let resolve_plugin_variables payload =
+  match payload with
+  | `Assoc fields -> (
+      match List.assoc_opt "collections" fields, List.assoc_opt "variables" fields with
+      | Some collections, Some variables ->
+          resolve_variables (`Assoc [
+            ("meta", `Assoc [
+              ("variableCollections", collections);
+              ("variables", variables);
+            ])
+          ])
+      | _ -> `Assoc [("error", `String "Missing plugin variables payload")])
+  | _ -> `Assoc [("error", `String "Invalid plugin variables payload")]
+
+let download_image_fill save_dir file_key (id, url) =
+  match url with
+  | `String url when is_http_url url ->
+      let ext = file_ext_from_url url in
+      let path = Printf.sprintf "%s/%s/%s%s"
+        save_dir file_key (sanitize_node_id id) ext in
+      (match Figma_effects.Perform.download_url ~url ~path with
+       | Ok saved ->
+           `Assoc [
+             ("image_ref", `String id);
+             ("url", `String url);
+             ("saved", `String saved);
+           ]
+       | Error err ->
+           `Assoc [
+             ("image_ref", `String id);
+             ("url", `String url);
+             ("error", `String err);
+           ])
+  | `String url ->
+      `Assoc [
+        ("image_ref", `String id);
+        ("url", `String url);
+        ("error", `String "Download skipped: invalid URL");
+      ]
+  | _ ->
+      `Assoc [
+        ("image_ref", `String id);
+        ("error", `String "Invalid image URL payload");
+      ]
+
+let build_file_meta json =
+  let meta_root =
+    match Yojson.Safe.Util.member "meta" json with
+    | `Null -> json
+    | m -> m
+  in
+  let pick key = Yojson.Safe.Util.member key meta_root in
+  `Assoc [
+    ("components", pick "components");
+    ("componentSets", pick "componentSets");
+    ("styles", pick "styles");
+  ]
+
+let make_text_content text : Yojson.Safe.t =
+  `Assoc [
+    ("content", `List [
+      `Assoc [("type", `String "text"); ("text", `String text)]
+    ])
+  ]
+
+let make_error_content msg : Yojson.Safe.t =
+  `Assoc [
+    ("content", `List [
+      `Assoc [("type", `String "text"); ("text", `String msg); ("isError", `Bool true)]
+    ])
+  ]
+
+(** figma_codegen 핸들러 *)
+let handle_codegen args : (Yojson.Safe.t, string) result Lwt.t =
+  let json_str = get_string "json" args in
+  let format = get_string_or "format" "fidelity" args in
+
+  match json_str with
+  | None -> Lwt.return (Error "Missing required parameter: json")
+  | Some json_str ->
+      (match process_json_string ~format json_str with
+       | Ok result -> Lwt.return (Ok (make_text_content result))
+       | Error msg -> Lwt.return (Error msg))
+
+(** figma_get_file 핸들러 *)
+let handle_get_file args : (Yojson.Safe.t, string) result =
+  let file_key = get_string "file_key" args in
+  let token = get_string "token" args in
+  let format = get_string_or "format" "fidelity" args in
+  let depth = get_int "depth" args in
+  let geometry = get_string "geometry" args in
+  let plugin_data = get_string "plugin_data" args in
+  let version = get_string "version" args in
+
+  match (file_key, token) with
+  | (Some file_key, Some token) ->
+      (match Figma_effects.Perform.get_file ~token ~file_key ?depth ?geometry ?plugin_data ?version () with
+       | Ok json ->
+           (* document 추출 *)
+           let doc = Figma_api.extract_document json in
+           let doc_str = match doc with
+             | Some d -> Yojson.Safe.to_string d
+             | None -> Yojson.Safe.to_string json
+           in
+           (match process_json_string ~format doc_str with
+            | Ok result -> Ok (make_text_content result)
+            | Error msg -> Error msg)
+       | Error err -> Error err)
+  | _ -> Error "Missing required parameters: file_key, token"
+
+(** figma_get_file_meta 핸들러 *)
+let handle_get_file_meta args : (Yojson.Safe.t, string) result =
+  let file_key = get_string "file_key" args in
+  let token = get_string "token" args in
+  let version = get_string "version" args in
+
+  match (file_key, token) with
+  | (Some file_key, Some token) ->
+      (match Figma_effects.Perform.get_file_meta ~token ~file_key ?version () with
+       | Ok json ->
+           let meta = build_file_meta json in
+           Ok (make_text_content (Yojson.Safe.pretty_to_string meta))
+       | Error err -> Error err)
+  | _ -> Error "Missing required parameters: file_key, token"
+
+(** figma_list_screens 핸들러 *)
+let handle_list_screens args : (Yojson.Safe.t, string) result =
+  let file_key = get_string "file_key" args in
+  let token = get_string "token" args in
+
+  match (file_key, token) with
+  | (Some file_key, Some token) ->
+      (match Figma_effects.Perform.get_file ~token ~file_key () with
+       | Ok json ->
+           let screens = Figma_api.get_all_screens json in
+           let screen_list = List.map (fun (id, name) ->
+             sprintf "- %s (%s)" name id
+           ) screens in
+           let result = sprintf "Found %d screens:\n%s"
+             (List.length screens)
+             (String.concat "\n" screen_list)
+           in
+           Ok (make_text_content result)
+       | Error err -> Error err)
+  | _ -> Error "Missing required parameters: file_key, token"
+
+(** figma_get_node 핸들러 *)
+let handle_get_node args : (Yojson.Safe.t, string) result =
+  let file_key = get_string "file_key" args in
+  let node_id = get_string "node_id" args in
+  let token = get_string "token" args in
+  let format = get_string_or "format" "fidelity" args in
+  let depth = get_int "depth" args in
+  let geometry = get_string "geometry" args in
+  let plugin_data = get_string "plugin_data" args in
+  let version = get_string "version" args in
+
+  match (file_key, node_id, token) with
+  | (Some file_key, Some node_id, Some token) ->
+      (match Figma_effects.Perform.get_nodes ~token ~file_key ~node_ids:[node_id] ?depth ?geometry ?plugin_data ?version () with
+       | Ok json ->
+           let nodes = member "nodes" json in
+           let node_data = match nodes with
+             | Some (`Assoc nodes_map) ->
+                 (match List.assoc_opt node_id nodes_map with
+                  | Some n -> member "document" n
+                  | None -> None)
+             | _ -> None
+           in
+           (match node_data with
+            | Some node ->
+                let node_str = Yojson.Safe.to_string node in
+                (match process_json_string ~format node_str with
+                 | Ok result -> Ok (make_text_content result)
+                 | Error msg -> Error msg)
+            | None -> Error (sprintf "Node not found: %s" node_id))
+       | Error err -> Error err)
+  | _ -> Error "Missing required parameters: file_key, node_id, token"
+
+(** figma_get_node_with_image 핸들러 *)
+let handle_get_node_with_image args : (Yojson.Safe.t, string) result =
+  let file_key = get_string "file_key" args in
+  let node_id = get_string "node_id" args in
+  let token = get_string "token" args in
+  let format = get_string_or "format" "fidelity" args in
+  let image_format = get_string_or "image_format" "png" args in
+  let scale = get_float_or "scale" 1.0 args |> int_of_float in
+  let use_absolute_bounds = get_bool "use_absolute_bounds" args in
+  let download = get_bool_or "download" false args in
+  let save_dir = get_string_or "save_dir" (default_asset_dir ()) args in
+  let depth = get_int "depth" args in
+  let geometry = get_string "geometry" args in
+  let plugin_data = get_string "plugin_data" args in
+  let version = get_string "version" args in
+
+  match (file_key, node_id, token) with
+  | (Some file_key, Some node_id, Some token) ->
+      (match Figma_effects.Perform.get_nodes ~token ~file_key ~node_ids:[node_id] ?depth ?geometry ?plugin_data ?version () with
+       | Ok json ->
+           let nodes = member "nodes" json in
+           let node_data = match nodes with
+             | Some (`Assoc nodes_map) ->
+                 (match List.assoc_opt node_id nodes_map with
+                  | Some n -> member "document" n
+                  | None -> None)
+             | _ -> None
+           in
+           (match node_data with
+            | Some node ->
+                let node_str = Yojson.Safe.to_string node in
+                (match process_json_string ~format node_str with
+                 | Ok dsl ->
+                     (match Figma_effects.Perform.get_images
+                              ~token ~file_key ~node_ids:[node_id]
+                              ~format:image_format ~scale
+                              ?use_absolute_bounds ?version () with
+                      | Ok img_json ->
+                          let image_url =
+                            match member "images" img_json with
+                            | Some (`Assoc img_map) ->
+                                (match List.assoc_opt node_id img_map with
+                                 | Some (`String url) -> url
+                                 | _ -> "No image URL returned")
+                            | _ -> "No images returned"
+                          in
+                          let download_info =
+                            if download then
+                              if is_http_url image_url then
+                                let path = Printf.sprintf "%s/%s/%s.%s"
+                                  save_dir file_key (sanitize_node_id node_id) image_format in
+                                (match Figma_effects.Perform.download_url ~url:image_url ~path with
+                                 | Ok saved -> sprintf "Saved: %s" saved
+                                 | Error err -> sprintf "Download error: %s" err)
+                              else
+                                "Download skipped: no image URL"
+                            else
+                              ""
+                          in
+                          let result =
+                            if download_info = "" then
+                              sprintf "DSL:\n%s\n\nImage (%s, scale %d):\n%s"
+                                dsl image_format scale image_url
+                            else
+                              sprintf "DSL:\n%s\n\nImage (%s, scale %d):\n%s\n%s"
+                                dsl image_format scale image_url download_info
+                          in
+                          Ok (make_text_content result)
+                      | Error err -> Error err)
+                 | Error msg -> Error msg)
+            | None -> Error (sprintf "Node not found: %s" node_id))
+       | Error err -> Error err)
+  | _ -> Error "Missing required parameters: file_key, node_id, token"
+
+(** figma_get_node_bundle 핸들러 *)
+let handle_get_node_bundle args : (Yojson.Safe.t, string) result =
+  let file_key = get_string "file_key" args in
+  let node_id = get_string "node_id" args in
+  let token = get_string "token" args in
+  let format = get_string_or "format" "fidelity" args in
+  let image_format = get_string_or "image_format" "png" args in
+  let scale = get_float_or "scale" 1.0 args in
+  let use_absolute_bounds = get_bool "use_absolute_bounds" args in
+  let download = get_bool_or "download" false args in
+  let save_dir = get_string_or "save_dir" (default_asset_dir ()) args in
+  let include_raw = get_bool_or "include_raw" true args in
+  let include_meta = get_bool_or "include_meta" true args in
+  let include_variables = get_bool_or "include_variables" true args in
+  let include_image_fills = get_bool_or "include_image_fills" true args in
+  let include_plugin = get_bool_or "include_plugin" false args in
+  let include_plugin_variables = get_bool_or "include_plugin_variables" false args in
+  let include_plugin_image = get_bool_or "include_plugin_image" false args in
+  let plugin_image_format = get_string_or "plugin_image_format" "png" args in
+  let plugin_image_scale = get_float_or "plugin_image_scale" 1.0 args in
+  let plugin_channel_id = get_string "plugin_channel_id" args in
+  let plugin_timeout_ms = get_int "plugin_timeout_ms" args |> Option.value ~default:20000 in
+  let depth = get_int "depth" args in
+  let geometry = get_string "geometry" args in
+  let plugin_data = get_string "plugin_data" args in
+  let version = get_string "version" args in
+
+  match (file_key, node_id, token) with
+  | (Some file_key, Some node_id, Some token) ->
+      (* 캐시 옵션 생성 *)
+      let cache_options =
+        List.filter_map Fun.id [
+          Option.map (sprintf "depth:%d") depth;
+          Option.map (sprintf "geometry:%s") geometry;
+          Option.map (sprintf "plugin_data:%s") plugin_data;
+          Option.map (sprintf "version:%s") version;
+        ]
+      in
+      (* 캐시에서 먼저 조회 *)
+      let cached_json = Figma_cache.get ~file_key ~node_id ~options:cache_options () in
+      let json_result = match cached_json with
+        | Some json ->
+            Printf.eprintf "[Cache] HIT for node %s\n%!" node_id;
+            Ok json
+        | None ->
+            Printf.eprintf "[Cache] MISS for node %s → fetching from API\n%!" node_id;
+            match Figma_effects.Perform.get_nodes ~token ~file_key ~node_ids:[node_id] ?depth ?geometry ?plugin_data ?version () with
+            | Error err -> Error err
+            | Ok json ->
+                (* 성공 시 캐시에 저장 *)
+                Figma_cache.set ~file_key ~node_id ~options:cache_options json;
+                Ok json
+      in
+      (match json_result with
+       | Error err -> Error err
+       | Ok json ->
+           let node_data = match member "nodes" json with
+             | Some (`Assoc nodes_map) ->
+                 (match List.assoc_opt node_id nodes_map with
+                  | Some n -> member "document" n
+                  | None -> None)
+             | _ -> None
+           in
+           (match node_data with
+            | None -> Error (sprintf "Node not found: %s" node_id)
+            | Some node ->
+                let node_str = Yojson.Safe.to_string node in
+                let dsl_str = match process_json_string ~format node_str with
+                  | Ok s -> s
+                  | Error msg -> msg
+                in
+                let dsl_json =
+                  try Yojson.Safe.from_string dsl_str
+                  with _ -> `Null
+                in
+                let (image_url, image_download) =
+                  match Figma_effects.Perform.get_images
+                          ~token ~file_key ~node_ids:[node_id]
+                          ~format:image_format ~scale:(int_of_float scale)
+                          ?use_absolute_bounds ?version () with
+                  | Ok img_json ->
+                      let url =
+                        match member "images" img_json with
+                        | Some (`Assoc img_map) ->
+                            (match List.assoc_opt node_id img_map with
+                             | Some (`String u) -> u
+                             | _ -> "No image URL returned")
+                        | _ -> "No images returned"
+                      in
+                      if download then
+                        if is_http_url url then
+                          let path = Printf.sprintf "%s/%s/%s.%s"
+                            save_dir file_key (sanitize_node_id node_id) image_format in
+                          (match Figma_effects.Perform.download_url ~url ~path with
+                           | Ok saved -> (url, `String saved)
+                           | Error err -> (url, `String ("Download error: " ^ err)))
+                        else
+                          (url, `String "Download skipped: no image URL")
+                      else
+                        (url, `Null)
+                  | Error err -> ("Image error: " ^ err, `Null)
+                in
+                let file_meta =
+                  if include_meta then
+                    match Figma_effects.Perform.get_file_meta ~token ~file_key ?version () with
+                    | Ok meta_json -> build_file_meta meta_json
+                    | Error err -> `Assoc [("error", `String err)]
+                  else
+                    `Null
+                in
+                let resolve_plugin_channel () =
+                  match plugin_channel_id with
+                  | Some id -> Ok id
+                  | None -> resolve_channel_id args
+                in
+                let want_plugin_variables =
+                  include_plugin_variables || (include_plugin && include_variables)
+                in
+                let plugin_variables =
+                  if want_plugin_variables then
+                    match resolve_plugin_channel () with
+                    | Error msg -> `Assoc [("error", `String msg)]
+                    | Ok channel_id ->
+                        let payload = `Assoc [] in
+                        let command_id = Figma_plugin_bridge.enqueue_command ~channel_id ~name:"get_variables" ~payload in
+                        (match plugin_wait ~channel_id ~command_id ~timeout_ms:plugin_timeout_ms with
+                         | Error err -> `Assoc [("error", `String err)]
+                         | Ok result ->
+                             `Assoc [
+                               ("channel_id", `String channel_id);
+                               ("command_id", `String command_id);
+                               ("ok", `Bool result.ok);
+                               ("payload", result.payload);
+                             ])
+                  else
+                    `Null
+                in
+                let (variables, variables_source) =
+                  if include_variables then
+                    match Figma_effects.Perform.get_variables ~token ~file_key with
+                    | Ok vars_json -> (resolve_variables vars_json, `String "rest")
+                    | Error err ->
+                        (match plugin_payload_if_ok plugin_variables with
+                         | Some payload -> (resolve_plugin_variables payload, `String "plugin")
+                         | None -> (`Assoc [("error", `String err)], `String "error"))
+                  else
+                    (`Null, `Null)
+                in
+                let image_fills =
+                  if include_image_fills then
+                    match Figma_effects.Perform.get_file_images ~token ~file_key ?version () with
+                    | Ok img_json ->
+                        let images =
+                          match member "images" img_json with
+                          | Some (`Assoc _ as m) -> m
+                          | _ -> `Null
+                        in
+                        let downloads =
+                          if download then
+                            match images with
+                            | `Assoc items ->
+                                `List (List.map (download_image_fill save_dir file_key) items)
+                            | _ -> `List []
+                          else
+                            `List []
+                        in
+                        `Assoc [("images", images); ("downloads", downloads)]
+                    | Error err -> `Assoc [("error", `String err)]
+                  else
+                    `Null
+                in
+                let plugin_snapshot =
+                  if include_plugin then
+                    (match resolve_plugin_channel () with
+                     | Error msg -> `Assoc [("error", `String msg)]
+                     | Ok channel_id ->
+                         let payload = `Assoc [
+                           ("node_id", `String node_id);
+                           ("depth", `Int (Option.value ~default:6 depth));
+                         ] in
+                         let command_id = Figma_plugin_bridge.enqueue_command ~channel_id ~name:"get_node" ~payload in
+                         (match plugin_wait ~channel_id ~command_id ~timeout_ms:plugin_timeout_ms with
+                          | Error err -> `Assoc [("error", `String err)]
+                          | Ok result ->
+                              `Assoc [
+                                ("channel_id", `String channel_id);
+                                ("command_id", `String command_id);
+                                ("ok", `Bool result.ok);
+                                ("payload", result.payload);
+                              ]))
+                  else
+                    `Null
+                in
+                let plugin_image =
+                  if include_plugin_image then
+                    (match resolve_plugin_channel () with
+                     | Error msg -> `Assoc [("error", `String msg)]
+                     | Ok channel_id ->
+                         let payload = `Assoc [
+                           ("node_id", `String node_id);
+                           ("format", `String plugin_image_format);
+                           ("scale", `Float plugin_image_scale);
+                         ] in
+                         let command_id = Figma_plugin_bridge.enqueue_command ~channel_id ~name:"export_node_image" ~payload in
+                         (match plugin_wait ~channel_id ~command_id ~timeout_ms:plugin_timeout_ms with
+                          | Error err -> `Assoc [("error", `String err)]
+                          | Ok result ->
+                              let response =
+                                `Assoc [
+                                  ("channel_id", `String channel_id);
+                                  ("command_id", `String command_id);
+                                  ("ok", `Bool result.ok);
+                                  ("payload", result.payload);
+                                ]
+                              in
+                              if download then
+                                `Assoc [
+                                  ("note", `String "download=true is ignored for plugin_image (base64 only)");
+                                  ("response", response);
+                                ]
+                              else
+                                response))
+                  else
+                    `Null
+                in
+                let fidelity =
+                  match dsl_json with
+                  | `Assoc _ as json ->
+                      let (overall, missing_total, sections) =
+                        fidelity_score_of_bundle
+                          ~dsl_json:json
+                          ~variables
+                          ~image_fills
+                          ~plugin_snapshot
+                          ~include_variables
+                          ~include_image_fills
+                          ~include_plugin
+                      in
+                      `Assoc [
+                        ("overall", `Float overall);
+                        ("missing_total", `Int missing_total);
+                        ("sections", sections);
+                      ]
+                  | _ -> `Null
+                in
+                let result =
+                  `Assoc [
+                    ("file_key", `String file_key);
+                    ("node_id", `String node_id);
+                    ("dsl", `String dsl_str);
+                    ("dsl_json", dsl_json);
+                    ("node_raw", if include_raw then node else `Null);
+                    ("image", `Assoc [
+                      ("url", `String image_url);
+                      ("download", image_download);
+                    ]);
+                    ("file_meta", file_meta);
+                    ("variables", variables);
+                    ("variables_source", variables_source);
+                    ("plugin_variables", plugin_variables);
+                    ("image_fills", image_fills);
+                    ("plugin_snapshot", plugin_snapshot);
+                    ("plugin_image", plugin_image);
+                    ("fidelity", fidelity);
+                  ]
+                in
+                (* Large Response Handler: 500KB 초과 시 파일로 저장 *)
+                let result_str = Yojson.Safe.pretty_to_string result in
+                let prefix = Printf.sprintf "node_%s" (sanitize_node_id node_id) in
+                Ok (Large_response.wrap_string_result ~prefix ~format result_str)))
+  | _ -> Error "Missing required parameters: file_key, node_id, token"
+
+(** figma_get_node_summary 핸들러 - 경량 구조 요약 *)
+let handle_get_node_summary args : (Yojson.Safe.t, string) result =
+  let file_key = get_string "file_key" args in
+  let node_id = get_string "node_id" args in
+  let token = get_string "token" args in
+  let max_children = match get_int "max_children" args with Some n when n > 0 -> n | _ -> 50 in
+  let version = get_string "version" args in
+
+  match (file_key, node_id, token) with
+  | (Some file_key, Some node_id, Some token) ->
+      (* 최소 depth=1로 자식만 가져옴 *)
+      (match Figma_effects.Perform.get_nodes ~token ~file_key ~node_ids:[node_id] ~depth:1 ?version () with
+       | Error err -> Error (Printf.sprintf "Figma API error: %s" err)
+       | Ok nodes_json ->
+           let open Yojson.Safe.Util in
+           let nodes = nodes_json |> member "nodes" in
+           let node_key = String.map (fun c -> if c = ':' then '_' else c) node_id in
+           let node_entry = nodes |> member node_key in
+           (match node_entry with
+            | `Null -> Error (Printf.sprintf "Node %s not found in file %s" node_id file_key)
+            | _ ->
+                let node_data = node_entry |> member "document" in
+                (match node_data with
+                 | `Null -> Error (Printf.sprintf "Document not found for node %s" node_id)
+                 | _ ->
+
+           (* 자식 요약 추출 *)
+           let children = node_data |> member "children" |> to_list in
+           let children_count = List.length children in
+           let children_summary =
+             children
+             |> List.mapi (fun i child ->
+                 if i >= max_children then None
+                 else
+                   let id = child |> member "id" |> to_string_option |> Option.value ~default:"" in
+                   let name = child |> member "name" |> to_string_option |> Option.value ~default:"" in
+                   let typ = child |> member "type" |> to_string_option |> Option.value ~default:"UNKNOWN" in
+                   let sub_children = child |> member "children" |> to_list |> List.length in
+                   Some (`Assoc [
+                     ("id", `String id);
+                     ("name", `String name);
+                     ("type", `String typ);
+                     ("children_count", `Int sub_children);
+                   ]))
+             |> List.filter_map Fun.id
+           in
+
+           let node_name = node_data |> member "name" |> to_string_option |> Option.value ~default:"" in
+           let node_type = node_data |> member "type" |> to_string_option |> Option.value ~default:"UNKNOWN" in
+
+           Ok (`Assoc [
+             ("node_id", `String node_id);
+             ("name", `String node_name);
+             ("type", `String node_type);
+             ("children_count", `Int children_count);
+             ("children", `List children_summary);
+             ("truncated", `Bool (children_count > max_children));
+             ("hint", `String "Use figma_get_node_chunk for progressive loading of specific depth ranges");
+           ]))))
+  | _ -> Error "Missing required parameters: file_key, node_id, token"
+
+(** figma_get_node_chunk 핸들러 - 깊이 범위별 청크 로드 *)
+let handle_get_node_chunk args : (Yojson.Safe.t, string) result =
+  let file_key = get_string "file_key" args in
+  let node_id = get_string "node_id" args in
+  let token = get_string "token" args in
+  let depth_start = match get_int "depth_start" args with Some d when d >= 0 -> d | _ -> 0 in
+  let depth_end = match get_int "depth_end" args with Some d when d >= 0 -> d | _ -> 2 in
+  let format = get_string_or "format" "fidelity" args in
+  let include_styles = get_bool_or "include_styles" false args in
+  let version = get_string "version" args in
+
+  match (file_key, node_id, token) with
+  | (Some file_key, Some node_id, Some token) ->
+      if depth_end < depth_start then
+        Error "depth_end must be >= depth_start"
+      else
+        (* depth_end까지만 가져옴 *)
+        let api_depth = depth_end + 1 in
+        (match Figma_effects.Perform.get_nodes ~token ~file_key ~node_ids:[node_id] ~depth:api_depth ?version () with
+         | Error err -> Error (Printf.sprintf "Figma API error: %s" err)
+         | Ok nodes_json ->
+             let open Yojson.Safe.Util in
+             let nodes = nodes_json |> member "nodes" in
+             let node_key = String.map (fun c -> if c = ':' then '_' else c) node_id in
+             let node_entry = nodes |> member node_key in
+             (match node_entry with
+              | `Null -> Error (Printf.sprintf "Node %s not found in file %s" node_id file_key)
+              | _ ->
+                  let node_data = node_entry |> member "document" in
+                  (match node_data with
+                   | `Null -> Error (Printf.sprintf "Document not found for node %s" node_id)
+                   | _ ->
+
+             (* 깊이 범위에 따라 필터링하는 재귀 함수 *)
+             let rec filter_by_depth current_depth json =
+               if current_depth < depth_start then
+                 (* 시작 깊이 미만: 자식만 재귀 처리 *)
+                 let children = json |> member "children" |> to_list in
+                 let filtered_children = List.filter_map (fun c ->
+                     let result = filter_by_depth (current_depth + 1) c in
+                     if result = `Null then None else Some result
+                   ) children
+                 in
+                 if filtered_children = [] then `Null
+                 else
+                   let assoc = to_assoc json in
+                   let without_children = List.filter (fun (k, _) -> k <> "children") assoc in
+                   `Assoc (without_children @ [("children", `List filtered_children)])
+               else if current_depth > depth_end then
+                 (* 종료 깊이 초과: 자식 제거 *)
+                 let assoc = to_assoc json in
+                 let without_children = List.filter (fun (k, _) -> k <> "children") assoc in
+                 let children = json |> member "children" |> to_list |> List.length in
+                 `Assoc (without_children @ [("_truncated_children", `Int children)])
+               else
+                 (* 범위 내: 자식 재귀 처리 *)
+                 let children = json |> member "children" |> to_list in
+                 let filtered_children = List.map (fun c -> filter_by_depth (current_depth + 1) c) children in
+                 let assoc = to_assoc json in
+                 let without_children = List.filter (fun (k, _) -> k <> "children") assoc in
+                 `Assoc (without_children @ [("children", `List filtered_children)])
+             in
+
+             let filtered = filter_by_depth 0 node_data in
+
+             let result =
+               let _ = include_styles in (* TODO: 스타일 추출 기능 추가 *)
+               let filtered_str = Yojson.Safe.to_string filtered in
+               match process_json_string ~format filtered_str with
+               | Ok dsl ->
+                   `Assoc [
+                     ("type", `String "text");
+                     ("text", `String dsl);
+                     ("depth_range", `String (Printf.sprintf "%d-%d" depth_start depth_end));
+                     ("format", `String format);
+                   ]
+               | Error msg ->
+                   `Assoc [
+                     ("error", `String msg);
+                     ("node", filtered);
+                     ("depth_range", `String (Printf.sprintf "%d-%d" depth_start depth_end));
+                   ]
+             in
+
+             (* Large Response Handler 적용 *)
+             let result_str = Yojson.Safe.pretty_to_string result in
+             let prefix = Printf.sprintf "chunk_%s_%d_%d" (sanitize_node_id node_id) depth_start depth_end in
+             Ok (Large_response.wrap_string_result ~prefix ~format result_str))))
+  | _ -> Error "Missing required parameters: file_key, node_id, token"
+
+(** figma_fidelity_loop 핸들러 *)
+let handle_fidelity_loop args : (Yojson.Safe.t, string) result =
+  let file_key = get_string "file_key" args in
+  let node_id = get_string "node_id" args in
+  let token = get_string "token" args in
+  let format = get_string_or "format" "fidelity" args in
+  let target_score = get_float_or "target_score" 0.92 args in
+  let start_depth = match get_int "start_depth" args with Some d when d > 0 -> d | _ -> 4 in
+  let depth_step = match get_int "depth_step" args with Some d when d > 0 -> d | _ -> 4 in
+  let max_depth = match get_int "max_depth" args with Some d when d > 0 -> d | _ -> 20 in
+  let max_attempts = match get_int "max_attempts" args with Some d when d > 0 -> d | _ -> 4 in
+  let geometry = match get_string "geometry" args with Some g -> Some g | None -> Some "paths" in
+  let plugin_data = get_string "plugin_data" args in
+  let include_meta = get_bool_or "include_meta" true args in
+  let include_variables = get_bool_or "include_variables" true args in
+  let include_image_fills = get_bool_or "include_image_fills" true args in
+  let include_plugin = get_bool_or "include_plugin" false args in
+  let include_plugin_variables = get_bool_or "include_plugin_variables" false args in
+  let plugin_channel_id = get_string "plugin_channel_id" args in
+  let plugin_depth = match get_int "plugin_depth" args with Some d when d > 0 -> d | _ -> 6 in
+  let plugin_timeout_ms = get_int "plugin_timeout_ms" args |> Option.value ~default:20000 in
+
+  let clamp_score v =
+    if v < 0.0 then 0.0 else if v > 1.0 then 1.0 else v
+  in
+
+  match (file_key, node_id, token) with
+  | (Some file_key, Some node_id, Some token) ->
+      if format <> "fidelity" then
+        Error "figma_fidelity_loop only supports format=fidelity"
+      else
+        let target_score = clamp_score target_score in
+        let file_meta =
+          if include_meta then
+            match Figma_effects.Perform.get_file_meta ~token ~file_key () with
+            | Ok meta_json -> build_file_meta meta_json
+            | Error err -> `Assoc [("error", `String err)]
+          else
+            `Null
+        in
+        let resolve_plugin_channel () =
+          match plugin_channel_id with
+          | Some id -> Ok id
+          | None -> resolve_channel_id args
+        in
+        let want_plugin_variables =
+          include_plugin_variables || (include_plugin && include_variables)
+        in
+        let plugin_variables =
+          if want_plugin_variables then
+            match resolve_plugin_channel () with
+            | Error msg -> `Assoc [("error", `String msg)]
+            | Ok channel_id ->
+                let payload = `Assoc [] in
+                let command_id = Figma_plugin_bridge.enqueue_command ~channel_id ~name:"get_variables" ~payload in
+                (match plugin_wait ~channel_id ~command_id ~timeout_ms:plugin_timeout_ms with
+                 | Error err -> `Assoc [("error", `String err)]
+                 | Ok result ->
+                     `Assoc [
+                       ("channel_id", `String channel_id);
+                       ("command_id", `String command_id);
+                       ("ok", `Bool result.ok);
+                       ("payload", result.payload);
+                     ])
+          else
+            `Null
+        in
+        let (variables, variables_source) =
+          if include_variables then
+            match Figma_effects.Perform.get_variables ~token ~file_key with
+            | Ok vars_json -> (resolve_variables vars_json, `String "rest")
+            | Error err ->
+                (match plugin_payload_if_ok plugin_variables with
+                 | Some payload -> (resolve_plugin_variables payload, `String "plugin")
+                 | None -> (`Assoc [("error", `String err)], `String "error"))
+          else
+            (`Null, `Null)
+        in
+        let image_fills =
+          if include_image_fills then
+            match Figma_effects.Perform.get_file_images ~token ~file_key () with
+            | Ok img_json ->
+                let images =
+                  match member "images" img_json with
+                  | Some (`Assoc _ as m) -> m
+                  | _ -> `Null
+                in
+                `Assoc [("images", images)]
+            | Error err -> `Assoc [("error", `String err)]
+          else
+            `Null
+        in
+        let plugin_snapshot =
+          if include_plugin then
+            match resolve_plugin_channel () with
+            | Error msg -> `Assoc [("error", `String msg)]
+            | Ok channel_id ->
+                let payload = `Assoc [
+                  ("node_id", `String node_id);
+                  ("depth", `Int plugin_depth);
+                ] in
+                let command_id = Figma_plugin_bridge.enqueue_command ~channel_id ~name:"get_node" ~payload in
+                (match plugin_wait ~channel_id ~command_id ~timeout_ms:plugin_timeout_ms with
+                 | Error err -> `Assoc [("error", `String err)]
+                 | Ok result ->
+                     `Assoc [
+                       ("channel_id", `String channel_id);
+                       ("command_id", `String command_id);
+                       ("ok", `Bool result.ok);
+                       ("payload", result.payload);
+                     ])
+          else
+            `Null
+        in
+        (* Early Stop 감지기 생성 *)
+        let early_stop_config = Figma_early_stop.{
+          target_ssim = target_score;
+          plateau_threshold = 0.005;  (* 0.5% *)
+          plateau_patience = 3;
+          text_ceiling = 0.88;
+          max_iterations = max_attempts;
+        } in
+        let early_stop_detector = Figma_early_stop.create ~config:early_stop_config () in
+
+        let rec loop attempt depth best attempts =
+          if attempt > max_attempts then
+            (best, attempts, None)
+          else
+            (* 캐시 옵션: depth와 geometry 포함 *)
+            let cache_options = List.filter_map Fun.id [
+              Some (sprintf "depth:%d" depth);
+              Option.map (sprintf "geometry:%s") geometry;
+              Option.map (sprintf "plugin_data:%s") plugin_data;
+            ] in
+            let cached = Figma_cache.get ~file_key ~node_id ~options:cache_options () in
+            let json_result = match cached with
+              | Some json ->
+                  Printf.eprintf "[FidelityLoop] Cache HIT: depth=%d\n%!" depth;
+                  Ok json
+              | None ->
+                  Printf.eprintf "[FidelityLoop] Cache MISS: depth=%d → API call\n%!" depth;
+                  match Figma_effects.Perform.get_nodes ~token ~file_key ~node_ids:[node_id]
+                          ?geometry ?plugin_data ~depth () with
+                  | Error err -> Error err
+                  | Ok json ->
+                      Figma_cache.set ~file_key ~node_id ~options:cache_options json;
+                      Ok json
+            in
+            (match json_result with
+            | Error err -> (best, (`Assoc [("attempt", `Int attempt); ("error", `String err)]) :: attempts, None)
+            | Ok json ->
+                let node_data = match member "nodes" json with
+                  | Some (`Assoc nodes_map) ->
+                      (match List.assoc_opt node_id nodes_map with
+                       | Some n -> member "document" n
+                       | None -> None)
+                  | _ -> None
+                in
+                (match node_data with
+                 | None ->
+                     let entry = `Assoc [
+                       ("attempt", `Int attempt);
+                       ("depth", `Int depth);
+                       ("error", `String ("Node not found: " ^ node_id));
+                     ] in
+                     (best, entry :: attempts, None)
+                 | Some node ->
+                     let node_str = Yojson.Safe.to_string node in
+                     let dsl_str =
+                       match process_json_string ~format node_str with
+                       | Ok s -> s
+                       | Error msg -> msg
+                     in
+                     let dsl_json =
+                       try Yojson.Safe.from_string dsl_str
+                       with _ -> `Null
+                     in
+                     let (overall, missing_total, sections) =
+                       match dsl_json with
+                       | `Assoc _ as json ->
+                           fidelity_score_of_bundle
+                             ~dsl_json:json
+                             ~variables
+                             ~image_fills
+                             ~plugin_snapshot
+                             ~include_variables
+                             ~include_image_fills
+                             ~include_plugin
+                       | _ -> (0.0, 0, `Null)
+                     in
+                     let fidelity = `Assoc [
+                       ("overall", `Float overall);
+                       ("missing_total", `Int missing_total);
+                       ("sections", sections);
+                     ] in
+                     let best =
+                       match best with
+                       | None ->
+                           let payload = `Assoc [
+                             ("depth", `Int depth);
+                             ("dsl", `String dsl_str);
+                             ("dsl_json", dsl_json);
+                             ("node_raw", node);
+                             ("fidelity", fidelity);
+                           ] in
+                           Some (overall, payload)
+                       | Some (best_score, _) when overall > best_score ->
+                           let payload = `Assoc [
+                             ("depth", `Int depth);
+                             ("dsl", `String dsl_str);
+                             ("dsl_json", dsl_json);
+                             ("node_raw", node);
+                             ("fidelity", fidelity);
+                           ] in
+                           Some (overall, payload)
+                       | Some _ -> best
+                     in
+                     (* Early Stop 체크 *)
+                     let text_density = Figma_early_stop.calculate_text_density dsl_json in
+                     let stop_condition = Figma_early_stop.check early_stop_detector
+                       ~current_ssim:overall ~iteration:attempt ~text_density () in
+                     let entry_with_stop = `Assoc [
+                       ("attempt", `Int attempt);
+                       ("depth", `Int depth);
+                       ("geometry", match geometry with Some g -> `String g | None -> `Null);
+                       ("fidelity", fidelity);
+                       ("early_stop", `Assoc [
+                         ("should_stop", `Bool stop_condition.should_stop);
+                         ("reason", `String stop_condition.message);
+                         ("text_density", `Float text_density);
+                       ]);
+                     ] in
+                     if stop_condition.should_stop || depth >= max_depth then
+                       (best, entry_with_stop :: attempts, Some stop_condition)
+                     else
+                       let next_depth = min max_depth (depth + depth_step) in
+                       if next_depth = depth then
+                         (best, entry_with_stop :: attempts, Some stop_condition)
+                       else
+                         loop (attempt + 1) next_depth best (entry_with_stop :: attempts)))
+        in
+        let (best, attempts, final_stop) = loop 1 start_depth None [] in
+        let (best_score, best_payload) =
+          match best with
+          | Some (score, payload) -> (score, payload)
+          | None -> (0.0, `Null)
+        in
+        let early_stop_summary =
+          match final_stop with
+          | Some cond -> Figma_early_stop.to_json early_stop_detector cond
+          | None -> `Assoc [("summary", `String (Figma_early_stop.summary early_stop_detector))]
+        in
+        let result = `Assoc [
+          ("target_score", `Float target_score);
+          ("early_stop", early_stop_summary);
+          ("best_score", `Float best_score);
+          ("achieved", `Bool (best_score >= target_score));
+          ("best", best_payload);
+          ("attempts", `List (List.rev attempts));
+          ("file_meta", file_meta);
+          ("variables", variables);
+          ("variables_source", variables_source);
+          ("plugin_variables", plugin_variables);
+          ("image_fills", image_fills);
+          ("plugin_snapshot", plugin_snapshot);
+        ] in
+        Ok (make_text_content (Yojson.Safe.pretty_to_string result))
+  | _ -> Error "Missing required parameters: file_key, node_id, token"
+
+(** figma_image_similarity 핸들러 *)
+let handle_image_similarity args : (Yojson.Safe.t, string) result =
+  let format = get_string_or "format" "png" args in
+  let start_scale = match get_int "start_scale" args with Some s when s > 0 -> s | _ -> 1 in
+  let max_scale = match get_int "max_scale" args with Some s when s > 0 -> s | _ -> start_scale in
+  let scale_step = match get_int "scale_step" args with Some s when s > 0 -> s | _ -> 1 in
+  let target_ssim = get_float "target_ssim" args in
+  let use_absolute_bounds = get_bool "use_absolute_bounds" args in
+  let version = get_string "version" args in
+  let save_dir = get_string_or "save_dir" (default_compare_dir ()) args in
+
+  let clamp_scale s = max 1 (min 4 s) in
+
+  match (get_string "file_key" args, get_string "node_a_id" args, get_string "node_b_id" args, get_string "token" args) with
+  | (Some file_key, Some node_a_id, Some node_b_id, Some token) ->
+      let compare_scale scale =
+        match Figma_effects.Perform.get_images ~token ~file_key
+                ~node_ids:[node_a_id; node_b_id]
+                ~format ~scale ?use_absolute_bounds ?version () with
+        | Error err -> Error err
+        | Ok json ->
+            let images = match member "images" json with
+              | Some (`Assoc map) -> map
+              | _ -> []
+            in
+            let url_for id =
+              match List.assoc_opt id images with
+              | Some (`String url) -> Ok url
+              | _ -> Error (Printf.sprintf "Image URL not found: %s" id)
+            in
+            (match (url_for node_a_id, url_for node_b_id) with
+             | (Ok url_a, Ok url_b) ->
+                 let path_a = Printf.sprintf "%s/%s/%s__%d.%s"
+                   save_dir file_key (sanitize_node_id node_a_id) scale format in
+                 let path_b = Printf.sprintf "%s/%s/%s__%d.%s"
+                   save_dir file_key (sanitize_node_id node_b_id) scale format in
+                 (match Figma_effects.Perform.download_url ~url:url_a ~path:path_a with
+                  | Error err -> Error err
+                  | Ok saved_a ->
+                      (match Figma_effects.Perform.download_url ~url:url_b ~path:path_b with
+                       | Error err -> Error err
+                       | Ok saved_b ->
+                           (match Figma_image_similarity.compare_paths ~path_a:saved_a ~path_b:saved_b with
+                            | Error err -> Error err
+                            | Ok metrics ->
+                                let result = `Assoc [
+                                  ("scale", `Int scale);
+                                  ("format", `String format);
+                                  ("image_a", `String saved_a);
+                                  ("image_b", `String saved_b);
+                                  ("metrics", `Assoc [
+                                    ("ssim", `Float metrics.ssim);
+                                    ("psnr", `Float metrics.psnr);
+                                    ("mse", `Float metrics.mse);
+                                    ("width_a", `Int metrics.width_a);
+                                    ("height_a", `Int metrics.height_a);
+                                    ("width_b", `Int metrics.width_b);
+                                    ("height_b", `Int metrics.height_b);
+                                    ("overlap_width", `Int metrics.overlap_width);
+                                    ("overlap_height", `Int metrics.overlap_height);
+                                  ]);
+                                ] in
+                                Ok result)))
+             | (Error err, _) -> Error err
+             | (_, Error err) -> Error err)
+      in
+      let max_scale = clamp_scale max_scale in
+      let start_scale = clamp_scale start_scale in
+      let rec loop scale best attempts =
+        if scale > max_scale then
+          (best, attempts)
+        else
+          let scale = clamp_scale scale in
+          let result = compare_scale scale in
+          let attempts = (match result with Ok r -> r | Error err ->
+            `Assoc [("scale", `Int scale); ("error", `String err)]) :: attempts
+          in
+          let best =
+            match (best, result) with
+            | (None, Ok r) ->
+                let ssim = match member "metrics" r with
+                  | Some (`Assoc m) -> (match List.assoc_opt "ssim" m with Some (`Float v) -> v | _ -> 0.0)
+                  | _ -> 0.0
+                in
+                Some (ssim, r)
+            | (Some (best_score, _), Ok r) ->
+                let ssim = match member "metrics" r with
+                  | Some (`Assoc m) -> (match List.assoc_opt "ssim" m with Some (`Float v) -> v | _ -> 0.0)
+                  | _ -> 0.0
+                in
+                if ssim > best_score then Some (ssim, r) else best
+            | _ -> best
+          in
+          let should_stop =
+            match target_ssim with
+            | Some target ->
+                (match result with
+                 | Ok r ->
+                     let ssim = match member "metrics" r with
+                       | Some (`Assoc m) -> (match List.assoc_opt "ssim" m with Some (`Float v) -> v | _ -> 0.0)
+                       | _ -> 0.0
+                     in
+                     ssim >= target
+                 | Error _ -> false)
+            | None -> true
+          in
+          if should_stop then
+            (best, attempts)
+          else
+            loop (scale + scale_step) best attempts
+      in
+      let (best, attempts) = loop start_scale None [] in
+      let (best_score, best_payload) =
+        match best with
+        | Some (score, payload) -> (score, payload)
+        | None -> (0.0, `Null)
+      in
+      let result = `Assoc [
+        ("file_key", `String file_key);
+        ("node_a_id", `String node_a_id);
+        ("node_b_id", `String node_b_id);
+        ("target_ssim", match target_ssim with Some v -> `Float v | None -> `Null);
+        ("best_score", `Float best_score);
+        ("best", best_payload);
+        ("attempts", `List (List.rev attempts));
+      ] in
+      Ok (make_text_content (Yojson.Safe.pretty_to_string result))
+  | _ -> Error "Missing required parameters: file_key, node_a_id, node_b_id, token"
+
+(** figma_verify_visual 핸들러 - Visual Feedback Loop *)
+let handle_verify_visual args : (Yojson.Safe.t, string) result =
+  let file_key = get_string "file_key" args in
+  let node_id = get_string "node_id" args in
+  let token = get_string "token" args in
+  let html = get_string "html" args in
+  let target_ssim = get_float_or "target_ssim" 0.95 args in
+  let max_iterations = match get_int "max_iterations" args with Some i when i > 0 -> i | _ -> 3 in
+  let width = match get_int "width" args with Some w when w > 0 -> w | _ -> 375 in
+  let height = match get_int "height" args with Some h when h > 0 -> h | _ -> 812 in
+  let version = get_string "version" args in
+
+  match (file_key, node_id, token) with
+  | (Some file_key, Some node_id, Some token) ->
+      (* 1. Figma에서 노드 PNG 내보내기 *)
+      let figma_png_path = Printf.sprintf "/tmp/figma-visual/figma_%s_%s.png"
+        file_key (sanitize_node_id node_id) in
+      (match Figma_effects.Perform.get_images ~token ~file_key
+              ~node_ids:[node_id] ~format:"png" ~scale:1 ?version () with
+       | Error err -> Error (Printf.sprintf "Failed to get Figma image: %s" err)
+       | Ok images_json ->
+           let url_opt =
+             match member "images" images_json with
+             | Some (`Assoc map) ->
+                 (match List.assoc_opt node_id map with
+                  | Some (`String url) -> Some url
+                  | _ -> None)
+             | _ -> None
+           in
+           (match url_opt with
+            | None -> Error (Printf.sprintf "Image URL not found for node: %s" node_id)
+            | Some img_url ->
+                (match Figma_effects.Perform.download_url ~url:img_url ~path:figma_png_path with
+                 | Error err -> Error (Printf.sprintf "Failed to download Figma image: %s" err)
+                 | Ok saved_figma_png ->
+                     (* 2. 노드 데이터 가져오기 (HTML 생성 + 텍스트 검증용) *)
+                     let parsed_node_opt, html_code =
+                       match Figma_effects.Perform.get_nodes ~token ~file_key
+                               ~node_ids:[node_id] ~depth:10 ?version () with
+                       | Error _ -> (None, match html with Some h -> h | None -> "<html><body><div>Auto-generation failed</div></body></html>")
+                       | Ok nodes_json ->
+                           match member "nodes" nodes_json with
+                           | Some (`Assoc nodes_map) ->
+                               (match List.assoc_opt node_id nodes_map with
+                                | Some node_data ->
+                                    (match member "document" node_data with
+                                     | Some doc_json ->
+                                         let parsed = Figma_parser.parse_node doc_json in
+                                         let generated_html = match parsed with
+                                           | Some node -> Figma_codegen.generate_flat_html node
+                                           | None -> "<html><body><div>Failed to parse node</div></body></html>"
+                                         in
+                                         (parsed, match html with Some h -> h | None -> generated_html)
+                                     | _ -> (None, match html with Some h -> h | None -> "<html><body><div>No document</div></body></html>"))
+                                | _ -> (None, match html with Some h -> h | None -> "<html><body><div>Node not found</div></body></html>"))
+                           | _ -> (None, match html with Some h -> h | None -> "<html><body><div>No nodes</div></body></html>")
+                     in
+                     (* 3. Visual Feedback Loop 실행 (SSIM) *)
+                     let result = Visual_verifier.verify_visual
+                       ~target_ssim ~max_iterations ~width ~height
+                       ~figma_png:saved_figma_png html_code
+                     in
+                     let result_json = Visual_verifier.result_to_json result in
+                     (* 4. 텍스트 정확도 검증 *)
+                     let text_verification_json = match parsed_node_opt with
+                       | Some dsl_node ->
+                           let text_result = Text_verifier.verify_texts ~dsl_node ~html:html_code in
+                           Text_verifier.result_to_json text_result
+                       | None -> `Assoc [
+                           ("error", `String "Could not parse DSL node for text verification");
+                           ("passed", `Bool false);
+                         ]
+                     in
+                     (* 5. 종합 PASS/FAIL 결정 *)
+                     let ssim_passed = result.Visual_verifier.passed in
+                     let text_passed = match text_verification_json with
+                       | `Assoc fields -> (match List.assoc_opt "passed" fields with Some (`Bool b) -> b | _ -> false)
+                       | _ -> false
+                     in
+                     let overall_passed = ssim_passed && text_passed in
+                     let full_result = `Assoc [
+                       ("file_key", `String file_key);
+                       ("node_id", `String node_id);
+                       ("overall_passed", `Bool overall_passed);
+                       ("visual_verification", result_json);
+                       ("text_verification", text_verification_json);
+                     ] in
+                     Ok (make_text_content (Yojson.Safe.pretty_to_string full_result)))))
+  | _ -> Error "Missing required parameters: file_key, node_id, token"
+
+(** figma_compare_regions 핸들러 - 영역별 상세 비교 *)
+let handle_compare_regions args : (Yojson.Safe.t, string) result =
+  let output_dir = get_string_or "output_dir" "/tmp/figma-evolution/regions" args in
+  let generate_diff = get_bool_or "generate_diff" true args in
+
+  match (get_string "image_a" args, get_string "image_b" args, get_string "regions" args) with
+  | (Some image_a, Some image_b, Some regions_json) ->
+      (* 디렉토리 생성 *)
+      let _ = Unix.system (Printf.sprintf "mkdir -p %s" (Filename.quote output_dir)) in
+
+      (* regions JSON 파싱 *)
+      let regions =
+        try
+          let json = Yojson.Safe.from_string regions_json in
+          match json with
+          | `List items ->
+              List.filter_map (fun item ->
+                let open Yojson.Safe.Util in
+                try
+                  let name = item |> member "name" |> to_string in
+                  let x = item |> member "x" |> to_int in
+                  let y = item |> member "y" |> to_int in
+                  let width = item |> member "width" |> to_int in
+                  let height = item |> member "height" |> to_int in
+                  Some (name, x, y, width, height)
+                with _ -> None
+              ) items
+          | _ -> []
+        with _ -> []
+      in
+
+      if regions = [] then
+        Error "Invalid regions JSON format. Expected: [{name, x, y, width, height}, ...]"
+      else
+        (* 각 영역별 SSIM 계산 *)
+        let compare_region (name, x, y, w, h) =
+          let crop_a = Printf.sprintf "%s/figma_%s.png" output_dir name in
+          let crop_b = Printf.sprintf "%s/html_%s.png" output_dir name in
+
+          (* ImageMagick으로 영역 crop *)
+          let cmd_a = Printf.sprintf "magick %s -crop %dx%d+%d+%d +repage %s 2>/dev/null"
+            (Filename.quote image_a) w h x y (Filename.quote crop_a) in
+          let cmd_b = Printf.sprintf "magick %s -crop %dx%d+%d+%d +repage %s 2>/dev/null"
+            (Filename.quote image_b) w h x y (Filename.quote crop_b) in
+          let _ = Unix.system cmd_a in
+          let _ = Unix.system cmd_b in
+
+          (* SSIM 계산 *)
+          let ssim_cmd = Printf.sprintf "magick compare -metric SSIM %s %s null: 2>&1"
+            (Filename.quote crop_a) (Filename.quote crop_b) in
+          let ic = Unix.open_process_in ssim_cmd in
+          let output = try input_line ic with _ -> "" in
+          let _ = Unix.close_process_in ic in
+
+          (* 결과 파싱: "0.876543 (0.123457)" 형식 *)
+          let ssim =
+            try
+              let re = Str.regexp "(\\([0-9.]+\\))" in
+              if Str.string_match re output 0 then
+                let diff = float_of_string (Str.matched_group 1 output) in
+                (1.0 -. diff) *. 100.0  (* 유사도 = (1 - 차이율) * 100 *)
+              else
+                let parts = String.split_on_char ' ' output in
+                match parts with
+                | first :: _ -> float_of_string first *. 100.0
+                | _ -> 0.0
+            with _ -> 0.0
+          in
+
+          (* 차이 이미지 생성 *)
+          let diff_image =
+            if generate_diff then begin
+              let diff_path = Printf.sprintf "%s/diff_%s.png" output_dir name in
+              let diff_cmd = Printf.sprintf "magick compare %s %s %s 2>/dev/null"
+                (Filename.quote crop_a) (Filename.quote crop_b) (Filename.quote diff_path) in
+              let _ = Unix.system diff_cmd in
+              Some diff_path
+            end else None
+          in
+
+          `Assoc [
+            ("name", `String name);
+            ("region", `Assoc [
+              ("x", `Int x);
+              ("y", `Int y);
+              ("width", `Int w);
+              ("height", `Int h);
+            ]);
+            ("ssim_percent", `Float ssim);
+            ("status", `String (if ssim >= 90.0 then "good" else if ssim >= 75.0 then "acceptable" else "needs_work"));
+            ("figma_crop", `String crop_a);
+            ("html_crop", `String crop_b);
+            ("diff_image", match diff_image with Some p -> `String p | None -> `Null);
+          ]
+        in
+
+        let results = List.map compare_region regions in
+
+        (* 전체 통계 *)
+        let ssims = List.filter_map (fun r ->
+          match r with
+          | `Assoc items ->
+              (match List.assoc_opt "ssim_percent" items with
+               | Some (`Float f) -> Some f
+               | _ -> None)
+          | _ -> None
+        ) results in
+        let avg_ssim = if ssims = [] then 0.0 else
+          (List.fold_left (+.) 0.0 ssims) /. (float_of_int (List.length ssims)) in
+        let min_ssim = if ssims = [] then 0.0 else List.fold_left min 100.0 ssims in
+        let max_ssim = if ssims = [] then 0.0 else List.fold_left max 0.0 ssims in
+
+        let summary = `Assoc [
+          ("total_regions", `Int (List.length regions));
+          ("average_ssim", `Float avg_ssim);
+          ("min_ssim", `Float min_ssim);
+          ("max_ssim", `Float max_ssim);
+          ("overall_status", `String (
+            if min_ssim >= 90.0 then "excellent"
+            else if avg_ssim >= 85.0 then "good"
+            else if avg_ssim >= 70.0 then "acceptable"
+            else "needs_improvement"
+          ));
+        ] in
+
+        let result = `Assoc [
+          ("summary", summary);
+          ("regions", `List results);
+          ("output_dir", `String output_dir);
+        ] in
+        Ok (make_text_content (Yojson.Safe.pretty_to_string result))
+
+  | _ -> Error "Missing required parameters: image_a, image_b, regions"
+
+(** figma_evolution_report 핸들러 - 진화 과정 리포트 생성 *)
+let handle_evolution_report args : (Yojson.Safe.t, string) result =
+  let run_dir = get_string "run_dir" args in
+  let generate_image = get_bool_or "generate_image" true args in
+
+  (* 최근 evolution 디렉토리 목록 *)
+  let list_recent_runs () =
+    let cmd = "ls -dt /tmp/figma-evolution/run_* 2>/dev/null | head -10" in
+    let ic = Unix.open_process_in cmd in
+    let rec read_lines acc =
+      try read_lines ((input_line ic) :: acc)
+      with End_of_file -> List.rev acc
+    in
+    let lines = read_lines [] in
+    let _ = Unix.close_process_in ic in
+    lines
+  in
+
+  match run_dir with
+  | None ->
+      (* run_dir 없으면 최근 실행 목록 반환 *)
+      let runs = list_recent_runs () in
+      let runs_json = `List (List.map (fun r -> `String r) runs) in
+      let result = `Assoc [
+        ("recent_runs", runs_json);
+        ("count", `Int (List.length runs));
+        ("hint", `String "특정 run에 대한 리포트를 보려면 run_dir 파라미터를 지정하세요");
+      ] in
+      Ok (make_text_content (Yojson.Safe.pretty_to_string result))
+  | Some dir ->
+      if not (Sys.file_exists dir) then
+        Error (sprintf "Evolution directory not found: %s" dir)
+      else
+        (* 해당 디렉토리의 진화 과정 분석 *)
+        let figma_png = Filename.concat dir "figma_original.png" in
+        let html_dir = Filename.concat dir "html" in
+
+        (* step 파일들 읽기 *)
+        let steps =
+          if Sys.file_exists html_dir then
+            let files = Sys.readdir html_dir |> Array.to_list in
+            List.filter (fun f -> Filename.check_suffix f ".html") files
+            |> List.sort compare
+          else []
+        in
+
+        (* PNG 파일들 읽기 *)
+        let pngs =
+          Sys.readdir dir |> Array.to_list
+          |> List.filter (fun f -> Filename.check_suffix f "_render.png")
+          |> List.sort compare
+        in
+
+        (* 비교 이미지 생성 *)
+        let comparison_image =
+          if generate_image && List.length pngs > 0 then
+            let last_png = Filename.concat dir (List.hd (List.rev pngs)) in
+            let output = Filename.concat dir "evolution_comparison.png" in
+            if Sys.file_exists figma_png && Sys.file_exists last_png then
+              let cmd = sprintf "montage '%s' '%s' -tile 2x1 -geometry +5+5 -background '#1a1a1a' '%s' 2>/dev/null"
+                figma_png last_png output in
+              let _ = Sys.command cmd in
+              if Sys.file_exists output then Some output else None
+            else None
+          else None
+        in
+
+        let result = `Assoc [
+          ("run_dir", `String dir);
+          ("figma_original", `String figma_png);
+          ("html_steps", `List (List.map (fun f -> `String (Filename.concat html_dir f)) steps));
+          ("png_renders", `List (List.map (fun f -> `String (Filename.concat dir f)) pngs));
+          ("step_count", `Int (List.length steps));
+          ("comparison_image", match comparison_image with Some p -> `String p | None -> `Null);
+          ("summary", `String (sprintf "Evolution with %d steps. Final PNG: %s"
+            (List.length steps)
+            (if List.length pngs > 0 then List.hd (List.rev pngs) else "none")));
+        ] in
+        Ok (make_text_content (Yojson.Safe.pretty_to_string result))
+
+(** figma_compare_elements 핸들러 - 색상/박스 확장 메트릭 비교 *)
+let handle_compare_elements args : (Yojson.Safe.t, string) result =
+  let compare_type = get_string "type" args in
+  let color1 = get_string "color1" args in
+  let color2 = get_string "color2" args in
+  let box1 = get_string "box1" args in
+  let box2 = get_string "box2" args in
+
+  (* 색상 파싱 헬퍼 *)
+  let parse_color str =
+    let str = String.trim str in
+    if String.length str > 0 && str.[0] = '#' then
+      (* Hex format: #RRGGBB *)
+      let hex = String.sub str 1 (String.length str - 1) in
+      let r = int_of_string ("0x" ^ String.sub hex 0 2) in
+      let g = int_of_string ("0x" ^ String.sub hex 2 2) in
+      let b = int_of_string ("0x" ^ String.sub hex 4 2) in
+      Some (float_of_int r /. 255.0, float_of_int g /. 255.0, float_of_int b /. 255.0)
+    else if String.length str >= 4 && String.sub str 0 3 = "rgb" then
+      (* RGB format: rgb(r,g,b) *)
+      let re = Str.regexp "rgb(\\([0-9]+\\),[ ]*\\([0-9]+\\),[ ]*\\([0-9]+\\))" in
+      if Str.string_match re str 0 then
+        let r = int_of_string (Str.matched_group 1 str) in
+        let g = int_of_string (Str.matched_group 2 str) in
+        let b = int_of_string (Str.matched_group 3 str) in
+        Some (float_of_int r /. 255.0, float_of_int g /. 255.0, float_of_int b /. 255.0)
+      else None
+    else None
+  in
+
+  (* 박스 파싱 헬퍼: "x,y,w,h" *)
+  let parse_box str =
+    match String.split_on_char ',' str |> List.map String.trim with
+    | [x; y; w; h] ->
+        (try Some (float_of_string x, float_of_string y, float_of_string w, float_of_string h)
+         with _ -> None)
+    | _ -> None
+  in
+
+  match compare_type with
+  | Some "color" ->
+      (match (color1, color2) with
+       | (Some c1, Some c2) ->
+           (match (parse_color c1, parse_color c2) with
+            | (Some rgb1, Some rgb2) ->
+                let metrics = Figma_similarity.compute_extended_color_metrics rgb1 rgb2 in
+                let result = `Assoc [
+                  ("type", `String "color");
+                  ("color1", `String c1);
+                  ("color2", `String c2);
+                  ("oklab_distance", `Float metrics.oklab_distance);
+                  ("oklab_similarity", `Float metrics.oklab_similarity);
+                  ("ciede2000_distance", `Float metrics.ciede2000_distance);
+                  ("ciede2000_similarity", `Float metrics.ciede2000_similarity);
+                  ("rgb_euclidean", `Float metrics.rgb_euclidean);
+                  ("formatted", `String (Figma_similarity.extended_color_to_string metrics));
+                ] in
+                Ok (make_text_content (Yojson.Safe.pretty_to_string result))
+            | _ -> Error "Invalid color format. Use #RRGGBB or rgb(r,g,b)")
+       | _ -> Error "Missing color1 or color2 for color comparison")
+
+  | Some "box" ->
+      (match (box1, box2) with
+       | (Some b1, Some b2) ->
+           (match (parse_box b1, parse_box b2) with
+            | (Some bbox1, Some bbox2) ->
+                let metrics = Figma_similarity.compute_extended_box_metrics bbox1 bbox2 in
+                let result = `Assoc [
+                  ("type", `String "box");
+                  ("box1", `String b1);
+                  ("box2", `String b2);
+                  ("iou_value", `Float metrics.iou_value);
+                  ("giou_value", `Float metrics.giou_value);
+                  ("diou_value", `Float metrics.diou_value);
+                  ("iou_similarity", `Float metrics.iou_similarity);
+                  ("giou_similarity", `Float metrics.giou_similarity);
+                  ("diou_similarity", `Float metrics.diou_similarity);
+                  ("center_distance", `Float metrics.center_distance);
+                  ("formatted", `String (Figma_similarity.extended_box_to_string metrics));
+                ] in
+                Ok (make_text_content (Yojson.Safe.pretty_to_string result))
+            | _ -> Error "Invalid box format. Use x,y,w,h")
+       | _ -> Error "Missing box1 or box2 for box comparison")
+
+  | Some "full" ->
+      let color_result =
+        match (color1, color2) with
+        | (Some c1, Some c2) ->
+            (match (parse_color c1, parse_color c2) with
+             | (Some rgb1, Some rgb2) ->
+                 let m = Figma_similarity.compute_extended_color_metrics rgb1 rgb2 in
+                 Some (`Assoc [
+                   ("color1", `String c1);
+                   ("color2", `String c2);
+                   ("oklab_similarity", `Float m.oklab_similarity);
+                   ("ciede2000_similarity", `Float m.ciede2000_similarity);
+                   ("formatted", `String (Figma_similarity.extended_color_to_string m));
+                 ])
+             | _ -> None)
+        | _ -> None
+      in
+      let box_result =
+        match (box1, box2) with
+        | (Some b1, Some b2) ->
+            (match (parse_box b1, parse_box b2) with
+             | (Some bbox1, Some bbox2) ->
+                 let m = Figma_similarity.compute_extended_box_metrics bbox1 bbox2 in
+                 Some (`Assoc [
+                   ("box1", `String b1);
+                   ("box2", `String b2);
+                   ("iou_similarity", `Float m.iou_similarity);
+                   ("giou_similarity", `Float m.giou_similarity);
+                   ("diou_similarity", `Float m.diou_similarity);
+                   ("formatted", `String (Figma_similarity.extended_box_to_string m));
+                 ])
+             | _ -> None)
+        | _ -> None
+      in
+      let result = `Assoc [
+        ("type", `String "full");
+        ("color", match color_result with Some r -> r | None -> `Null);
+        ("box", match box_result with Some r -> r | None -> `Null);
+      ] in
+      Ok (make_text_content (Yojson.Safe.pretty_to_string result))
+
+  | _ -> Error "Invalid type. Use 'color', 'box', or 'full'"
+
+(** figma_export_image 핸들러 *)
+let handle_export_image args : (Yojson.Safe.t, string) result =
+  let file_key = get_string "file_key" args in
+  let node_ids_str = get_string "node_ids" args in
+  let token = get_string "token" args in
+  let format = get_string_or "format" "png" args in
+  let scale = get_float_or "scale" 1.0 args in
+  let use_absolute_bounds = get_bool "use_absolute_bounds" args in
+  let version = get_string "version" args in
+  let download = get_bool_or "download" false args in
+  let save_dir = get_string_or "save_dir" (default_asset_dir ()) args in
+
+  match (file_key, node_ids_str, token) with
+  | (Some file_key, Some node_ids_str, Some token) ->
+      let node_ids = String.split_on_char ',' node_ids_str |> List.map String.trim in
+      (match Figma_effects.Perform.get_images ~token ~file_key ~node_ids ~format ~scale:(int_of_float scale)
+               ?use_absolute_bounds ?version () with
+       | Ok json ->
+           let images = member "images" json in
+           let result = match images with
+             | Some (`Assoc img_map) ->
+                 List.map (fun (id, url) ->
+                   match url with
+                   | `String url ->
+                       if download then
+                         if is_http_url url then
+                           let path = Printf.sprintf "%s/%s/%s.%s"
+                             save_dir file_key (sanitize_node_id id) format in
+                           (match Figma_effects.Perform.download_url ~url ~path with
+                            | Ok saved -> sprintf "%s: %s -> %s" id url saved
+                            | Error err -> sprintf "%s: %s (download error: %s)" id url err)
+                         else
+                           sprintf "%s: %s (download skipped: no URL)" id url
+                       else
+                         sprintf "%s: %s" id url
+                   | _ -> sprintf "%s: (error)" id
+                 ) img_map
+                 |> String.concat "\n"
+             | _ -> "No images returned"
+           in
+           Ok (make_text_content result)
+       | Error err -> Error err)
+  | _ -> Error "Missing required parameters: file_key, node_ids, token"
+
+(** figma_get_image_fills 핸들러 *)
+let handle_get_image_fills args : (Yojson.Safe.t, string) result =
+  let file_key = get_string "file_key" args in
+  let token = get_string "token" args in
+  let version = get_string "version" args in
+  let download = get_bool_or "download" false args in
+  let save_dir = get_string_or "save_dir" (default_asset_dir ()) args in
+
+  match (file_key, token) with
+  | (Some file_key, Some token) ->
+      (match Figma_effects.Perform.get_file_images ~token ~file_key ?version () with
+       | Ok json ->
+           let images =
+             match member "images" json with
+             | Some (`Assoc _ as m) -> m
+             | _ -> `Null
+           in
+           let downloads =
+             if download then
+               match images with
+               | `Assoc items ->
+                   `List (List.map (download_image_fill save_dir file_key) items)
+               | _ -> `List []
+             else
+               `List []
+           in
+           let result = `Assoc [
+             ("images", images);
+             ("downloads", downloads);
+           ] in
+           Ok (make_text_content (Yojson.Safe.pretty_to_string result))
+       | Error err -> Error err)
+  | _ -> Error "Missing required parameters: file_key, token"
+
+(** figma_get_nodes 핸들러 *)
+let handle_get_nodes args : (Yojson.Safe.t, string) result =
+  let file_key = get_string "file_key" args in
+  let node_ids_str = get_string "node_ids" args in
+  let token = get_string "token" args in
+  let format = get_string_or "format" "raw" args in
+  let depth = get_int "depth" args in
+  let geometry = get_string "geometry" args in
+  let plugin_data = get_string "plugin_data" args in
+  let version = get_string "version" args in
+
+  match (file_key, node_ids_str, token) with
+  | (Some file_key, Some node_ids_str, Some token) ->
+      let node_ids = String.split_on_char ',' node_ids_str |> List.map String.trim in
+      (match Figma_effects.Perform.get_nodes ~token ~file_key ~node_ids ?depth ?geometry ?plugin_data ?version () with
+       | Error err -> Error err
+       | Ok json ->
+           if format = "raw" then
+             Ok (make_text_content (Yojson.Safe.pretty_to_string json))
+           else
+             let nodes = match member "nodes" json with
+               | Some (`Assoc nodes_map) -> nodes_map
+               | _ -> []
+             in
+             let converted =
+               List.map (fun (id, node_json) ->
+                 let doc = match member "document" node_json with
+                   | Some d -> d
+                   | None -> `Null
+                 in
+                 let dsl =
+                   match process_json_string ~format (Yojson.Safe.to_string doc) with
+                   | Ok s -> s
+                   | Error msg -> "Error: " ^ msg
+                 in
+                 `Assoc [
+                   ("node_id", `String id);
+                   ("dsl", `String dsl);
+                   ("node_raw", doc);
+                 ]) nodes
+             in
+             let result = `Assoc [("nodes", `List converted)] in
+             Ok (make_text_content (Yojson.Safe.pretty_to_string result)))
+  | _ -> Error "Missing required parameters: file_key, node_ids, token"
+
+(** figma_get_file_versions 핸들러 *)
+let handle_get_file_versions args : (Yojson.Safe.t, string) result =
+  let file_key = get_string "file_key" args in
+  let token = get_string "token" args in
+
+  match (file_key, token) with
+  | (Some file_key, Some token) ->
+      (match Figma_effects.Perform.get_file_versions ~token ~file_key with
+       | Ok json -> Ok (make_text_content (Yojson.Safe.pretty_to_string json))
+       | Error err -> Error err)
+  | _ -> Error "Missing required parameters: file_key, token"
+
+(** figma_get_file_comments 핸들러 *)
+let handle_get_file_comments args : (Yojson.Safe.t, string) result =
+  let file_key = get_string "file_key" args in
+  let token = get_string "token" args in
+
+  match (file_key, token) with
+  | (Some file_key, Some token) ->
+      (match Figma_effects.Perform.get_file_comments ~token ~file_key with
+       | Ok json -> Ok (make_text_content (Yojson.Safe.pretty_to_string json))
+       | Error err -> Error err)
+  | _ -> Error "Missing required parameters: file_key, token"
+
+(** figma_post_comment 핸들러 *)
+let handle_post_comment args : (Yojson.Safe.t, string) result =
+  let file_key = get_string "file_key" args in
+  let token = get_string "token" args in
+  let message = get_string "message" args in
+  let x = get_float "x" args in
+  let y = get_float "y" args in
+  let node_id = get_string "node_id" args in
+
+  match (file_key, token, message, x, y) with
+  | (Some file_key, Some token, Some message, Some x, Some y) ->
+      let client_meta =
+        `Assoc (
+          ("x", `Float x) ::
+          ("y", `Float y) ::
+          (match node_id with Some id -> [("node_id", `String id)] | None -> [])
+        )
+      in
+      (match Figma_effects.Perform.post_file_comment ~token ~file_key ~message ~client_meta with
+       | Ok json -> Ok (make_text_content (Yojson.Safe.pretty_to_string json))
+       | Error err -> Error err)
+  | _ -> Error "Missing required parameters: file_key, token, message, x, y"
+
+(** figma_get_file_components 핸들러 *)
+let handle_get_file_components args : (Yojson.Safe.t, string) result =
+  let file_key = get_string "file_key" args in
+  let token = get_string "token" args in
+
+  match (file_key, token) with
+  | (Some file_key, Some token) ->
+      (match Figma_effects.Perform.get_file_components ~token ~file_key with
+       | Ok json -> Ok (make_text_content (Yojson.Safe.pretty_to_string json))
+       | Error err -> Error err)
+  | _ -> Error "Missing required parameters: file_key, token"
+
+(** figma_get_team_components 핸들러 *)
+let handle_get_team_components args : (Yojson.Safe.t, string) result =
+  let team_id = get_string "team_id" args in
+  let token = get_string "token" args in
+
+  match (team_id, token) with
+  | (Some team_id, Some token) ->
+      (match Figma_effects.Perform.get_team_components ~token ~team_id with
+       | Ok json -> Ok (make_text_content (Yojson.Safe.pretty_to_string json))
+       | Error err -> Error err)
+  | _ -> Error "Missing required parameters: team_id, token"
+
+(** figma_get_file_component_sets 핸들러 *)
+let handle_get_file_component_sets args : (Yojson.Safe.t, string) result =
+  let file_key = get_string "file_key" args in
+  let token = get_string "token" args in
+
+  match (file_key, token) with
+  | (Some file_key, Some token) ->
+      (match Figma_effects.Perform.get_file_component_sets ~token ~file_key with
+       | Ok json -> Ok (make_text_content (Yojson.Safe.pretty_to_string json))
+       | Error err -> Error err)
+  | _ -> Error "Missing required parameters: file_key, token"
+
+(** figma_get_team_component_sets 핸들러 *)
+let handle_get_team_component_sets args : (Yojson.Safe.t, string) result =
+  let team_id = get_string "team_id" args in
+  let token = get_string "token" args in
+
+  match (team_id, token) with
+  | (Some team_id, Some token) ->
+      (match Figma_effects.Perform.get_team_component_sets ~token ~team_id with
+       | Ok json -> Ok (make_text_content (Yojson.Safe.pretty_to_string json))
+       | Error err -> Error err)
+  | _ -> Error "Missing required parameters: team_id, token"
+
+(** figma_get_file_styles 핸들러 *)
+let handle_get_file_styles args : (Yojson.Safe.t, string) result =
+  let file_key = get_string "file_key" args in
+  let token = get_string "token" args in
+
+  match (file_key, token) with
+  | (Some file_key, Some token) ->
+      (match Figma_effects.Perform.get_file_styles ~token ~file_key with
+       | Ok json -> Ok (make_text_content (Yojson.Safe.pretty_to_string json))
+       | Error err -> Error err)
+  | _ -> Error "Missing required parameters: file_key, token"
+
+(** figma_get_team_styles 핸들러 *)
+let handle_get_team_styles args : (Yojson.Safe.t, string) result =
+  let team_id = get_string "team_id" args in
+  let token = get_string "token" args in
+
+  match (team_id, token) with
+  | (Some team_id, Some token) ->
+      (match Figma_effects.Perform.get_team_styles ~token ~team_id with
+       | Ok json -> Ok (make_text_content (Yojson.Safe.pretty_to_string json))
+       | Error err -> Error err)
+  | _ -> Error "Missing required parameters: team_id, token"
+
+(** figma_get_component 핸들러 *)
+let handle_get_component args : (Yojson.Safe.t, string) result =
+  let component_key = get_string "component_key" args in
+  let token = get_string "token" args in
+
+  match (component_key, token) with
+  | (Some component_key, Some token) ->
+      (match Figma_effects.Perform.get_component ~token ~component_key with
+       | Ok json -> Ok (make_text_content (Yojson.Safe.pretty_to_string json))
+       | Error err -> Error err)
+  | _ -> Error "Missing required parameters: component_key, token"
+
+(** figma_get_component_set 핸들러 *)
+let handle_get_component_set args : (Yojson.Safe.t, string) result =
+  let component_set_key = get_string "component_set_key" args in
+  let token = get_string "token" args in
+
+  match (component_set_key, token) with
+  | (Some component_set_key, Some token) ->
+      (match Figma_effects.Perform.get_component_set ~token ~component_set_key with
+       | Ok json -> Ok (make_text_content (Yojson.Safe.pretty_to_string json))
+       | Error err -> Error err)
+  | _ -> Error "Missing required parameters: component_set_key, token"
+
+(** figma_get_style 핸들러 *)
+let handle_get_style args : (Yojson.Safe.t, string) result =
+  let style_key = get_string "style_key" args in
+  let token = get_string "token" args in
+
+  match (style_key, token) with
+  | (Some style_key, Some token) ->
+      (match Figma_effects.Perform.get_style ~token ~style_key with
+       | Ok json -> Ok (make_text_content (Yojson.Safe.pretty_to_string json))
+       | Error err -> Error err)
+  | _ -> Error "Missing required parameters: style_key, token"
+
+(** figma_plugin_connect 핸들러 *)
+let handle_plugin_connect args : (Yojson.Safe.t, string) result =
+  let channel_id = get_string "channel_id" args in
+  let channel_id = Figma_plugin_bridge.register_channel ?channel_id () in
+  let result = `Assoc [
+    ("status", `String "ok");
+    ("channel_id", `String channel_id);
+  ] in
+  Ok (make_text_content (Yojson.Safe.pretty_to_string result))
+
+(** figma_plugin_use_channel 핸들러 *)
+let handle_plugin_use_channel args : (Yojson.Safe.t, string) result =
+  match get_string "channel_id" args with
+  | None -> Error "Missing required parameter: channel_id"
+  | Some channel_id ->
+      Figma_plugin_bridge.set_default_channel channel_id;
+      let result = `Assoc [
+        ("status", `String "ok");
+        ("channel_id", `String channel_id);
+      ] in
+      Ok (make_text_content (Yojson.Safe.pretty_to_string result))
+
+(** figma_plugin_status 핸들러 *)
+let handle_plugin_status _args : (Yojson.Safe.t, string) result =
+  let channels = Figma_plugin_bridge.list_channels () in
+  let default_channel = Figma_plugin_bridge.get_default_channel () in
+  let result = `Assoc [
+    ("channels", `List (List.map (fun id -> `String id) channels));
+    ("default_channel", match default_channel with Some id -> `String id | None -> `Null);
+  ] in
+  Ok (make_text_content (Yojson.Safe.pretty_to_string result))
+
+(** figma_plugin_read_selection 핸들러 *)
+let handle_plugin_read_selection args : (Yojson.Safe.t, string) result =
+  match resolve_channel_id args with
+  | Error msg -> Error msg
+  | Ok channel_id ->
+      let depth = get_int "depth" args |> Option.value ~default:6 in
+      let timeout_ms = get_int "timeout_ms" args |> Option.value ~default:20000 in
+      let payload = `Assoc [("depth", `Int depth)] in
+      let command_id = Figma_plugin_bridge.enqueue_command ~channel_id ~name:"read_selection" ~payload in
+      (match plugin_wait ~channel_id ~command_id ~timeout_ms with
+       | Error err -> Error err
+       | Ok result ->
+           let response = `Assoc [
+             ("channel_id", `String channel_id);
+             ("command_id", `String command_id);
+             ("ok", `Bool result.ok);
+             ("payload", result.payload);
+           ] in
+           Ok (make_text_content (Yojson.Safe.pretty_to_string response)))
+
+(** figma_plugin_get_node 핸들러 *)
+let handle_plugin_get_node args : (Yojson.Safe.t, string) result =
+  match (get_string "node_id" args, resolve_channel_id args) with
+  | (None, _) -> Error "Missing required parameter: node_id"
+  | (Some _, Error msg) -> Error msg
+  | (Some node_id, Ok channel_id) ->
+      let depth = get_int "depth" args |> Option.value ~default:6 in
+      let timeout_ms = get_int "timeout_ms" args |> Option.value ~default:20000 in
+      let payload = `Assoc [("node_id", `String node_id); ("depth", `Int depth)] in
+      let command_id = Figma_plugin_bridge.enqueue_command ~channel_id ~name:"get_node" ~payload in
+      (match plugin_wait ~channel_id ~command_id ~timeout_ms with
+       | Error err -> Error err
+       | Ok result ->
+           let response = `Assoc [
+             ("channel_id", `String channel_id);
+             ("command_id", `String command_id);
+             ("ok", `Bool result.ok);
+             ("payload", result.payload);
+           ] in
+           Ok (make_text_content (Yojson.Safe.pretty_to_string response)))
+
+(** figma_plugin_export_node_image 핸들러 *)
+let handle_plugin_export_node_image args : (Yojson.Safe.t, string) result =
+  match (get_string "node_id" args, resolve_channel_id args) with
+  | (None, _) -> Error "Missing required parameter: node_id"
+  | (Some _, Error msg) -> Error msg
+  | (Some node_id, Ok channel_id) ->
+      let timeout_ms = get_int "timeout_ms" args |> Option.value ~default:20000 in
+      let format = get_string_or "format" "png" args in
+      let scale = get_float_or "scale" 1.0 args in
+      let payload = `Assoc [
+        ("node_id", `String node_id);
+        ("format", `String format);
+        ("scale", `Float scale);
+      ] in
+      let command_id = Figma_plugin_bridge.enqueue_command ~channel_id ~name:"export_node_image" ~payload in
+      (match plugin_wait ~channel_id ~command_id ~timeout_ms with
+       | Error err -> Error err
+       | Ok result ->
+           let response = `Assoc [
+             ("channel_id", `String channel_id);
+             ("command_id", `String command_id);
+             ("ok", `Bool result.ok);
+             ("payload", result.payload);
+           ] in
+           Ok (make_text_content (Yojson.Safe.pretty_to_string response)))
+
+(** figma_plugin_get_variables 핸들러 *)
+let handle_plugin_get_variables args : (Yojson.Safe.t, string) result =
+  match resolve_channel_id args with
+  | Error msg -> Error msg
+  | Ok channel_id ->
+      let timeout_ms = get_int "timeout_ms" args |> Option.value ~default:20000 in
+      let payload = `Assoc [] in
+      let command_id = Figma_plugin_bridge.enqueue_command ~channel_id ~name:"get_variables" ~payload in
+      (match plugin_wait ~channel_id ~command_id ~timeout_ms with
+       | Error err -> Error err
+       | Ok result ->
+           let response = `Assoc [
+             ("channel_id", `String channel_id);
+             ("command_id", `String command_id);
+             ("ok", `Bool result.ok);
+             ("payload", result.payload);
+           ] in
+           Ok (make_text_content (Yojson.Safe.pretty_to_string response)))
+
+(** figma_plugin_apply_ops 핸들러 *)
+let handle_plugin_apply_ops args : (Yojson.Safe.t, string) result =
+  match (get_json "ops" args, resolve_channel_id args) with
+  | (None, _) -> Error "Missing required parameter: ops"
+  | (_, Error msg) -> Error msg
+  | (Some ops, Ok channel_id) ->
+      let timeout_ms = get_int "timeout_ms" args |> Option.value ~default:20000 in
+      let payload = `Assoc [("ops", ops)] in
+      let command_id = Figma_plugin_bridge.enqueue_command ~channel_id ~name:"apply_ops" ~payload in
+      (match plugin_wait ~channel_id ~command_id ~timeout_ms with
+       | Error err -> Error err
+       | Ok result ->
+           let response = `Assoc [
+             ("channel_id", `String channel_id);
+             ("command_id", `String command_id);
+             ("ok", `Bool result.ok);
+             ("payload", result.payload);
+           ] in
+           Ok (make_text_content (Yojson.Safe.pretty_to_string response)))
+
+(** ============== Phase 1: 탐색 도구 핸들러 ============== *)
+
+(** figma_parse_url 핸들러 - 로컬 URL 파싱 *)
+let handle_parse_url args : (Yojson.Safe.t, string) result =
+  match get_string "url" args with
+  | None -> Error "Missing required parameter: url"
+  | Some url ->
+      let info = Figma_api.parse_figma_url url in
+      let result = sprintf "Parsed URL:\n- team_id: %s\n- project_id: %s\n- file_key: %s\n- node_id: %s"
+        (Option.value ~default:"(none)" info.team_id)
+        (Option.value ~default:"(none)" info.project_id)
+        (Option.value ~default:"(none)" info.file_key)
+        (Option.value ~default:"(none)" info.node_id)
+      in
+      Ok (make_text_content result)
+
+(** figma_get_me 핸들러 - 현재 사용자 정보 *)
+let handle_get_me args : (Yojson.Safe.t, string) result =
+  match get_string "token" args with
+  | None -> Error "Missing required parameter: token"
+  | Some token ->
+      (match Figma_effects.Perform.get_me ~token with
+       | Ok json ->
+           let id = get_string "id" json in
+           let email = get_string "email" json in
+           let handle = get_string "handle" json in
+           let result = sprintf "User Info:\n- id: %s\n- email: %s\n- handle: %s"
+             (Option.value ~default:"(unknown)" id)
+             (Option.value ~default:"(unknown)" email)
+             (Option.value ~default:"(unknown)" handle)
+           in
+           Ok (make_text_content result)
+       | Error err -> Error err)
+
+(** figma_list_projects 핸들러 - 팀의 프로젝트 목록 *)
+let handle_list_projects args : (Yojson.Safe.t, string) result =
+  let team_id = get_string "team_id" args in
+  let token = get_string "token" args in
+
+  match (team_id, token) with
+  | (Some team_id, Some token) ->
+      (match Figma_effects.Perform.get_team_projects ~token ~team_id with
+       | Ok json ->
+           let projects = match member "projects" json with
+             | Some (`List lst) -> lst
+             | _ -> []
+           in
+           let project_list = List.filter_map (fun p ->
+             let id = get_string "id" p in
+             let name = get_string "name" p in
+             match (id, name) with
+             | (Some id, Some name) -> Some (sprintf "- %s (id: %s)" name id)
+             | _ -> None
+           ) projects in
+           let result = sprintf "Found %d projects:\n%s"
+             (List.length project_list)
+             (String.concat "\n" project_list)
+           in
+           Ok (make_text_content result)
+       | Error err -> Error err)
+  | _ -> Error "Missing required parameters: team_id, token"
+
+(** figma_list_files 핸들러 - 프로젝트의 파일 목록 *)
+let handle_list_files args : (Yojson.Safe.t, string) result =
+  let project_id = get_string "project_id" args in
+  let token = get_string "token" args in
+
+  match (project_id, token) with
+  | (Some project_id, Some token) ->
+      (match Figma_effects.Perform.get_project_files ~token ~project_id with
+       | Ok json ->
+           let files = match member "files" json with
+             | Some (`List lst) -> lst
+             | _ -> []
+           in
+           let file_list = List.filter_map (fun f ->
+             let key = get_string "key" f in
+             let name = get_string "name" f in
+             match (key, name) with
+             | (Some key, Some name) -> Some (sprintf "- %s (key: %s)" name key)
+             | _ -> None
+           ) files in
+           let result = sprintf "Found %d files:\n%s"
+             (List.length file_list)
+             (String.concat "\n" file_list)
+           in
+           Ok (make_text_content result)
+       | Error err -> Error err)
+  | _ -> Error "Missing required parameters: project_id, token"
+
+(** figma_get_variables 핸들러 - 디자인 토큰/변수 *)
+let handle_get_variables args : (Yojson.Safe.t, string) result =
+  let file_key = get_string "file_key" args in
+  let token = get_string "token" args in
+  let format = get_string_or "format" "summary" args in
+
+  match (file_key, token) with
+  | (Some file_key, Some token) ->
+      (match Figma_effects.Perform.get_variables ~token ~file_key with
+       | Ok json ->
+           (match format with
+            | "raw" ->
+                Ok (make_text_content (Yojson.Safe.pretty_to_string json))
+            | "resolved" ->
+                let resolved = resolve_variables json in
+                Ok (make_text_content (Yojson.Safe.pretty_to_string resolved))
+            | _ ->
+                (* 변수 컬렉션과 변수 목록 추출 *)
+                let collections = match member "meta" json with
+                  | Some meta -> (match member "variableCollections" meta with
+                      | Some (`Assoc lst) -> List.length lst
+                      | _ -> 0)
+                  | _ -> 0
+                in
+                let variables = match member "meta" json with
+                  | Some meta -> (match member "variables" meta with
+                      | Some (`Assoc lst) -> List.length lst
+                      | _ -> 0)
+                  | _ -> 0
+                in
+                let result = sprintf "Design Tokens Summary:\n- Collections: %d\n- Variables: %d"
+                  collections variables
+                in
+                Ok (make_text_content result))
+       | Error err -> Error err)
+  | _ -> Error "Missing required parameters: file_key, token"
+
+(** ============== Phase 2: 고급 쿼리 핸들러 ============== *)
+
+(** figma_query 핸들러 - 노드 필터링 *)
+let handle_query args : (Yojson.Safe.t, string) result =
+  let file_key = get_string "file_key" args in
+  let token = get_string "token" args in
+  let node_id = get_string "node_id" args in
+  let type_filter = get_string "type" args in
+  let width_min = get_float "width_min" args in
+  let width_max = get_float "width_max" args in
+  let height_min = get_float "height_min" args in
+  let height_max = get_float "height_max" args in
+  let color = get_string "color" args in
+  let name = get_string "name" args in
+  let depth = get_float "depth" args |> Option.map int_of_float in
+  let limit = get_float "limit" args |> Option.map int_of_float in
+
+  match (file_key, token) with
+  | (Some file_key, Some token) ->
+      (* 파일 또는 특정 노드 가져오기 - Effect 사용 *)
+      let json_result = match node_id with
+        | Some nid -> Figma_effects.Perform.get_nodes ~token ~file_key ~node_ids:[nid] ()
+        | None -> Figma_effects.Perform.get_file ~token ~file_key ()
+      in
+      (match json_result with
+       | Ok json ->
+           (* JSON에서 document 추출 *)
+           let doc_json = match node_id with
+             | Some nid ->
+                 (match member "nodes" json with
+                  | Some (`Assoc nodes) ->
+                      (match List.assoc_opt nid nodes with
+                       | Some node -> member "document" node
+                       | None -> None)
+                  | _ -> None)
+             | None -> Figma_api.extract_document json
+           in
+           (match doc_json with
+            | Some doc_json ->
+                let doc_str = Yojson.Safe.to_string doc_json in
+                (match Figma_parser.parse_json_string doc_str with
+                 | Some root ->
+                     (* 쿼리 빌드 *)
+                     let q = Figma_query.empty_query in
+                     let q = match type_filter with
+                       | Some t -> Figma_query.with_type (String.split_on_char ',' t |> List.map String.trim) q
+                       | None -> q
+                     in
+                     let q = match width_min with Some w -> Figma_query.with_width_min w q | None -> q in
+                     let q = match width_max with Some w -> Figma_query.with_width_max w q | None -> q in
+                     let q = match height_min with Some h -> Figma_query.with_height_min h q | None -> q in
+                     let q = match height_max with Some h -> Figma_query.with_height_max h q | None -> q in
+                     let q = match color with Some c -> Figma_query.with_color c q | None -> q in
+                     let q = match name with Some n -> Figma_query.with_name n q | None -> q in
+                     let q = match depth with Some d -> Figma_query.with_depth d q | None -> q in
+                     let q = match limit with Some l -> Figma_query.with_limit l q | None -> q in
+
+                     (* 쿼리 실행 *)
+                     let results = Figma_query.execute_query q root in
+                     let result_str = Figma_query.results_to_string results in
+                     Ok (make_text_content result_str)
+                 | None -> Error "Failed to parse document")
+            | None -> Error "Document not found")
+       | Error err -> Error err)
+  | _ -> Error "Missing required parameters: file_key, token"
+
+(** figma_search 핸들러 - 텍스트/이름 검색 *)
+let handle_search args : (Yojson.Safe.t, string) result =
+  let file_key = get_string "file_key" args in
+  let token = get_string "token" args in
+  let query = get_string "query" args in
+  let search_in = get_string_or "search_in" "both" args in
+  let limit = get_float "limit" args |> Option.map int_of_float |> Option.value ~default:20 in
+
+  match (file_key, token, query) with
+  | (Some file_key, Some token, Some query) ->
+      (match Figma_effects.Perform.get_file ~token ~file_key () with
+       | Ok json ->
+           (match Figma_api.extract_document json with
+            | Some doc_json ->
+                let doc_str = Yojson.Safe.to_string doc_json in
+                (match Figma_parser.parse_json_string doc_str with
+                 | Some root ->
+                     (* 모든 노드 수집 *)
+                     let all_nodes = Figma_query.collect_nodes ~max_depth:None root in
+                     let query_lower = String.lowercase_ascii query in
+
+                     (* 검색 함수 *)
+                     let matches_name node =
+                       let name_lower = String.lowercase_ascii node.Figma_types.name in
+                       try
+                         let _ = Str.search_forward (Str.regexp_string query_lower) name_lower 0 in
+                         true
+                       with Not_found -> false
+                     in
+                     let matches_text node =
+                       match node.Figma_types.characters with
+                       | Some chars ->
+                           let chars_lower = String.lowercase_ascii chars in
+                           (try
+                              let _ = Str.search_forward (Str.regexp_string query_lower) chars_lower 0 in
+                              true
+                            with Not_found -> false)
+                       | None -> false
+                     in
+                     let matches node = match search_in with
+                       | "name" -> matches_name node
+                       | "text" -> matches_text node
+                       | _ -> matches_name node || matches_text node
+                     in
+
+                     (* 필터링 *)
+                     let results = List.filter matches all_nodes in
+                     let results = List.filteri (fun i _ -> i < limit) results in
+                     let result_str = Figma_query.results_to_string results in
+                     Ok (make_text_content result_str)
+                 | None -> Error "Failed to parse document")
+            | None -> Error "Document not found")
+       | Error err -> Error err)
+  | _ -> Error "Missing required parameters: file_key, token, query"
+
+(** figma_compare 핸들러 *)
+let handle_compare args : (Yojson.Safe.t, string) result =
+  let file_key = get_string "file_key" args in
+  let token = get_string "token" args in
+  let node_a_id = get_string "node_a_id" args in
+  let node_b_id = get_string "node_b_id" args in
+  let mode = get_string_or "mode" "single" args in
+  let web_prefix = get_string_or "web_prefix" "Web" args in
+  let mobile_prefix = get_string_or "mobile_prefix" "Mobile" args in
+
+  match file_key, token with
+  | Some file_key, Some token ->
+      (match Figma_effects.Perform.get_file ~token ~file_key () with
+       | Ok file_data ->
+           (match Yojson.Safe.Util.member "document" file_data with
+            | `Null -> Error "Document not found"
+            | doc_json ->
+                (match Figma_parser.parse_node doc_json with
+                 | Some root ->
+                     let all_nodes = Figma_query.collect_nodes ~max_depth:None root in
+
+                     if mode = "batch" then begin
+                       (* Batch 모드: Web/Mobile 이름 매칭 *)
+                       let web_nodes = List.filter (fun n ->
+                         String.length n.Figma_types.name >= String.length web_prefix &&
+                         String.sub (String.lowercase_ascii n.Figma_types.name) 0 (String.length web_prefix) =
+                         String.lowercase_ascii web_prefix
+                       ) all_nodes in
+                       let mobile_nodes = List.filter (fun n ->
+                         String.length n.Figma_types.name >= String.length mobile_prefix &&
+                         String.sub (String.lowercase_ascii n.Figma_types.name) 0 (String.length mobile_prefix) =
+                         String.lowercase_ascii mobile_prefix
+                       ) all_nodes in
+
+                       let (results, total, avg_sim, critical, major) =
+                         Figma_compare.compare_web_mobile ~web_nodes ~mobile_nodes
+                       in
+
+                       let summary = Printf.sprintf
+                         "=== Web/Mobile 일관성 검사 결과 ===\n매칭된 쌍: %d개\n평균 유사도: %.0f%%\nCritical 차이: %d개\nMajor 차이: %d개\n\n"
+                         total (avg_sim *. 100.) critical major
+                       in
+                       let details = String.concat "\n---\n"
+                         (List.map Figma_compare.result_to_string results)
+                       in
+                       Ok (make_text_content (summary ^ details))
+                     end
+                     else begin
+                       (* Single 모드: 특정 노드 쌍 비교 *)
+                       match node_a_id, node_b_id with
+                       | Some id_a, Some id_b ->
+                           let find_node id = List.find_opt (fun n -> n.Figma_types.id = id) all_nodes in
+                           (match find_node id_a, find_node id_b with
+                            | Some node_a, Some node_b ->
+                                let result = Figma_compare.compare_nodes node_a node_b in
+                                Ok (make_text_content (Figma_compare.result_to_string result))
+                            | None, _ -> Error (Printf.sprintf "Node A not found: %s" id_a)
+                            | _, None -> Error (Printf.sprintf "Node B not found: %s" id_b))
+                       | _ -> Error "Single mode requires node_a_id and node_b_id"
+                     end
+                 | None -> Error "Failed to parse document"))
+       | Error err -> Error err)
+  | _ -> Error "Missing required parameters: file_key, token"
+
+(** figma_tree 핸들러 *)
+let handle_tree args : (Yojson.Safe.t, string) result =
+  let file_key = get_string "file_key" args in
+  let token = get_string "token" args in
+  let node_id = get_string "node_id" args in
+  let style_str = get_string_or "style" "ascii" args in
+  let max_depth = get_float "max_depth" args |> Option.map int_of_float in
+  let show_size = get_string_or "show_size" "true" args = "true" in
+  let show_stats = get_string_or "show_stats" "false" args = "true" in
+
+  let style = match style_str with
+    | "indent" -> Figma_tree.Indent
+    | "compact" -> Figma_tree.Compact
+    | _ -> Figma_tree.Ascii
+  in
+
+  match file_key, token with
+  | Some file_key, Some token ->
+      (match Figma_effects.Perform.get_file ~token ~file_key () with
+       | Ok json ->
+           (match Yojson.Safe.Util.member "document" json with
+            | `Null -> Error "Document not found"
+            | doc_json ->
+                (match Figma_parser.parse_node doc_json with
+                 | Some root ->
+                     let start_node = match node_id with
+                       | Some id ->
+                           let all = Figma_query.collect_nodes ~max_depth:None root in
+                           (match List.find_opt (fun n -> n.Figma_types.id = id) all with
+                            | Some n -> n
+                            | None -> root)
+                       | None -> root
+                     in
+                     let result = Figma_tree.render ~style ~max_depth ~show_size ~show_stats start_node in
+                     Ok (make_text_content result)
+                 | None -> Error "Failed to parse document"))
+       | Error err -> Error err)
+  | _ -> Error "Missing required parameters: file_key, token"
+
+(** figma_stats 핸들러 *)
+let handle_stats args : (Yojson.Safe.t, string) result =
+  let file_key = get_string "file_key" args in
+  let token = get_string "token" args in
+  let node_id = get_string "node_id" args in
+
+  match file_key, token with
+  | Some file_key, Some token ->
+      (match Figma_effects.Perform.get_file ~token ~file_key () with
+       | Ok json ->
+           (match Yojson.Safe.Util.member "document" json with
+            | `Null -> Error "Document not found"
+            | doc_json ->
+                (match Figma_parser.parse_node doc_json with
+                 | Some root ->
+                     let start_node = match node_id with
+                       | Some id ->
+                           let all = Figma_query.collect_nodes ~max_depth:None root in
+                           (match List.find_opt (fun n -> n.Figma_types.id = id) all with
+                            | Some n -> n
+                            | None -> root)
+                       | None -> root
+                     in
+                     let all_nodes = Figma_query.collect_nodes ~max_depth:None start_node in
+                     let stats = Figma_stats.generate_report all_nodes in
+                     Ok (make_text_content (Figma_stats.report_to_string stats))
+                 | None -> Error "Failed to parse document"))
+       | Error err -> Error err)
+  | _ -> Error "Missing required parameters: file_key, token"
+
+(** figma_export_tokens 핸들러 *)
+let handle_export_tokens args : (Yojson.Safe.t, string) result =
+  let file_key = get_string "file_key" args in
+  let token = get_string "token" args in
+  let format = get_string_or "format" "css" args in
+  let node_id = get_string "node_id" args in
+
+  match file_key, token with
+  | Some file_key, Some token ->
+      (match Figma_effects.Perform.get_file ~token ~file_key () with
+       | Ok json ->
+           (match Yojson.Safe.Util.member "document" json with
+            | `Null -> Error "Document not found"
+            | doc_json ->
+                (match Figma_parser.parse_node doc_json with
+                 | Some root ->
+                     let start_node = match node_id with
+                       | Some id ->
+                           let all = Figma_query.collect_nodes ~max_depth:None root in
+                           (match List.find_opt (fun n -> n.Figma_types.id = id) all with
+                            | Some n -> n
+                            | None -> root)
+                       | None -> root
+                     in
+                     let all_nodes = Figma_query.collect_nodes ~max_depth:None start_node in
+                     let result = match format with
+                       | "semantic" ->
+                         (* UIFormer-inspired Semantic DSL output *)
+                         all_nodes
+                         |> List.map (fun n ->
+                           let dsl = Semantic_mapper.node_to_semantic n in
+                           let prefix = match n.Figma_types.node_type with
+                             | Figma_types.Frame | Figma_types.Component | Figma_types.Instance -> "F"
+                             | Figma_types.Text -> "T"
+                             | Figma_types.Rectangle | Figma_types.Ellipse | Figma_types.Vector -> "V"
+                             | _ -> "N"
+                           in
+                           Printf.sprintf "%s(%s) ; %s" prefix dsl n.Figma_types.name)
+                         |> String.concat "\n"
+                       | _ ->
+                         (* Design token extraction (CSS/Tailwind/JSON) *)
+                         let tokens = Figma_tokens.extract_all all_nodes in
+                         match format with
+                         | "tailwind" -> Figma_tokens.to_tailwind tokens
+                         | "json" -> Figma_tokens.to_json tokens
+                         | _ -> Figma_tokens.to_css tokens
+                     in
+                     Ok (make_text_content result)
+                 | None -> Error "Failed to parse document"))
+       | Error err -> Error err)
+  | _ -> Error "Missing required parameters: file_key, token"
+
+(** 캐시 통계 핸들러 *)
+let handle_cache_stats _args : (Yojson.Safe.t, string) result =
+  let stats = Figma_cache.stats () in
+  Ok stats
+
+(** 캐시 무효화 핸들러 *)
+let handle_cache_invalidate args : (Yojson.Safe.t, string) result =
+  let file_key = get_string "file_key" args in
+  let node_id = get_string "node_id" args in
+  Figma_cache.invalidate ?file_key ?node_id ();
+  let message = match file_key, node_id with
+    | None, _ -> "All cache invalidated"
+    | Some fk, None -> sprintf "Cache invalidated for file: %s" fk
+    | Some fk, Some nid -> sprintf "Cache invalidated for node: %s/%s" fk nid
+  in
+  Ok (`Assoc [("status", `String "ok"); ("message", `String message)])
+
+(** ============== 핸들러 맵 ============== *)
+
+(** 실행 모드 설정 - HTTP 서버에서 변경됨 *)
+let is_http_mode = ref false
+
+(** sync 핸들러를 Lwt로 래핑.
+    - stdio 모드: Effect 핸들러로 감싸서 실행 (테스트 가능)
+    - HTTP 모드: Effect 없이 직접 실행 (Lwt_main.run 중첩 방지) *)
+let wrap_sync (f : Yojson.Safe.t -> (Yojson.Safe.t, string) result) : tool_handler =
+  fun args ->
+    if !is_http_mode then
+      (* HTTP 모드: Effect 없이 직접 실행 - Lwt가 이미 실행 중 *)
+      Lwt.return (f args)
+    else
+      (* stdio 모드: Effect 핸들러로 감싸서 실행 *)
+      let result = Figma_effects.run_with_real_api (fun () -> f args) in
+      Lwt.return result
+
+let all_handlers : (string * tool_handler) list = [
+  (* 기존 도구 *)
+  ("figma_codegen", handle_codegen);  (* 이미 Lwt *)
+  ("figma_get_file", wrap_sync handle_get_file);
+  ("figma_get_file_meta", wrap_sync handle_get_file_meta);
+  ("figma_list_screens", wrap_sync handle_list_screens);
+  ("figma_get_node", wrap_sync handle_get_node);
+  ("figma_get_node_with_image", wrap_sync handle_get_node_with_image);
+  ("figma_get_node_bundle", wrap_sync handle_get_node_bundle);
+  ("figma_get_node_summary", wrap_sync handle_get_node_summary);
+  ("figma_get_node_chunk", wrap_sync handle_get_node_chunk);
+  ("figma_fidelity_loop", wrap_sync handle_fidelity_loop);
+  ("figma_image_similarity", wrap_sync handle_image_similarity);
+  ("figma_verify_visual", wrap_sync handle_verify_visual);
+  ("figma_compare_regions", wrap_sync handle_compare_regions);
+  ("figma_evolution_report", wrap_sync handle_evolution_report);
+  ("figma_compare_elements", wrap_sync handle_compare_elements);
+  ("figma_export_image", wrap_sync handle_export_image);
+  ("figma_get_image_fills", wrap_sync handle_get_image_fills);
+  ("figma_get_nodes", wrap_sync handle_get_nodes);
+  ("figma_get_file_versions", wrap_sync handle_get_file_versions);
+  ("figma_get_file_comments", wrap_sync handle_get_file_comments);
+  ("figma_post_comment", wrap_sync handle_post_comment);
+  ("figma_get_file_components", wrap_sync handle_get_file_components);
+  ("figma_get_team_components", wrap_sync handle_get_team_components);
+  ("figma_get_file_component_sets", wrap_sync handle_get_file_component_sets);
+  ("figma_get_team_component_sets", wrap_sync handle_get_team_component_sets);
+  ("figma_get_file_styles", wrap_sync handle_get_file_styles);
+  ("figma_get_team_styles", wrap_sync handle_get_team_styles);
+  ("figma_get_component", wrap_sync handle_get_component);
+  ("figma_get_component_set", wrap_sync handle_get_component_set);
+  ("figma_get_style", wrap_sync handle_get_style);
+  ("figma_plugin_connect", wrap_sync handle_plugin_connect);
+  ("figma_plugin_use_channel", wrap_sync handle_plugin_use_channel);
+  ("figma_plugin_status", wrap_sync handle_plugin_status);
+  ("figma_plugin_read_selection", wrap_sync handle_plugin_read_selection);
+  ("figma_plugin_get_node", wrap_sync handle_plugin_get_node);
+  ("figma_plugin_export_node_image", wrap_sync handle_plugin_export_node_image);
+  ("figma_plugin_get_variables", wrap_sync handle_plugin_get_variables);
+  ("figma_plugin_apply_ops", wrap_sync handle_plugin_apply_ops);
+  (* Phase 1: 탐색 도구 *)
+  ("figma_parse_url", wrap_sync handle_parse_url);
+  ("figma_get_me", wrap_sync handle_get_me);
+  ("figma_list_projects", wrap_sync handle_list_projects);
+  ("figma_list_files", wrap_sync handle_list_files);
+  ("figma_get_variables", wrap_sync handle_get_variables);
+  (* Phase 2: 고급 쿼리 *)
+  ("figma_query", wrap_sync handle_query);
+  ("figma_search", wrap_sync handle_search);
+  ("figma_compare", wrap_sync handle_compare);
+  (* Phase 3: 분석/추출 *)
+  ("figma_tree", wrap_sync handle_tree);
+  ("figma_stats", wrap_sync handle_stats);
+  ("figma_export_tokens", wrap_sync handle_export_tokens);
+  (* 캐시 관리 *)
+  ("figma_cache_stats", wrap_sync handle_cache_stats);
+  ("figma_cache_invalidate", wrap_sync handle_cache_invalidate);
+]
+
+(** ============== Resources / Prompts ============== *)
+
+let resources : mcp_resource list = [
+  {
+    uri = "figma://docs/fidelity";
+    name = "Fidelity DSL";
+    description = "fidelity 출력 포맷(정확도 우선) 설명 및 키 목록";
+    mime_type = "text/markdown";
+  };
+  {
+    uri = "figma://docs/usage";
+    name = "Usage";
+    description = "정확도 우선 호출 패턴 및 옵션";
+    mime_type = "text/markdown";
+  };
+]
+
+let prompts : mcp_prompt list = [
+  {
+    name = "figma_fidelity_review";
+    description = "레이아웃/페인트/타이포 누락 필드 확인용 리뷰 프롬프트";
+    arguments = [
+      { name = "file_key"; description = "Figma 파일 키"; required = true };
+      { name = "node_id"; description = "노드 ID"; required = true };
+      { name = "depth"; description = "트리 깊이 제한"; required = false };
+    ];
+    text = {|
+당신은 Figma Fidelity DSL 리뷰어입니다.
+
+입력:
+- file_key: {{file_key}}
+- node_id: {{node_id}}
+- depth: {{depth}}
+
+점검 항목:
+1) meta/structure/geometry/vector/layout/paint/effects/text/text_segments/instance/variables/assets의 *_missing 목록 확인
+2) children_present=false 인 경우 depth 조정 필요성 판단
+3) 이미지가 있는 경우 image_fills 누락 확인 (필요 시 include_image_fills=true)
+4) variables_resolved 누락 시 include_variables=true 제안
+5) 텍스트 세그먼트/라인 이슈 시 include_plugin=true 제안
+6) 렌더 정확도 이슈 시 figma_get_node_with_image + use_absolute_bounds=true 제안
+7) 변수 API 오류 시 include_plugin_variables=true 제안
+8) 플러그인 렌더가 필요하면 include_plugin_image=true 제안
+9) 벡터/패스 누락이면 geometry=paths + depth 상향 제안
+10) ⚠️ TEXT 노드 정확도 (Critical): DSL의 text.characters 필드가 HTML에 **정확히 그대로** 반영되었는지 확인
+    - SSIM은 픽셀 구조만 측정 → 같은 폰트/크기면 다른 텍스트도 높은 점수
+    - 텍스트를 hallucinate하거나 추측하지 말 것
+    - 원본 텍스트가 한국어면 한국어 그대로 유지
+
+출력:
+- 누락/의심 항목 요약
+- 필요한 재호출 파라미터 제안
+|};
+  };
+]
+
+let read_resource uri =
+  match uri with
+  | "figma://docs/fidelity" ->
+      let body = {|
+# Fidelity DSL (v3)
+
+## Output shape
+- JSON object with sections:
+  `meta`, `structure`, `geometry`, `vector`, `layout`, `paint`, `effects`,
+  `text`, `text_segments`, `instance`, `variables`, `variables_resolved`,
+  `assets`, `plugin`, `children`
+- Each section includes only keys present in the Figma JSON
+- `*_missing` lists keys that were absent in the source JSON
+
+## Notes
+- Set `geometry=paths` to receive vector geometry (`vectorNetwork`, `fillGeometry`, etc)
+- `assets_missing` includes `image_fills` when `image_refs` exist but fills are not fetched
+- `variables_resolved` and `plugin` are filled when `include_variables` / `include_plugin` are enabled
+- Plugin snapshots include `text.segments` + range bounds when available
+- `plugin_variables` is available when `include_plugin_variables=true` (Variables API fallback)
+- `plugin_image` is available when `include_plugin_image=true` (base64 render)
+- `variables_source` indicates whether variables came from REST or plugin
+- Use `use_absolute_bounds=true` for render bounds in image exports
+
+## Fidelity scoring (all-axes)
+- Sections weighted by importance; missing in any axis lowers score.
+- `variables_resolved`: uses Variables API resolved/default values.
+- `assets`: compares `image_refs` in DSL vs `image_fills` map.
+- `plugin`: counts `text.segments` from plugin snapshot (line/segment detail).
+
+## node_id format
+- Figma URL shows `node-id=2089-11127` (hyphen), but API expects `2089:11127` (colon)
+- MCP tools require colon format: `figma_get_node`, `figma_get_node_with_image`
+- Convert: `2089-11127` -> `2089:11127`
+|} in
+      Ok ("text/markdown", body)
+  | "figma://docs/usage" ->
+      let body = {|
+# Usage (accuracy-first)
+
+## Recommended calls
+- `figma_get_node` with `format=fidelity`
+- Pixel-perfect bundle: `figma_get_node_bundle`
+- Auto depth escalation: `figma_fidelity_loop` (target score 기반 반복)
+- Render similarity: `figma_image_similarity` (SSIM/PSNR)
+
+## Accuracy-first loop (suggested order)
+1) `figma_fidelity_loop` with `include_variables=true`, `include_image_fills=true`, `include_plugin=true`
+2) If still low: increase `max_depth` / `depth_step` and ensure `geometry=paths`
+3) Validate pixels with `figma_get_node_with_image` + `use_absolute_bounds=true`
+4) Compare renders via `figma_image_similarity`
+
+## Full-axes options
+- `figma_fidelity_loop` + `include_variables=true` + `include_image_fills=true` + `include_plugin=true`
+- `figma_get_node_bundle` + `include_plugin=true` for text segments/line bounds
+- `include_plugin_variables=true` for Variables API fallback (Enterprise-free)
+- `include_plugin_image=true` for plugin-rendered base64 images (large output)
+- Pair DSL with images via `figma_get_node_with_image` (use_absolute_bounds=true)
+- For plugin snapshots:
+  - `figma_plugin_connect` → copy channel ID
+  - `figma_plugin_use_channel` or pass `plugin_channel_id`
+  - `figma_get_node_bundle` with `include_plugin=true`
+- Use `depth` to control context size (API `depth`)
+- Use `geometry=paths` to include vector geometry fields
+- Use `plugin_data` if plugin-authored metadata is needed
+
+## REST parity helpers
+- `figma_get_nodes` for multi-node fetch
+- `figma_get_file_components` / `figma_get_file_styles` for asset metadata
+- `figma_get_file_versions` / `figma_get_file_comments` for change context
+
+## node_id format
+- Figma URL shows `node-id=2089-11127` (hyphen), but API expects `2089:11127` (colon)
+- MCP tools require colon format: `figma_get_node`, `figma_get_node_with_image`
+- Convert: `2089-11127` -> `2089:11127`
+- Tip: `figma_parse_url` returns a ready-to-use `node_id`
+
+## Variables
+- `figma_get_variables` with `format=resolved` to get default-mode values
+
+## Raw JSON
+- Use `format=raw` to get lossless JSON (largest output)
+
+## Pixel accuracy
+- Pair DSL with images via `figma_get_node_with_image`
+- Use `use_absolute_bounds=true` to include effects in render bounds
+|} in
+      Ok ("text/markdown", body)
+  | _ -> Error "Resource not found"
+
+(** ============== 서버 생성 ============== *)
+
+let create_figma_server () =
+  Mcp_protocol.create_server all_tools all_handlers resources prompts read_resource

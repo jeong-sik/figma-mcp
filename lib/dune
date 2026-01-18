@@ -1,0 +1,24 @@
+(library
+ (name figma_mcp)
+ (public_name figma_mcp)
+ (libraries
+   yojson
+   uri
+   str
+   ipaddr
+   ;; Lwt (HTTP client)
+   lwt
+   lwt.unix
+   cohttp-lwt-unix
+   ;; Eio (HTTP server + Effect handlers)
+   eio
+   eio_main
+   httpun-eio
+   gluten-eio
+   lwt_eio
+   bigstringaf
+   ;; gRPC (streaming for large responses)
+   grpc-direct
+   grpc-direct-core)
+ (wrapped false)
+ (ocamlopt_flags (:standard -w -50)))

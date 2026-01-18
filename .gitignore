@@ -1,0 +1,28 @@
+# OCaml build artifacts
+_build/
+*.install
+*.merlin
+.merlin
+_opam/
+
+# Node.js
+node_modules/
+
+# Editor
+.vscode/
+*.swp
+*~
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Plugin build
+plugin/dist/
+
+# Test artifacts
+*.log
+*.png
+*.jpg
+*.svg
