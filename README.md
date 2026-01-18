@@ -1,5 +1,11 @@
 # Figma MCP Server
 
+[![Version](https://img.shields.io/badge/version-0.1.0-blue.svg)](https://github.com/jeong-sik/figma-mcp)
+[![OCaml](https://img.shields.io/badge/OCaml-5.x-orange.svg)](https://ocaml.org/)
+[![MCP](https://img.shields.io/badge/MCP-2025--11--25-blue.svg)](https://spec.modelcontextprotocol.io/)
+[![Status](https://img.shields.io/badge/status-Production%20Ready-green.svg)]()
+[![License](https://img.shields.io/badge/license-Private-red.svg)]()
+
 OCaml 5.x 네이티브 MCP 서버 - Figma 디자인을 정확도 우선 Fidelity DSL로 변환
 
 ## 특징
