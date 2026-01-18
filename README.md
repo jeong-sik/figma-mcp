@@ -180,7 +180,7 @@ figma_fidelity_loop
 Figma MCP 결과를 정량화된 리포트로 저장합니다.
 
 ```bash
-features/figma-mcp/scripts/figma-accuracy-eval.py \
+./scripts/figma-accuracy-eval.py \
   --file-key "FILE_KEY" \
   --node-id "123:456" \
   --token "$FIGMA_TOKEN" \
@@ -222,12 +222,14 @@ features/figma-mcp/scripts/figma-accuracy-eval.py \
 # opam 환경
 eval $(opam env)
 
+# 의존성 설치
+opam install . --deps-only
+
 # 빌드
-cd ~/me/features
 dune build
 
-# 실행 파일 위치
-ls _build/default/figma-mcp/bin/mcp_main.exe
+# 실행 (로컬 빌드)
+dune exec figma-mcp
 ```
 
 ## Claude Code MCP 설정
@@ -238,7 +240,7 @@ ls _build/default/figma-mcp/bin/mcp_main.exe
 {
   "mcpServers": {
     "figma": {
-      "command": "/Users/YOUR_USER/me/features/figma-mcp/start-figma-mcp.sh",
+      "command": "/path/to/figma-mcp/start-figma-mcp.sh",
       "args": []
     }
   }
@@ -256,9 +258,9 @@ REST API만으로 부족한 레이아웃/스타일 정보를 보강하려면 플
 
 2) Figma 플러그인 설치
 - Figma → Plugins → Development → Import plugin from manifest…
-- `features/figma-mcp/plugin/manifest.json` 선택
+- `plugin/manifest.json` 선택
 - Import 실패 시: Figma → Plugins → Development → New Plugin으로 생성 후,
-  생성된 `manifest.json`의 숫자 ID로 `features/figma-mcp/plugin/manifest.json`의 `id` 교체
+  생성된 `manifest.json`의 숫자 ID로 `plugin/manifest.json`의 `id` 교체
 - `allowedDomains` 에 `http://localhost:...` 넣으면 오류가 날 수 있으니,
   로컬은 `devAllowedDomains`에만 넣고 `allowedDomains`는 https 도메인만 유지
 - `devAllowedDomains`는 `localhost`만 허용되는 경우가 있어 `127.0.0.1` 대신 `localhost` 사용 권장
@@ -318,7 +320,7 @@ HTTP 엔드포인트:
 
 ### 이미지 다운로드 옵션
 `figma_export_image`, `figma_get_node_with_image`에서 `download: true`와 `save_dir` 지정 가능.
-기본 저장 경로는 `~/me/download/figma-assets` 입니다.
+기본 저장 경로는 `$ME_ROOT/download/figma-assets` 입니다. (`ME_ROOT` 미설정 시 `$HOME/me/download/figma-assets`, 없으면 `/tmp/figma-assets`)
 
 ## 테스트
 
