@@ -120,6 +120,41 @@ let process_mcp_request_sync (server : Mcp_protocol.mcp_server) body_str =
 
 (** ============== SSE Helpers ============== *)
 
+(** SSE client registry for shutdown notification *)
+type sse_client = {
+  body: Httpun.Body.Writer.t;
+  mutable connected: bool;
+}
+let sse_clients : (int, sse_client) Hashtbl.t = Hashtbl.create 16
+let sse_client_counter = ref 0
+
+let register_sse_client body =
+  incr sse_client_counter;
+  let id = !sse_client_counter in
+  let client = { body; connected = true } in
+  Hashtbl.add sse_clients id client;
+  id
+
+let unregister_sse_client id =
+  (match Hashtbl.find_opt sse_clients id with
+   | Some c -> c.connected <- false
+   | None -> ());
+  Hashtbl.remove sse_clients id
+
+let broadcast_sse_shutdown reason =
+  let data = sprintf
+    {|{"jsonrpc":"2.0","method":"notifications/shutdown","params":{"reason":"%s","message":"Server is shutting down, please reconnect"}}|}
+    reason
+  in
+  let msg = sprintf "event: notification\ndata: %s\n\n" data in
+  Hashtbl.iter (fun _ client ->
+    if client.connected then
+      try
+        Httpun.Body.Writer.write_string client.body msg;
+        Httpun.Body.Writer.flush client.body ignore
+      with _ -> ()
+  ) sse_clients
+
 (** Send SSE event and flush immediately *)
 let send_sse_event body ~event ~data =
   let msg = sprintf "event: %s\ndata: %s\n\n" event data in
@@ -146,6 +181,9 @@ let mcp_post_handler server _request reqd =
 (** MCP SSE handler for streamable-http protocol (GET /mcp) *)
 let mcp_sse_handler ~clock _request reqd =
   Response.sse_stream reqd ~on_write:(fun body ->
+    (* Register client for shutdown broadcast *)
+    let client_id = register_sse_client body in
+
     (* Send initial endpoint event (MCP protocol requirement) *)
     send_sse_event body ~event:"endpoint" ~data:"/mcp";
 
@@ -157,7 +195,8 @@ let mcp_sse_handler ~clock _request reqd =
         send_sse_event body ~event:"ping" ~data:timestamp;
         ping_loop ()
       with _ ->
-        (* Client disconnected or error - close the body *)
+        (* Client disconnected or error - unregister and close *)
+        unregister_sse_client client_id;
         Httpun.Body.Writer.close body
     in
     ping_loop ()
@@ -342,7 +381,8 @@ let run ~sw ~net ~clock config server =
   eprintf "   Protocol: %s\n" Mcp_protocol.protocol_version;
   eprintf "   HTTP:     http://%s:%d\n" config.host config.port;
   eprintf "   MCP:      GET  /mcp -> SSE stream (streamable-http)\n";
-  eprintf "             POST /mcp -> JSON-RPC requests\n%!";
+  eprintf "             POST /mcp -> JSON-RPC requests\n";
+  eprintf "   Graceful shutdown: SIGTERM/SIGINT supported\n%!";
 
   let rec accept_loop () =
     let flow, client_addr = Eio.Net.accept ~sw socket in
@@ -363,10 +403,44 @@ let run ~sw ~net ~clock config server =
   in
   accept_loop ()
 
+(** Graceful shutdown exception *)
+exception Shutdown
+
 (** Start the server - entry point for main.ml *)
 let start_server ?(config = default_config) server =
   Eio_main.run @@ fun env ->
   let net = Eio.Stdenv.net env in
   let clock = Eio.Stdenv.clock env in
-  Eio.Switch.run @@ fun sw ->
-  run ~sw ~net ~clock config server
+
+  (* Graceful shutdown setup *)
+  let switch_ref = ref None in
+  let shutdown_initiated = ref false in
+  let initiate_shutdown signal_name =
+    if not !shutdown_initiated then begin
+      shutdown_initiated := true;
+      eprintf "\n🎨 %s: Received %s, shutting down gracefully...\n%!" Mcp_protocol.server_name signal_name;
+
+      (* Broadcast shutdown notification to all SSE clients *)
+      broadcast_sse_shutdown signal_name;
+      eprintf "🎨 %s: Sent shutdown notification to %d SSE clients\n%!" Mcp_protocol.server_name (Hashtbl.length sse_clients);
+
+      (* Give clients 500ms to receive the notification *)
+      Unix.sleepf 0.5;
+
+      match !switch_ref with
+      | Some sw -> Eio.Switch.fail sw Shutdown
+      | None -> ()
+    end
+  in
+  Sys.set_signal Sys.sigterm (Sys.Signal_handle (fun _ -> initiate_shutdown "SIGTERM"));
+  Sys.set_signal Sys.sigint (Sys.Signal_handle (fun _ -> initiate_shutdown "SIGINT"));
+
+  (try
+    Eio.Switch.run @@ fun sw ->
+    switch_ref := Some sw;
+    run ~sw ~net ~clock config server
+  with
+  | Shutdown ->
+      eprintf "🎨 %s: Shutdown complete.\n%!" Mcp_protocol.server_name
+  | Eio.Cancel.Cancelled _ ->
+      eprintf "🎨 %s: Shutdown complete.\n%!" Mcp_protocol.server_name)
