@@ -1893,14 +1893,14 @@ let handle_get_node_summary args : (Yojson.Safe.t, string) result =
 
   match (file_key, node_id, token) with
   | (Some file_key, Some node_id, Some token) ->
+      let node_id = Figma_api.normalize_node_id node_id in
       (* 최소 depth=1로 자식만 가져옴 *)
       (match Figma_effects.Perform.get_nodes ~token ~file_key ~node_ids:[node_id] ~depth:1 ?version () with
        | Error err -> Error (Printf.sprintf "Figma API error: %s" err)
        | Ok nodes_json ->
            let open Yojson.Safe.Util in
            let nodes = nodes_json |> member "nodes" in
-           let node_key = String.map (fun c -> if c = ':' then '_' else c) node_id in
-           let node_entry = nodes |> member node_key in
+           let node_entry = nodes |> member node_id in
            (match node_entry with
             | `Null -> Error (Printf.sprintf "Node %s not found in file %s" node_id file_key)
             | _ ->
@@ -1957,6 +1957,7 @@ let handle_get_node_chunk args : (Yojson.Safe.t, string) result =
 
   match (file_key, node_id, token) with
   | (Some file_key, Some node_id, Some token) ->
+      let node_id = Figma_api.normalize_node_id node_id in
       if depth_end < depth_start then
         Error "depth_end must be >= depth_start"
       else
@@ -1967,8 +1968,7 @@ let handle_get_node_chunk args : (Yojson.Safe.t, string) result =
          | Ok nodes_json ->
              let open Yojson.Safe.Util in
              let nodes = nodes_json |> member "nodes" in
-             let node_key = String.map (fun c -> if c = ':' then '_' else c) node_id in
-             let node_entry = nodes |> member node_key in
+             let node_entry = nodes |> member node_id in
              (match node_entry with
               | `Null -> Error (Printf.sprintf "Node %s not found in file %s" node_id file_key)
               | _ ->
