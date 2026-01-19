@@ -204,7 +204,10 @@ let health_handler _request reqd =
 let mcp_post_handler server _request reqd =
   Request.read_body_async reqd (fun body_str ->
     match classify_message body_str with
-    | `Notification | `Response ->
+    | `Notification ->
+        ignore (process_mcp_request_sync server body_str);
+        Response.accepted reqd
+    | `Response ->
         Response.accepted reqd
     | `Request | `Unknown ->
         let response_str = process_mcp_request_sync server body_str in
