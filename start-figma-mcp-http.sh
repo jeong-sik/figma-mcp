@@ -1,8 +1,16 @@
 #!/bin/bash
 # Figma MCP Server (HTTP) - Start Script
-# Usage: ./start-figma-mcp-http.sh [--port PORT]
+# Usage: ./start-figma-mcp-http.sh [--port PORT] [--grpc-port PORT]
 
 set -e
+
+# Load FIGMA_TOKEN from Keychain if not already set
+if [ -z "$FIGMA_TOKEN" ]; then
+  FIGMA_TOKEN=$(security find-generic-password -s "figma-mcp" -a "FIGMA_TOKEN" -w 2>/dev/null || true)
+  if [ -n "$FIGMA_TOKEN" ]; then
+    export FIGMA_TOKEN
+  fi
+fi
 
 # Ensure OCaml environment
 if command -v opam >/dev/null 2>&1; then
@@ -17,6 +25,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
 PORT="${FIGMA_MCP_PORT:-8940}"
+GRPC_PORT="${FIGMA_MCP_GRPC_PORT:-}"
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
@@ -25,9 +34,18 @@ while [[ $# -gt 0 ]]; do
       PORT="$2"
       shift 2
       ;;
+    --grpc-port)
+      GRPC_PORT="$2"
+      shift 2
+      ;;
+    --grpc-port=*)
+      GRPC_PORT="${1#*=}"
+      shift 1
+      ;;
     -h|--help)
-      echo "Usage: $0 [--port PORT]"
+      echo "Usage: $0 [--port PORT] [--grpc-port PORT]"
       echo "  --port PORT  Server port (default: 8940)"
+      echo "  --grpc-port PORT  gRPC port (optional, enables streaming)"
       exit 0
       ;;
     *)
@@ -72,4 +90,8 @@ if [ -z "$FIGMA_EXE" ]; then
   fi
 fi
 
-exec "$FIGMA_EXE" --port "$PORT"
+if [ -n "$GRPC_PORT" ]; then
+  exec "$FIGMA_EXE" --port "$PORT" --grpc-port "$GRPC_PORT"
+else
+  exec "$FIGMA_EXE" --port "$PORT"
+fi

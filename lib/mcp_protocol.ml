@@ -223,6 +223,8 @@ F(Card 320×200 col gap:12 ax:min cx:stretch bg:#FFF r:12,16,12,16)
 - 500KB 이상 응답 시 구조 요약 먼저 확인
 - `depth` 파라미터로 탐색 깊이 제한
 - 반복되는 스타일은 CSS 변수로 추출
+- 전체 재귀가 필요하면 gRPC `GetNodeStream`의 `recursive=true` 사용
+- 분할정복 플랜은 gRPC `PlanTasks`의 `recursive=true`로 생성
 
 ### 🔄 권장 워크플로우
 1. `figma_list_screens` → 화면 목록 확인
@@ -465,7 +467,8 @@ let run_http_server ~host ~port server =
   let cors_headers = [
     ("Access-Control-Allow-Origin", "*");
     ("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-    ("Access-Control-Allow-Headers", "Content-Type, Accept");
+    ("Access-Control-Allow-Headers", "Content-Type, Accept, Access-Control-Request-Private-Network");
+    ("Access-Control-Allow-Private-Network", "true");
   ] in
 
   let callback _conn req body =

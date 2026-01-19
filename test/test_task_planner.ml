@@ -147,6 +147,24 @@ let collection_tests = [
   "dependencies", `Quick, test_dependencies;
 ]
 
+(** ============== Flat Node Task Tests ============== *)
+
+let test_tasks_from_flat_dependencies () =
+  let root = make_frame "1:1" "Root" in
+  let child = make_text "1:2" "Child" in
+  let flat_nodes = [
+    { node = root; parent_node_id = None; depth = 0 };
+    { node = child; parent_node_id = Some "1:1"; depth = 1 };
+  ] in
+  let tasks = tasks_from_flat flat_nodes in
+  let child_task = List.find (fun t -> t.node_id = "1:2") tasks in
+  check (list string) "child depends on parent"
+    ["task_1:1"] child_task.dependencies
+
+let flat_tasks_tests = [
+  "flat dependencies", `Quick, test_tasks_from_flat_dependencies;
+]
+
 (** ============== Priority Sorting Tests ============== *)
 
 let test_sort_by_priority () =
@@ -331,6 +349,7 @@ let () =
     "Priority Classification", priority_tests;
     "Priority Adjustment", adjustment_tests;
     "Task Collection (Outside-In)", collection_tests;
+    "Task Collection (Flat)", flat_tasks_tests;
     "Priority Sorting", sorting_tests;
     "DSL Summary", dsl_tests;
     "Hint Generation", hint_tests;

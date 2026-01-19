@@ -66,17 +66,70 @@
       const statusEl = document.getElementById("status");
       const connectBtn = document.getElementById("connect");
 
+      const STORAGE_KEY = "figmaMcpBridgeState";
+
       let serverUrl = serverInput.value.trim();
       let channelId = "";
       let polling = false;
+      const pollWaitMs = 15000;
+      const pollDelayMs = 50;
+      const errorDelayMs = 2000;
+
+      function normalizeServerUrl(raw) {
+        if (!raw) return "";
+        let value = raw.trim();
+        if (!value) return "";
+        if (!/^https?:\/\//i.test(value)) {
+          value = "http://" + value;
+        }
+        if (value.endsWith("/")) {
+          value = value.slice(0, -1);
+        }
+        return value;
+      }
+
+      function loadState() {
+        try {
+          const raw = localStorage.getItem(STORAGE_KEY);
+          if (!raw) return null;
+          const parsed = JSON.parse(raw);
+          if (!parsed || typeof parsed !== "object") return null;
+          return parsed;
+        } catch (err) {
+          return null;
+        }
+      }
+
+      function saveState(state) {
+        try {
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+        } catch (err) {
+          // Ignore storage failures.
+        }
+      }
 
       function setStatus(text) {
         statusEl.innerHTML = text;
       }
 
+      const state = loadState();
+      if (state && typeof state.serverUrl === "string") {
+        serverInput.value = state.serverUrl;
+      }
+      if (state && typeof state.channelId === "string") {
+        channelInput.value = state.channelId;
+      }
+
       async function connect() {
-        serverUrl = serverInput.value.trim();
+        serverUrl = normalizeServerUrl(serverInput.value);
         channelId = channelInput.value.trim();
+
+        if (!serverUrl) {
+          setStatus("<div>Error</div><div class=\"muted\">Server URL is required.</div>");
+          return;
+        }
+
+        serverInput.value = serverUrl;
 
         const payload = channelId ? { channel_id: channelId } : {};
         const resp = await fetch(serverUrl + "/plugin/connect", {
@@ -84,9 +137,14 @@
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload)
         });
+        if (!resp.ok) {
+          throw new Error("HTTP " + resp.status);
+        }
         const data = await resp.json();
         channelId = data.channel_id || channelId;
         channelInput.value = channelId;
+
+        saveState({ serverUrl, channelId });
 
         setStatus(
           "<div>Connected</div>" +
@@ -108,23 +166,44 @@
           const resp = await fetch(serverUrl + "/plugin/poll", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ channel_id: channelId, max_commands: 5 })
+            body: JSON.stringify({
+              channel_id: channelId,
+              max_commands: 5,
+              wait_ms: pollWaitMs
+            })
           });
+          if (!resp.ok) {
+            throw new Error("HTTP " + resp.status);
+          }
           const data = await resp.json();
           const commands = Array.isArray(data.commands) ? data.commands : [];
           for (const cmd of commands) {
             parent.postMessage({ pluginMessage: { type: "command", command: cmd } }, "*");
           }
+          setTimeout(pollLoop, pollDelayMs);
         } catch (err) {
-          setStatus("<div>Error</div><div class=\"muted\">" + String(err) + "</div>");
+          setStatus(
+            "<div>Error</div>" +
+            "<div class=\"muted\">" + String(err) + "</div>" +
+            "<div class=\"muted\">Check server: ./start-figma-mcp-http.sh --port 8940</div>"
+          );
+          setTimeout(pollLoop, errorDelayMs);
         }
-        setTimeout(pollLoop, 500);
       }
 
       window.onmessage = async (event) => {
         const msg = event.data.pluginMessage;
         if (!msg || msg.type !== "command_result") return;
         if (!channelId) return;
+
+        let payload = msg.payload;
+        if (typeof msg.payload_json === "string") {
+          try {
+            payload = JSON.parse(msg.payload_json);
+          } catch (err) {
+            payload = { error: "Invalid payload_json", details: String(err) };
+          }
+        }
 
         await fetch(serverUrl + "/plugin/result", {
           method: "POST",
@@ -133,7 +212,7 @@
             channel_id: channelId,
             command_id: msg.command_id,
             ok: msg.ok,
-            payload: msg.payload
+            payload
           })
         });
       };

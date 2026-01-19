@@ -49,12 +49,36 @@ let array_prop desc : Yojson.Safe.t =
     ("description", `String desc);
   ]
 
+let object_prop desc : Yojson.Safe.t =
+  `Assoc [
+    ("type", `String "object");
+    ("description", `String desc);
+  ]
+
 let object_schema props required : Yojson.Safe.t =
   `Assoc [
     ("type", `String "object");
     ("properties", `Assoc props);
     ("required", `List (List.map (fun s -> `String s) required));
   ]
+
+(** ============== 캐시 헬퍼 ============== *)
+
+let variables_cache_node_id = "__variables__"
+
+let fetch_variables_cached ~file_key ~token =
+  let cached_json =
+    Figma_cache.get ~file_key ~node_id:variables_cache_node_id
+      ~ttl_hours:Figma_cache.Config.ttl_variables_hours ()
+  in
+  match cached_json with
+  | Some json -> Ok (json, `String "cache")
+  | None ->
+      (match Figma_effects.Perform.get_variables ~token ~file_key with
+       | Ok json ->
+           Figma_cache.set ~file_key ~node_id:variables_cache_node_id json;
+           Ok (json, `String "rest")
+       | Error err -> Error err)
 
 (** ============== Tool 정의 ============== *)
 
@@ -102,7 +126,7 @@ let tool_figma_list_screens : tool_def = {
 
 let tool_figma_get_node : tool_def = {
   name = "figma_get_node";
-  description = "특정 노드 ID의 데이터를 가져와 Fidelity DSL로 변환합니다.";
+  description = "특정 노드 ID의 데이터를 가져와 Fidelity DSL로 변환합니다. (전체 재귀는 gRPC GetNodeStream recursive 사용 권장)";
   input_schema = object_schema [
     ("file_key", string_prop "Figma 파일 키");
     ("node_id", string_prop "노드 ID (예: 123:456)");
@@ -155,6 +179,8 @@ let tool_figma_get_node_bundle : tool_def = {
     ("include_plugin", bool_prop "플러그인 스냅샷 포함 여부 (기본값: false)");
     ("include_plugin_variables", bool_prop "플러그인 변수 보강 포함 여부 (기본값: false)");
     ("include_plugin_image", bool_prop "플러그인 이미지(base64) 포함 여부 (기본값: false)");
+    ("plugin_include_geometry", bool_prop "플러그인 스냅샷에 벡터/지오메트리 포함 여부 (기본값: false)");
+    ("plugin_depth", number_prop "플러그인 스냅샷 depth (기본값: Figma depth 또는 6)");
     ("plugin_image_format", enum_prop ["png"; "jpg"; "svg"; "pdf"] "플러그인 이미지 포맷 (기본값: png)");
     ("plugin_image_scale", number_prop "플러그인 이미지 스케일 (기본값: 1)");
     ("plugin_channel_id", string_prop "플러그인 채널 ID (옵션)");
@@ -491,6 +517,7 @@ let tool_figma_plugin_get_node : tool_def = {
     ("channel_id", string_prop "채널 ID (옵션)");
     ("node_id", string_prop "노드 ID (예: 123:456)");
     ("depth", number_prop "자식 탐색 깊이 (기본값: 6)");
+    ("include_geometry", bool_prop "벡터/지오메트리 포함 여부 (기본값: true)");
     ("timeout_ms", number_prop "응답 대기 시간 (기본값: 20000)");
   ] ["node_id"];
 }
@@ -524,6 +551,57 @@ let tool_figma_plugin_apply_ops : tool_def = {
     ("ops", array_prop "작업 목록 (create/update/delete 오브젝트 배열)");
     ("timeout_ms", number_prop "응답 대기 시간 (기본값: 20000)");
   ] ["ops"];
+}
+
+(** ============== LLM Bridge 도구 ============== *)
+
+let tool_figma_llm_call : tool_def = {
+  name = "figma_llm_call";
+  description = "MCP endpoint를 통해 codex/claude-cli/gemini/ollama를 호출합니다.";
+  input_schema = object_schema [
+    ("provider", enum_prop ["mcp-http"; "stub"] "LLM provider (기본값: mcp-http)");
+    ("llm_provider", string_prop "provider alias (하위 호환)");
+    ("llm_tool", enum_prop ["codex"; "claude-cli"; "gemini"; "ollama"] "MCP tool 이름 (기본값: codex)");
+    ("tool_name", string_prop "MCP tool 이름 override (llm_tool alias)");
+    ("arguments", object_prop "MCP tool arguments (prompt/model/...)");
+    ("prompt", string_prop "prompt 바로 전달 (arguments.prompt가 없을 때 사용)");
+    ("response_format", enum_prop ["verbose"; "compact"; "binary"; "base85"; "compressed"; "auto"]
+      "llm-mcp 응답 포맷 (기본값: verbose)");
+    ("mcp_url", string_prop "MCP endpoint URL override");
+    ("llm_url", string_prop "MCP endpoint alias (하위 호환)");
+    ("return_metadata", bool_prop "raw JSON 및 메타데이터 반환 여부 (기본값: false)");
+  ] [];
+}
+
+let tool_figma_llm_task : tool_def = {
+  name = "figma_llm_task";
+  description = "Figma DSL + Plugin 스냅샷을 컨텍스트로 MCP LLM 작업을 수행합니다.";
+  input_schema = object_schema [
+    ("task", string_prop "LLM 작업 지시문 (필수)");
+    ("quality", enum_prop ["best"; "balanced"; "fast"] "컨텍스트/속도 프리셋 (기본값: best)");
+    ("provider", enum_prop ["mcp-http"; "stub"] "LLM provider (기본값: mcp-http)");
+    ("llm_provider", string_prop "provider alias (하위 호환)");
+    ("llm_tool", enum_prop ["codex"; "claude-cli"; "gemini"; "ollama"] "MCP tool 이름 (기본값: codex)");
+    ("tool_name", string_prop "MCP tool 이름 override (llm_tool alias)");
+    ("llm_args", object_prop "MCP tool arguments (model/timeout/...)");
+    ("mcp_url", string_prop "MCP endpoint URL override");
+    ("llm_url", string_prop "MCP endpoint alias (하위 호환)");
+    ("file_key", string_prop "Figma 파일 키 (DSL/변수/이미지 fill 추출용)");
+    ("node_id", string_prop "노드 ID (예: 123:456)");
+    ("token", string_prop "Figma Personal Access Token");
+    ("depth", number_prop "Figma API depth");
+    ("geometry", enum_prop ["paths"] "벡터 경로 포함 (geometry=paths)");
+    ("include_variables", bool_prop "변수 포함 여부 (기본값: quality에 따라 자동)");
+    ("include_image_fills", bool_prop "이미지 fill 포함 여부 (기본값: quality에 따라 자동)");
+    ("include_plugin", bool_prop "플러그인 스냅샷 포함 여부 (기본값: quality에 따라 자동)");
+    ("plugin_channel_id", string_prop "플러그인 채널 ID (옵션)");
+    ("plugin_mode", enum_prop ["selection"; "node"] "플러그인 스냅샷 모드 (기본값: selection)");
+    ("plugin_depth", number_prop "플러그인 depth (기본값: 0)");
+    ("plugin_include_geometry", bool_prop "플러그인 지오메트리 포함 여부 (기본값: false)");
+    ("plugin_timeout_ms", number_prop "플러그인 응답 대기 시간 (기본값: 20000)");
+    ("max_context_chars", number_prop "LLM 프롬프트 컨텍스트 최대 길이 (기본값: 120000)");
+    ("return_metadata", bool_prop "raw JSON 및 메타데이터 반환 여부 (기본값: false)");
+  ] ["task"];
 }
 
 (** ============== Phase 1: 탐색 도구 ============== *)
@@ -654,6 +732,24 @@ let tool_figma_export_tokens : tool_def = {
   ] ["file_key"; "token"];
 }
 
+(** 환경/의존성 점검 도구 *)
+let tool_figma_doctor : tool_def = {
+  name = "figma_doctor";
+  description = "로컬 의존성(Node/Playwright/ImageMagick) 및 스크립트 경로를 점검합니다.";
+  input_schema = object_schema [] [];
+}
+
+(** large_result 파일 읽기 *)
+let tool_figma_read_large_result : tool_def = {
+  name = "figma_read_large_result";
+  description = "large_result로 저장된 파일을 offset/limit로 읽습니다.";
+  input_schema = object_schema [
+    ("file_path", string_prop "large_result file_path");
+    ("offset", number_prop "읽기 시작 바이트 (기본값: 0)");
+    ("limit", number_prop "최대 읽기 바이트 (기본값: 20000)");
+  ] ["file_path"];
+}
+
 (** 캐시 관리 도구 *)
 let tool_figma_cache_stats : tool_def = {
   name = "figma_cache_stats";
@@ -712,6 +808,8 @@ let all_tools = [
   tool_figma_plugin_export_node_image;
   tool_figma_plugin_get_variables;
   tool_figma_plugin_apply_ops;
+  tool_figma_llm_call;
+  tool_figma_llm_task;
   (* Phase 1: 탐색 도구 *)
   tool_figma_parse_url;
   tool_figma_get_me;
@@ -726,6 +824,8 @@ let all_tools = [
   tool_figma_tree;
   tool_figma_stats;
   tool_figma_export_tokens;
+  tool_figma_doctor;
+  tool_figma_read_large_result;
   (* 캐시 관리 *)
   tool_figma_cache_stats;
   tool_figma_cache_invalidate;
@@ -738,9 +838,17 @@ let member key json =
   | `Assoc lst -> List.assoc_opt key lst
   | _ -> None
 
+let normalize_node_id value =
+  Figma_api.normalize_node_id value
+
+let normalize_node_id_key key value =
+  match key with
+  | "node_id" | "node_a_id" | "node_b_id" -> normalize_node_id value
+  | _ -> value
+
 let get_string key json =
   match member key json with
-  | Some (`String s) -> Some s
+  | Some (`String s) -> Some (normalize_node_id_key key s)
   | _ -> None
 
 let get_json key json =
@@ -1263,6 +1371,35 @@ let make_error_content msg : Yojson.Safe.t =
     ])
   ]
 
+let command_ok cmd =
+  Sys.command (cmd ^ " >/dev/null 2>&1") = 0
+
+let command_output cmd =
+  let ic = Unix.open_process_in cmd in
+  let output =
+    try input_line ic with
+    | End_of_file -> ""
+    | _ -> ""
+  in
+  let _ = Unix.close_process_in ic in
+  String.trim output
+
+let has_command name =
+  command_ok (Printf.sprintf "command -v %s" name)
+
+let has_node_module name =
+  command_ok (Printf.sprintf "node -e \"require('%s')\"" name)
+
+let normalize_path path =
+  try Some (Unix.realpath path) with _ -> None
+
+let is_under_dir ~dir path =
+  match (normalize_path dir, normalize_path path) with
+  | (Some dir_norm, Some path_norm) ->
+      let prefix = if String.ends_with ~suffix:"/" dir_norm then dir_norm else dir_norm ^ "/" in
+      path_norm = dir_norm || String.starts_with ~prefix path_norm
+  | _ -> false
+
 (** figma_codegen 핸들러 *)
 let handle_codegen args : (Yojson.Safe.t, string) result Lwt.t =
   let json_str = get_string "json" args in
@@ -1462,11 +1599,17 @@ let handle_get_node_bundle args : (Yojson.Safe.t, string) result =
   let include_plugin = get_bool_or "include_plugin" false args in
   let include_plugin_variables = get_bool_or "include_plugin_variables" false args in
   let include_plugin_image = get_bool_or "include_plugin_image" false args in
+  let plugin_include_geometry = get_bool_or "plugin_include_geometry" false args in
+  let depth = get_int "depth" args in
+  let plugin_depth =
+    match get_int "plugin_depth" args with
+    | Some d when d >= 0 -> d
+    | _ -> Option.value ~default:6 depth
+  in
   let plugin_image_format = get_string_or "plugin_image_format" "png" args in
   let plugin_image_scale = get_float_or "plugin_image_scale" 1.0 args in
   let plugin_channel_id = get_string "plugin_channel_id" args in
   let plugin_timeout_ms = get_int "plugin_timeout_ms" args |> Option.value ~default:20000 in
-  let depth = get_int "depth" args in
   let geometry = get_string "geometry" args in
   let plugin_data = get_string "plugin_data" args in
   let version = get_string "version" args in
@@ -1583,8 +1726,8 @@ let handle_get_node_bundle args : (Yojson.Safe.t, string) result =
                 in
                 let (variables, variables_source) =
                   if include_variables then
-                    match Figma_effects.Perform.get_variables ~token ~file_key with
-                    | Ok vars_json -> (resolve_variables vars_json, `String "rest")
+                    match fetch_variables_cached ~file_key ~token with
+                    | Ok (vars_json, source) -> (resolve_variables vars_json, source)
                     | Error err ->
                         (match plugin_payload_if_ok plugin_variables with
                          | Some payload -> (resolve_plugin_variables payload, `String "plugin")
@@ -1620,20 +1763,44 @@ let handle_get_node_bundle args : (Yojson.Safe.t, string) result =
                     (match resolve_plugin_channel () with
                      | Error msg -> `Assoc [("error", `String msg)]
                      | Ok channel_id ->
-                         let payload = `Assoc [
-                           ("node_id", `String node_id);
-                           ("depth", `Int (Option.value ~default:6 depth));
-                         ] in
-                         let command_id = Figma_plugin_bridge.enqueue_command ~channel_id ~name:"get_node" ~payload in
-                         (match plugin_wait ~channel_id ~command_id ~timeout_ms:plugin_timeout_ms with
-                          | Error err -> `Assoc [("error", `String err)]
-                          | Ok result ->
-                              `Assoc [
-                                ("channel_id", `String channel_id);
-                                ("command_id", `String command_id);
-                                ("ok", `Bool result.ok);
-                                ("payload", result.payload);
-                              ]))
+                         let run_snapshot depth_used =
+                           let payload = `Assoc [
+                             ("node_id", `String node_id);
+                             ("depth", `Int depth_used);
+                             ("include_geometry", `Bool plugin_include_geometry);
+                           ] in
+                           let command_id =
+                             Figma_plugin_bridge.enqueue_command
+                               ~channel_id
+                               ~name:"get_node"
+                               ~payload
+                           in
+                           match plugin_wait ~channel_id ~command_id ~timeout_ms:plugin_timeout_ms with
+                           | Error err -> Error err
+                           | Ok result ->
+                               Ok (`Assoc [
+                                 ("channel_id", `String channel_id);
+                                 ("command_id", `String command_id);
+                                 ("ok", `Bool result.ok);
+                                 ("payload", result.payload);
+                                 ("plugin_depth", `Int depth_used);
+                               ])
+                         in
+                         match run_snapshot plugin_depth with
+                         | Ok snapshot -> snapshot
+                         | Error err ->
+                             if plugin_depth > 0 then
+                               (match run_snapshot 0 with
+                                | Ok snapshot ->
+                                    (match snapshot with
+                                     | `Assoc fields ->
+                                         `Assoc (("note", `String "plugin snapshot fallback to depth=0")
+                                                 :: ("fallback_error", `String err)
+                                                 :: fields)
+                                     | _ -> snapshot)
+                                | Error err2 -> `Assoc [("error", `String err2)])
+                             else
+                               `Assoc [("error", `String err)])
                   else
                     `Null
                 in
@@ -1936,8 +2103,8 @@ let handle_fidelity_loop args : (Yojson.Safe.t, string) result =
         in
         let (variables, variables_source) =
           if include_variables then
-            match Figma_effects.Perform.get_variables ~token ~file_key with
-            | Ok vars_json -> (resolve_variables vars_json, `String "rest")
+            match fetch_variables_cached ~file_key ~token with
+            | Ok (vars_json, source) -> (resolve_variables vars_json, source)
             | Error err ->
                 (match plugin_payload_if_ok plugin_variables with
                  | Some payload -> (resolve_plugin_variables payload, `String "plugin")
@@ -2710,7 +2877,13 @@ let handle_export_image args : (Yojson.Safe.t, string) result =
 
   match (file_key, node_ids_str, token) with
   | (Some file_key, Some node_ids_str, Some token) ->
-      let node_ids = String.split_on_char ',' node_ids_str |> List.map String.trim in
+      let node_ids =
+        node_ids_str
+        |> String.split_on_char ','
+        |> List.map String.trim
+        |> List.filter (fun s -> s <> "")
+        |> List.map normalize_node_id
+      in
       (match Figma_effects.Perform.get_images ~token ~file_key ~node_ids ~format ~scale:(int_of_float scale)
                ?use_absolute_bounds ?version () with
        | Ok json ->
@@ -2787,7 +2960,13 @@ let handle_get_nodes args : (Yojson.Safe.t, string) result =
 
   match (file_key, node_ids_str, token) with
   | (Some file_key, Some node_ids_str, Some token) ->
-      let node_ids = String.split_on_char ',' node_ids_str |> List.map String.trim in
+      let node_ids =
+        node_ids_str
+        |> String.split_on_char ','
+        |> List.map String.trim
+        |> List.filter (fun s -> s <> "")
+        |> List.map normalize_node_id
+      in
       (match Figma_effects.Perform.get_nodes ~token ~file_key ~node_ids ?depth ?geometry ?plugin_data ?version () with
        | Error err -> Error err
        | Ok json ->
@@ -3033,8 +3212,13 @@ let handle_plugin_get_node args : (Yojson.Safe.t, string) result =
   | (Some _, Error msg) -> Error msg
   | (Some node_id, Ok channel_id) ->
       let depth = get_int "depth" args |> Option.value ~default:6 in
+      let include_geometry = get_bool_or "include_geometry" true args in
       let timeout_ms = get_int "timeout_ms" args |> Option.value ~default:20000 in
-      let payload = `Assoc [("node_id", `String node_id); ("depth", `Int depth)] in
+      let payload = `Assoc [
+        ("node_id", `String node_id);
+        ("depth", `Int depth);
+        ("include_geometry", `Bool include_geometry);
+      ] in
       let command_id = Figma_plugin_bridge.enqueue_command ~channel_id ~name:"get_node" ~payload in
       (match plugin_wait ~channel_id ~command_id ~timeout_ms with
        | Error err -> Error err
@@ -3109,8 +3293,363 @@ let handle_plugin_apply_ops args : (Yojson.Safe.t, string) result =
              ("command_id", `String command_id);
              ("ok", `Bool result.ok);
              ("payload", result.payload);
-           ] in
+            ] in
            Ok (make_text_content (Yojson.Safe.pretty_to_string response)))
+
+(** 실행 모드 설정 - HTTP 서버에서 변경됨 *)
+let is_http_mode = ref false
+
+(** Ensure effect handler in stdio mode for non-wrapped Lwt handlers. *)
+let run_with_effects f =
+  if !is_http_mode then f ()
+  else Figma_effects.run_with_real_api f
+
+(** ============== LLM Bridge 핸들러 ============== *)
+
+let has_field key fields =
+  List.exists (fun (k, _) -> k = key) fields
+
+let set_field key value fields =
+  let filtered = List.filter (fun (k, _) -> k <> key) fields in
+  (key, value) :: filtered
+
+let add_if_missing key value fields =
+  if has_field key fields then fields else (key, value) :: fields
+
+let get_string_any keys json =
+  let rec loop = function
+    | [] -> None
+    | key :: rest ->
+        (match get_string key json with
+         | Some v -> Some v
+         | None -> loop rest)
+  in
+  loop keys
+
+let handle_llm_call args : (Yojson.Safe.t, string) result Lwt.t =
+  let open Lwt.Syntax in
+  let provider_name = get_string_any ["provider"; "llm_provider"] args in
+  let llm_tool = get_string_any ["tool_name"; "llm_tool"] args |> Option.value ~default:"codex" in
+  let return_metadata = get_bool_or "return_metadata" false args in
+  let base_args =
+    match get_json "arguments" args with
+    | None -> Ok []
+    | Some (`Assoc fields) -> Ok fields
+    | Some _ -> Error "arguments must be an object"
+  in
+  match base_args with
+  | Error msg -> Lwt.return (Error msg)
+  | Ok fields ->
+      let fields =
+        match get_string "prompt" args with
+        | Some prompt -> set_field "prompt" (`String prompt) fields
+        | None -> fields
+      in
+      let fields =
+        match get_string "response_format" args with
+        | Some fmt -> set_field "response_format" (`String fmt) fields
+        | None -> fields
+      in
+      let fields = add_if_missing "stream" (`Bool false) fields in
+      let arguments = `Assoc fields in
+      (match Llm_provider.resolve ?provider:provider_name () with
+       | Error msg -> Lwt.return (Error msg)
+       | Ok provider ->
+           let llm_url =
+             get_string_any ["mcp_url"; "llm_url"] args
+             |> Option.value ~default:provider.default_url
+           in
+           let* result = provider.call_tool ~url:llm_url ~name:llm_tool ~arguments in
+           (match result with
+            | Error err -> Lwt.return (Error err)
+            | Ok response ->
+                if return_metadata then
+                  let payload = `Assoc [
+                    ("provider", `String provider.id);
+                    ("llm_tool", `String llm_tool);
+                    ("llm_url", `String llm_url);
+                    ("is_error", `Bool response.is_error);
+                    ("response_text", `String response.text);
+                    ("raw", response.raw);
+                  ] in
+                  Lwt.return (Ok payload)
+                else
+                  let prefix = Printf.sprintf "llm_%s" llm_tool in
+                  let output =
+                    if response.is_error then "LLM error:\n" ^ response.text else response.text
+                  in
+                  Lwt.return (Ok (Large_response.wrap_string_result ~prefix ~format:"text" output))))
+
+let handle_llm_task args : (Yojson.Safe.t, string) result Lwt.t =
+  let open Lwt.Syntax in
+  let task = get_string "task" args in
+  match task with
+  | None -> Lwt.return (Error "Missing required parameter: task")
+  | Some task ->
+      let provider_name = get_string_any ["provider"; "llm_provider"] args in
+      let llm_tool = get_string_any ["tool_name"; "llm_tool"] args |> Option.value ~default:"codex" in
+      let quality = get_string_or "quality" "best" args in
+      let return_metadata = get_bool_or "return_metadata" false args in
+      let max_context_chars =
+        get_int "max_context_chars" args |> Option.value ~default:120000
+      in
+      let include_plugin =
+        get_bool_or "include_plugin" (quality <> "fast") args
+      in
+      let include_variables =
+        get_bool_or "include_variables" (quality <> "fast") args
+      in
+      let include_image_fills =
+        get_bool_or "include_image_fills" (quality = "best") args
+      in
+      let plugin_depth = get_int "plugin_depth" args |> Option.value ~default:0 in
+      let plugin_include_geometry = get_bool_or "plugin_include_geometry" false args in
+      let plugin_timeout_ms = get_int "plugin_timeout_ms" args |> Option.value ~default:20000 in
+      let plugin_mode = get_string_or "plugin_mode" "selection" args in
+      let file_key = get_string "file_key" args in
+      let node_id = get_string "node_id" args in
+      let token = get_string "token" args in
+      let depth = get_int "depth" args in
+      let geometry = get_string "geometry" args in
+
+      let warnings = ref [] in
+      let add_warning msg = warnings := msg :: !warnings in
+
+      let dsl =
+        match (file_key, node_id, token) with
+        | (Some file_key, Some node_id, Some token) ->
+            let cache_options =
+              List.filter_map Fun.id [
+                Option.map (Printf.sprintf "depth:%d") depth;
+                Option.map (Printf.sprintf "geometry:%s") geometry;
+              ]
+            in
+            let json_result =
+              run_with_effects (fun () ->
+                match Figma_cache.get ~file_key ~node_id ~options:cache_options () with
+                | Some json -> Ok json
+                | None ->
+                    match Figma_effects.Perform.get_nodes ~token ~file_key ~node_ids:[node_id] ?depth ?geometry () with
+                    | Ok json ->
+                        Figma_cache.set ~file_key ~node_id ~options:cache_options json;
+                        Ok json
+                    | Error err -> Error err)
+            in
+            (match json_result with
+             | Error err ->
+                 add_warning ("DSL fetch error: " ^ err);
+                 `Null
+             | Ok json ->
+                 let node_data = match member "nodes" json with
+                   | Some (`Assoc nodes_map) ->
+                       (match List.assoc_opt node_id nodes_map with
+                        | Some n -> member "document" n
+                        | None -> None)
+                   | _ -> None
+                 in
+                 (match node_data with
+                  | None ->
+                      add_warning ("Node not found: " ^ node_id);
+                      `Null
+                  | Some node ->
+                      let node_str = Yojson.Safe.to_string node in
+                      let dsl_str = match process_json_string ~format:"fidelity" node_str with
+                        | Ok s -> s
+                        | Error msg -> msg
+                      in
+                      `String dsl_str))
+        | _ ->
+            add_warning "Missing file_key/node_id/token for DSL context";
+            `Null
+      in
+
+      let variables, variables_source =
+        if include_variables then
+          match (file_key, token) with
+          | (Some file_key, Some token) ->
+              let vars =
+                run_with_effects (fun () -> fetch_variables_cached ~file_key ~token)
+              in
+              (match vars with
+               | Ok (vars_json, source) -> (resolve_variables vars_json, source)
+               | Error err ->
+                   add_warning ("Variables error: " ^ err);
+                   (`Null, `String "error"))
+          | _ ->
+              add_warning "Missing file_key/token for variables context";
+              (`Null, `Null)
+        else
+          (`Null, `Null)
+      in
+
+      let image_fills =
+        if include_image_fills then
+          match (file_key, token) with
+          | (Some file_key, Some token) ->
+              let images =
+                run_with_effects (fun () ->
+                  match Figma_effects.Perform.get_file_images ~token ~file_key () with
+                  | Ok img_json ->
+                      (match member "images" img_json with
+                       | Some (`Assoc _ as m) -> m
+                       | _ -> `Null)
+                  | Error err -> `Assoc [("error", `String err)])
+              in
+              images
+          | _ ->
+              add_warning "Missing file_key/token for image fills context";
+              `Null
+        else
+          `Null
+      in
+
+      let plugin_snapshot =
+        if include_plugin then
+          let resolve_plugin_channel () =
+            match get_string "plugin_channel_id" args with
+            | Some id -> Ok id
+            | None -> resolve_channel_id args
+          in
+          (match resolve_plugin_channel () with
+           | Error msg ->
+               add_warning ("Plugin channel error: " ^ msg);
+               `Assoc [("error", `String msg)]
+           | Ok channel_id ->
+               let use_selection =
+                 plugin_mode = "selection" || node_id = None
+               in
+               if use_selection then
+                 let payload = `Assoc [("depth", `Int plugin_depth)] in
+                 let command_id =
+                   Figma_plugin_bridge.enqueue_command ~channel_id ~name:"read_selection" ~payload
+                 in
+                 (match plugin_wait ~channel_id ~command_id ~timeout_ms:plugin_timeout_ms with
+                  | Error err ->
+                      add_warning ("Plugin selection error: " ^ err);
+                      `Assoc [("error", `String err)]
+                  | Ok result ->
+                      `Assoc [
+                        ("mode", `String "selection");
+                        ("channel_id", `String channel_id);
+                        ("command_id", `String command_id);
+                        ("ok", `Bool result.ok);
+                        ("payload", result.payload);
+                      ])
+               else
+                 match node_id with
+                 | None ->
+                     `Assoc [("error", `String "node_id required for plugin_mode=node")]
+                 | Some node_id ->
+                     let payload = `Assoc [
+                       ("node_id", `String node_id);
+                       ("depth", `Int plugin_depth);
+                       ("include_geometry", `Bool plugin_include_geometry);
+                     ] in
+                     let command_id =
+                       Figma_plugin_bridge.enqueue_command ~channel_id ~name:"get_node" ~payload
+                     in
+                     (match plugin_wait ~channel_id ~command_id ~timeout_ms:plugin_timeout_ms with
+                      | Error err ->
+                          add_warning ("Plugin node error: " ^ err);
+                          `Assoc [("error", `String err)]
+                      | Ok result ->
+                          `Assoc [
+                            ("mode", `String "node");
+                            ("channel_id", `String channel_id);
+                            ("command_id", `String command_id);
+                            ("ok", `Bool result.ok);
+                            ("payload", result.payload);
+                            ("plugin_depth", `Int plugin_depth);
+                          ]))
+        else
+          `Null
+      in
+
+      let context_fields = [
+        ("task", `String task);
+        ("quality", `String quality);
+        ("file_key", (match file_key with Some v -> `String v | None -> `Null));
+        ("node_id", (match node_id with Some v -> `String v | None -> `Null));
+        ("dsl", dsl);
+        ("variables", variables);
+        ("variables_source", variables_source);
+        ("image_fills", image_fills);
+        ("plugin_snapshot", plugin_snapshot);
+      ] in
+      let context_fields =
+        if !warnings = [] then context_fields
+        else ("warnings", `List (List.map (fun s -> `String s) (List.rev !warnings))) :: context_fields
+      in
+      let context_json = `Assoc context_fields in
+      let context_str = Yojson.Safe.pretty_to_string context_json in
+      let max_context_chars = if max_context_chars > 0 then max_context_chars else 120000 in
+      let (context_str, truncated) =
+        if String.length context_str > max_context_chars then
+          let head = String.sub context_str 0 max_context_chars in
+          (head ^ "\n...TRUNCATED...", true)
+        else
+          (context_str, false)
+      in
+      let prompt =
+        let base =
+          Printf.sprintf "Task:\n%s\n\nContext (JSON):\n%s" task context_str
+        in
+        if truncated then
+          base ^ Printf.sprintf "\n\nNote: context truncated to %d chars." max_context_chars
+        else
+          base
+      in
+
+      let llm_args_fields =
+        match get_json "llm_args" args with
+        | None -> Ok []
+        | Some (`Assoc fields) -> Ok fields
+        | Some _ -> Error "llm_args must be an object"
+      in
+      (match llm_args_fields with
+       | Error msg -> Lwt.return (Error msg)
+       | Ok fields ->
+           let fields = set_field "prompt" (`String prompt) fields in
+           let fields =
+             if quality = "fast" then add_if_missing "budget_mode" (`Bool true) fields
+             else fields
+           in
+           let fields =
+             if has_field "response_format" fields then fields
+             else if quality = "fast" then add_if_missing "response_format" (`String "compact") fields
+             else add_if_missing "response_format" (`String "verbose") fields
+           in
+           let fields = add_if_missing "stream" (`Bool false) fields in
+           let arguments = `Assoc fields in
+           (match Llm_provider.resolve ?provider:provider_name () with
+            | Error msg -> Lwt.return (Error msg)
+            | Ok provider ->
+                let llm_url =
+                  get_string_any ["mcp_url"; "llm_url"] args
+                  |> Option.value ~default:provider.default_url
+                in
+                let* llm_result = provider.call_tool ~url:llm_url ~name:llm_tool ~arguments in
+                (match llm_result with
+                 | Error err -> Lwt.return (Error err)
+                 | Ok response ->
+                     if return_metadata then
+                       let payload = `Assoc [
+                         ("provider", `String provider.id);
+                         ("llm_tool", `String llm_tool);
+                         ("llm_url", `String llm_url);
+                         ("quality", `String quality);
+                         ("context_truncated", `Bool truncated);
+                         ("is_error", `Bool response.is_error);
+                         ("response_text", `String response.text);
+                         ("raw", response.raw);
+                       ] in
+                       Lwt.return (Ok payload)
+                     else
+                       let prefix = Printf.sprintf "llm_task_%s" llm_tool in
+                       let output =
+                         if response.is_error then "LLM error:\n" ^ response.text else response.text
+                       in
+                       Lwt.return (Ok (Large_response.wrap_string_result ~prefix ~format:"text" output)))))
 
 (** ============== Phase 1: 탐색 도구 핸들러 ============== *)
 
@@ -3210,7 +3749,12 @@ let handle_get_variables args : (Yojson.Safe.t, string) result =
 
   match (file_key, token) with
   | (Some file_key, Some token) ->
-      (match Figma_effects.Perform.get_variables ~token ~file_key with
+      let json_result =
+        match fetch_variables_cached ~file_key ~token with
+        | Ok (json, _) -> Ok json
+        | Error err -> Error err
+      in
+      (match json_result with
        | Ok json ->
            (match format with
             | "raw" ->
@@ -3545,6 +4089,112 @@ let handle_export_tokens args : (Yojson.Safe.t, string) result =
        | Error err -> Error err)
   | _ -> Error "Missing required parameters: file_key, token"
 
+(** 환경/의존성 점검 핸들러 *)
+let handle_doctor _args : (Yojson.Safe.t, string) result =
+  let mk_check name ok detail =
+    `Assoc [
+      ("name", `String name);
+      ("ok", `Bool ok);
+      ("detail", `String detail);
+    ]
+  in
+  let node_ok = has_command "node" in
+  let node_version =
+    if node_ok then command_output "node -v" else "missing"
+  in
+  let playwright_ok = node_ok && has_node_module "playwright" in
+  let pngjs_ok = node_ok && has_node_module "pngjs" in
+  let pixelmatch_ok = node_ok && has_node_module "pixelmatch" in
+  let magick_ok = has_command "magick" || has_command "convert" in
+  let magick_detail =
+    if has_command "magick" then "magick"
+    else if has_command "convert" then "convert"
+    else "missing"
+  in
+  let sips_ok = has_command "sips" in
+  let render_script = Visual_verifier.render_script_path in
+  let ssim_script = Visual_verifier.ssim_script_path in
+  let render_script_ok = Sys.file_exists render_script in
+  let ssim_script_ok = Sys.file_exists ssim_script in
+
+  let required_ok =
+    node_ok
+    && playwright_ok
+    && pngjs_ok
+    && pixelmatch_ok
+    && magick_ok
+    && render_script_ok
+    && ssim_script_ok
+  in
+
+  let checks = `List [
+    mk_check "node" node_ok node_version;
+    mk_check "playwright" playwright_ok (if playwright_ok then "ok" else "missing");
+    mk_check "pngjs" pngjs_ok (if pngjs_ok then "ok" else "missing");
+    mk_check "pixelmatch" pixelmatch_ok (if pixelmatch_ok then "ok" else "missing");
+    mk_check "imagemagick" magick_ok magick_detail;
+    mk_check "sips" sips_ok (if sips_ok then "ok" else "missing");
+    mk_check "render_script" render_script_ok render_script;
+    mk_check "ssim_script" ssim_script_ok ssim_script;
+  ] in
+
+  let hints =
+    List.filter_map Fun.id [
+      if not node_ok then Some "Install Node.js (node required for render/compare scripts)." else None;
+      if node_ok && not playwright_ok then Some "Install Playwright: npm i -D playwright && npx playwright install chromium." else None;
+      if node_ok && (not pngjs_ok || not pixelmatch_ok) then Some "Install image deps: npm i -D pngjs pixelmatch." else None;
+      if not magick_ok then Some "Install ImageMagick (magick/convert) for PPM conversion." else None;
+      if not render_script_ok then Some "Ensure render-html.js path is valid (FIGMA_RENDER_SCRIPT or scripts/render-html.js)." else None;
+      if not ssim_script_ok then Some "Ensure ssim-compare.js path is valid (scripts/ssim-compare.js)." else None;
+    ]
+  in
+
+  let result = `Assoc [
+    ("status", `String (if required_ok then "ok" else "needs_attention"));
+    ("checks", checks);
+    ("hints", `List (List.map (fun h -> `String h) hints));
+  ] in
+  Ok (make_text_content (Yojson.Safe.pretty_to_string result))
+
+(** large_result 파일 읽기 핸들러 *)
+let handle_read_large_result args : (Yojson.Safe.t, string) result =
+  let file_path = get_string "file_path" args in
+  let offset = get_int "offset" args |> Option.value ~default:0 in
+  let limit = get_int "limit" args |> Option.value ~default:20000 in
+
+  match file_path with
+  | None -> Error "Missing required parameter: file_path"
+  | Some path ->
+      let storage_dir = Large_response.storage_dir in
+      if not (is_under_dir ~dir:storage_dir path) then
+        Error (Printf.sprintf "file_path must be under %s" storage_dir)
+      else if not (Sys.file_exists path) then
+        Error (Printf.sprintf "File not found: %s" path)
+      else
+        let safe_offset = max 0 offset in
+        let safe_limit = if limit <= 0 then 20000 else limit in
+        let ic = open_in_bin path in
+        let total = in_channel_length ic in
+        if safe_offset >= total then begin
+          close_in ic;
+          Error "offset is beyond EOF"
+        end else begin
+          seek_in ic safe_offset;
+          let to_read = min safe_limit (total - safe_offset) in
+          let chunk = really_input_string ic to_read in
+          close_in ic;
+          let result = `Assoc [
+            ("file_path", `String path);
+            ("offset", `Int safe_offset);
+            ("limit", `Int safe_limit);
+            ("read_bytes", `Int to_read);
+            ("total_bytes", `Int total);
+            ("eof", `Bool (safe_offset + to_read >= total));
+            ("chunk", `String chunk);
+          ] in
+          Ok (make_text_content (Yojson.Safe.pretty_to_string result))
+        end
+
 (** 캐시 통계 핸들러 *)
 let handle_cache_stats _args : (Yojson.Safe.t, string) result =
   let stats = Figma_cache.stats () in
@@ -3563,9 +4213,6 @@ let handle_cache_invalidate args : (Yojson.Safe.t, string) result =
   Ok (`Assoc [("status", `String "ok"); ("message", `String message)])
 
 (** ============== 핸들러 맵 ============== *)
-
-(** 실행 모드 설정 - HTTP 서버에서 변경됨 *)
-let is_http_mode = ref false
 
 (** sync 핸들러를 Lwt로 래핑.
     - stdio 모드: Effect 핸들러로 감싸서 실행 (테스트 가능)
@@ -3620,6 +4267,8 @@ let all_handlers : (string * tool_handler) list = [
   ("figma_plugin_export_node_image", wrap_sync handle_plugin_export_node_image);
   ("figma_plugin_get_variables", wrap_sync handle_plugin_get_variables);
   ("figma_plugin_apply_ops", wrap_sync handle_plugin_apply_ops);
+  ("figma_llm_call", handle_llm_call);
+  ("figma_llm_task", handle_llm_task);
   (* Phase 1: 탐색 도구 *)
   ("figma_parse_url", wrap_sync handle_parse_url);
   ("figma_get_me", wrap_sync handle_get_me);
@@ -3634,6 +4283,8 @@ let all_handlers : (string * tool_handler) list = [
   ("figma_tree", wrap_sync handle_tree);
   ("figma_stats", wrap_sync handle_stats);
   ("figma_export_tokens", wrap_sync handle_export_tokens);
+  ("figma_doctor", wrap_sync handle_doctor);
+  ("figma_read_large_result", wrap_sync handle_read_large_result);
   (* 캐시 관리 *)
   ("figma_cache_stats", wrap_sync handle_cache_stats);
   ("figma_cache_invalidate", wrap_sync handle_cache_invalidate);
@@ -3716,7 +4367,7 @@ let read_resource uri =
 - Plugin snapshots include `text.segments` + range bounds when available
 - `plugin_variables` is available when `include_plugin_variables=true` (Variables API fallback)
 - `plugin_image` is available when `include_plugin_image=true` (base64 render)
-- `variables_source` indicates whether variables came from REST or plugin
+- `variables_source` indicates whether variables came from REST, cache, or plugin
 - Use `use_absolute_bounds=true` for render bounds in image exports
 
 ## Fidelity scoring (all-axes)
@@ -3727,8 +4378,9 @@ let read_resource uri =
 
 ## node_id format
 - Figma URL shows `node-id=2089-11127` (hyphen), but API expects `2089:11127` (colon)
-- MCP tools require colon format: `figma_get_node`, `figma_get_node_with_image`
+- MCP tools recommend colon format: `figma_get_node`, `figma_get_node_with_image`
 - Convert: `2089-11127` -> `2089:11127`
+- MCP tools normalize hyphen format automatically (URL format accepted)
 |} in
       Ok ("text/markdown", body)
   | "figma://docs/usage" ->
@@ -3768,8 +4420,9 @@ let read_resource uri =
 
 ## node_id format
 - Figma URL shows `node-id=2089-11127` (hyphen), but API expects `2089:11127` (colon)
-- MCP tools require colon format: `figma_get_node`, `figma_get_node_with_image`
+- MCP tools recommend colon format: `figma_get_node`, `figma_get_node_with_image`
 - Convert: `2089-11127` -> `2089:11127`
+- MCP tools normalize hyphen format automatically (URL format accepted)
 - Tip: `figma_parse_url` returns a ready-to-use `node_id`
 
 ## Variables
@@ -3777,6 +4430,12 @@ let read_resource uri =
 
 ## Raw JSON
 - Use `format=raw` to get lossless JSON (largest output)
+
+## gRPC streaming
+- `GetNodeStream` supports `recursive=true` to stream full subtrees
+- Use `recursive_max_depth` / `recursive_max_nodes` for safety
+- `PlanTasks` supports `recursive=true` to generate divide-and-conquer task lists
+- `grpcurl` 사용 시 reflection이 비활성화되어 있으므로 `-import-path proto -proto figma.proto` 옵션 필요
 
 ## Pixel accuracy
 - Pair DSL with images via `figma_get_node_with_image`

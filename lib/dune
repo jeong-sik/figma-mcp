@@ -10,6 +10,7 @@
    lwt
    lwt.unix
    cohttp-lwt-unix
+   conduit-lwt-unix
    ;; Eio (HTTP server + Effect handlers)
    eio
    eio_main

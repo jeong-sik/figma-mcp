@@ -23,7 +23,7 @@ Capabilities: tools ✅ · resources ✅ · prompts ✅
 
 | Capability | 상태 | 설명 |
 |------------|------|------|
-| **tools** | ✅ 지원 | 43개 도구 (아래 목록 참조) |
+| **tools** | ✅ 지원 | 47개 도구 (아래 목록 참조) |
 | **resources** | ✅ 지원 | `figma://docs/*` 가이드 |
 | **prompts** | ✅ 지원 | Fidelity 리뷰 프롬프트 |
 
@@ -43,7 +43,11 @@ echo '{"jsonrpc":"2.0","id":4,"method":"prompts/list","params":{}}' | ./start-fi
 echo '{"jsonrpc":"2.0","id":5,"method":"prompts/get","params":{"name":"figma_fidelity_review"}}' | ./start-figma-mcp.sh
 ```
 
-## 도구 목록 (43개)
+## Recipes
+
+- `docs/RECIPES.md` - end-to-end usage patterns (quickstart, high fidelity, large nodes)
+
+## 도구 목록 (47개)
 
 ### Phase 1: Core
 | Tool | 설명 | 테스트 |
@@ -59,7 +63,7 @@ echo '{"jsonrpc":"2.0","id":5,"method":"prompts/get","params":{"name":"figma_fid
 | `figma_image_similarity` | 렌더 이미지 SSIM/PSNR 비교 | ✅ |
 | `figma_export_image` | 노드를 PNG/JPG/SVG/PDF URL로 내보내기 | ✅ |
 | `figma_get_image_fills` | 파일 내 이미지 채움(image fills) 원본 URL | ✅ |
-| `figma_get_file_nodes` | 여러 노드 ID를 한번에 조회 | ✅ |
+| `figma_get_nodes` | 여러 노드 ID를 한번에 조회 | ✅ |
 | `figma_get_file_versions` | 파일 버전 목록 조회 | ✅ |
 | `figma_get_file_comments` | 파일 코멘트 목록 조회 | ✅ |
 | `figma_post_comment` | 파일 코멘트 생성 | ✅ |
@@ -80,6 +84,8 @@ echo '{"jsonrpc":"2.0","id":5,"method":"prompts/get","params":{"name":"figma_fid
 | `figma_plugin_export_node_image` | 플러그인 exportAsync 이미지(base64) | ✅ |
 | `figma_plugin_get_variables` | 플러그인 Variables API 추출 | ✅ |
 | `figma_plugin_apply_ops` | 플러그인으로 create/update/delete | ✅ |
+| `figma_llm_call` | llm-mcp 프록시 호출 | ✅ |
+| `figma_llm_task` | Figma 컨텍스트 + Plugin 스냅샷 → LLM 작업 | ✅ |
 
 ### Phase 1.5: Visual Feedback Loop (95%+ 정확도)
 | Tool | 설명 | 테스트 |
@@ -141,8 +147,9 @@ figma_evolution_report
 
 ### node_id 형식 (중요)
 - Figma URL에서는 `node-id=2089-11127`(하이픈)처럼 보이지만, API는 `2089:11127`(콜론) 형식만 받습니다.
-- MCP 도구(`figma_get_node`, `figma_get_node_with_image`)의 `node_id`는 반드시 콜론 형식으로 전달하세요.
+- MCP 도구(`figma_get_node`, `figma_get_node_with_image`)의 `node_id`는 콜론 형식이 권장입니다.
 - 변환 규칙: `2089-11127` -> `2089:11127`
+- MCP 도구/gRPC는 하이픈 형식도 자동 정규화합니다.
 - 팁: `figma_parse_url`로 URL에서 `node_id`를 추출하면 바로 사용할 수 있습니다.
 
 예시:
@@ -189,7 +196,7 @@ Figma MCP 결과를 정량화된 리포트로 저장합니다.
   --out "$HOME/me/logs/figma-accuracy-123_456.json"
 ```
 
-- 기본 MCP URL: `http://127.0.0.1:8940/mcp` (`FIGMA_MCP_URL`로 변경 가능)
+- 기본 MCP URL: `http://localhost:8940/mcp` (`FIGMA_MCP_URL`로 변경 가능)
 - 비교 노드가 있으면 `--compare-node-id`로 SSIM/PSNR도 기록
 
 ### Phase 2: Navigation & Search
@@ -211,6 +218,14 @@ Figma MCP 결과를 정량화된 리포트로 저장합니다.
 | `figma_compare` | 두 노드 비교 (Web/Mobile 일관성 검사) | ✅ |
 | `figma_export_tokens` | CSS/Tailwind/JSON 디자인 토큰 추출 | ✅ |
 
+### Phase 4: Ops & Cache
+| Tool | 설명 | 테스트 |
+|------|------|--------|
+| `figma_doctor` | 로컬 의존성/스크립트 경로 점검 | ✅ |
+| `figma_read_large_result` | large_result 파일 chunk 읽기 | ✅ |
+| `figma_cache_stats` | L1/L2 캐시 통계 조회 | ✅ |
+| `figma_cache_invalidate` | 캐시 무효화 | ✅ |
+
 ### 테스트 현황 (2026-01-14)
 - **성공**: 15/16 도구 (Core 기준)
 - **제한**: `figma_get_variables` - Figma Variables API는 Enterprise 플랜 또는 추가 OAuth 스코프 필요
@@ -230,6 +245,18 @@ dune build
 
 # 실행 (로컬 빌드)
 dune exec figma-mcp
+```
+
+## 토큰 설정 (Keychain)
+
+`start-figma-mcp.sh`와 `start-figma-mcp-http.sh`는 Keychain에서 `FIGMA_TOKEN`을 읽습니다.
+
+```bash
+# 1) 환경변수로 실행 (일회성)
+export FIGMA_TOKEN="YOUR_TOKEN"
+
+# 2) Keychain 저장 (권장)
+security add-generic-password -s "figma-mcp" -a "FIGMA_TOKEN" -w "YOUR_TOKEN"
 ```
 
 ## Claude Code MCP 설정
@@ -263,7 +290,7 @@ REST API만으로 부족한 레이아웃/스타일 정보를 보강하려면 플
   생성된 `manifest.json`의 숫자 ID로 `plugin/manifest.json`의 `id` 교체
 - `allowedDomains` 에 `http://localhost:...` 넣으면 오류가 날 수 있으니,
   로컬은 `devAllowedDomains`에만 넣고 `allowedDomains`는 https 도메인만 유지
-- `devAllowedDomains`는 `localhost`만 허용되는 경우가 있어 `127.0.0.1` 대신 `localhost` 사용 권장
+- Figma는 `devAllowedDomains`에서 IP(예: `127.0.0.1`)를 거부할 수 있으니 `localhost`만 사용
 - Dev Mode 패널에서 실행하려면 `capabilities: ["inspect", "codegen"]` + `codegenLanguages`가 필요
 
 3) 플러그인 실행 후 채널 연결
@@ -283,6 +310,8 @@ figma_get_node_bundle
   node_id: "123:456"
   include_plugin: true
   plugin_channel_id: "ch-..."
+  plugin_depth: 0
+  plugin_include_geometry: false
   include_plugin_variables: true
   include_plugin_image: true
 ```
@@ -294,6 +323,11 @@ figma_plugin_export_node_image
 
 figma_plugin_get_variables
 ```
+
+플러그인 스냅샷 옵션:
+- `plugin_depth`: 큰 섹션은 `0`으로, 필요한 경우 `1~2`로 점진 증가
+- `plugin_include_geometry`: 아이콘/벡터가 필요할 때만 `true`
+- `figma_plugin_get_node`는 `include_geometry`로 벡터 포함 여부 제어
 주의: 플러그인 이미지 응답은 base64이므로 출력이 커집니다. (download 옵션은 REST 이미지에만 적용)
 
 HTTP 엔드포인트:
@@ -301,6 +335,116 @@ HTTP 엔드포인트:
 - `POST /plugin/poll`
 - `POST /plugin/result`
 - `GET  /plugin/status`
+`/plugin/poll`은 `wait_ms`(또는 `timeout_ms`)를 지원합니다. (long-poll, ms 단위)
+최대 대기 시간은 `FIGMA_PLUGIN_POLL_MAX_MS`로 제한됩니다. (기본 30000ms)
+
+## LLM Bridge (MCP 슬롯)
+
+플러그인 스냅샷(텍스트 세그먼트/라인 bounds 등)과 DSL을 함께 넣어 MCP endpoint로 전달합니다.
+
+1) llm-mcp 서버 실행
+```bash
+cd ~/me/workspace/yousleepwhen/llm-mcp
+./start-llm-mcp.sh --port 8932
+export MCP_SLOT_URL="http://127.0.0.1:8932/mcp"
+```
+
+2) LLM 작업 실행
+```
+figma_llm_task
+  task: "Generate HTML/CSS that matches the Figma layout. Output only code."
+  file_key: "..."
+  node_id: "123:456"
+  token: "$FIGMA_TOKEN"
+  include_plugin: true
+  plugin_channel_id: "ch-..."
+  plugin_depth: 0
+  llm_tool: "codex"
+  llm_args:
+    model: "gpt-5.2"
+```
+
+고급 사용 (직접 프롬프트 전달):
+```
+figma_llm_call
+  llm_tool: "claude-cli"
+  prompt: "Summarize this layout..."
+```
+
+슬롯 교체:
+- `MCP_SLOT_URL`로 MCP endpoint 교체
+- `LLM_PROVIDER=mcp-http` (기본값), 다른 provider 추가 가능
+
+슬롯 개념:
+- figma-mcp는 LLM과 강결합하지 않습니다.
+- `MCP_SLOT_URL`을 바꾸면 원하는 MCP endpoint로 도킹해 호출합니다.
+
+### MCP 슬롯 가이드
+
+- 기본 슬롯: `MCP_SLOT_URL` (없으면 `LLM_MCP_URL` -> 기본값)
+- 타임아웃: `MCP_SLOT_TIMEOUT_MS` (없으면 `LLM_MCP_TIMEOUT_MS`)
+- provider 선택: `LLM_PROVIDER=mcp-http|stub`
+
+런타임에서 직접 override:
+```
+figma_llm_call
+  mcp_url: "http://127.0.0.1:8932/mcp"
+  tool_name: "codex"
+  prompt: "Generate HTML..."
+```
+
+슬롯이 비어 있으면 `figma_llm_*`만 실패하고 나머지 도구는 정상 동작합니다.
+
+## gRPC Streaming (대용량 응답)
+
+대형 노드/반복 깊이 증가 작업은 gRPC 스트리밍이 유리합니다.
+
+```bash
+# gRPC 단독 실행
+./figma-mcp --grpc-port 50052
+
+# HTTP + gRPC 동시 실행
+./figma-mcp --port 8940 --grpc-port 50052
+```
+
+서비스/메서드:
+- `figma.v1.FigmaService/GetNodeStream` (server streaming)
+- `figma.v1.FigmaService/FidelityLoop` (server streaming)
+- `figma.v1.FigmaService/GetSplitStream` (server streaming)
+- `figma.v1.FigmaService/GetFileMeta` (unary)
+
+테스트 (reflection 비활성화: proto 지정 필요):
+```bash
+grpcurl -plaintext -import-path proto -proto figma.proto \
+  -d '{"file_key":"...","node_id":"...","token":"..."}' \
+  localhost:50052 figma.v1.FigmaService/GetNodeStream
+```
+
+재귀 스트림(하위 노드 전체 확장):
+```bash
+grpcurl -plaintext -import-path proto -proto figma.proto \
+  -d '{"file_key":"...","node_id":"...","token":"...","recursive":true}' \
+  localhost:50052 figma.v1.FigmaService/GetNodeStream
+```
+
+옵션:
+- `recursive_max_depth` (기본 20, env: `FIGMA_RECURSIVE_MAX_DEPTH`)
+- `recursive_max_nodes` (기본 5000, env: `FIGMA_RECURSIVE_MAX_NODES`)
+- `recursive_depth_per_call` (기본 1, env: `FIGMA_RECURSIVE_DEPTH_PER_CALL`)
+- 재귀 모드는 중복을 피하려고 각 노드를 단일 레벨(자식 제거)로 스트림합니다.
+
+요구사항 분석 + 분할정복 플랜:
+```bash
+grpcurl -plaintext -import-path proto -proto figma.proto \
+  -d '{"file_key":"...","node_id":"...","token":"...","recursive":true}' \
+  localhost:50052 figma.v1.FigmaService/PlanTasks
+```
+
+PlanTasks 응답 추가 필드:
+- `summary`: 우선순위/토큰 요약
+- `requirements_json`: 노드 타입/오토레이아웃/이미지 fill 등 분석 결과
+
+프로토콜 정의는 `proto/figma.proto`를 참고하세요.
 
 ## Fidelity DSL 포맷 (정확도 우선)
 
