@@ -48,6 +48,16 @@ module Response = struct
     let response = Httpun.Response.create ~headers status in
     Httpun.Reqd.respond_with_string reqd response body
 
+  let accepted reqd =
+    let headers = Httpun.Headers.of_list [
+      ("content-length", "0");
+      ("access-control-allow-origin", "*");
+      ("access-control-allow-methods", "GET, POST, OPTIONS");
+      ("access-control-allow-headers", "Content-Type, Accept");
+    ] in
+    let response = Httpun.Response.create ~headers `Accepted in
+    Httpun.Reqd.respond_with_string reqd response ""
+
   let not_found reqd =
     text ~status:`Not_found "404 Not Found" reqd
 
@@ -118,6 +128,25 @@ let process_mcp_request_sync (server : Mcp_protocol.mcp_server) body_str =
         `Null Mcp_protocol.parse_error msg None in
       Yojson.Safe.to_string err_response
 
+type mcp_message_kind =
+  [ `Request | `Notification | `Response | `Unknown ]
+
+let classify_message body_str =
+  match Yojson.Safe.from_string body_str with
+  | exception _ -> `Unknown
+  | `Assoc fields ->
+      let has_method = List.mem_assoc "method" fields in
+      let id = List.assoc_opt "id" fields in
+      let has_result = List.mem_assoc "result" fields in
+      let has_error = List.mem_assoc "error" fields in
+      (match has_method, id with
+       | true, None
+       | true, Some `Null -> `Notification
+       | true, Some _ -> `Request
+       | false, Some _ when has_result || has_error -> `Response
+       | _ -> `Unknown)
+  | _ -> `Unknown
+
 (** ============== SSE Helpers ============== *)
 
 (** SSE client registry for shutdown notification *)
@@ -174,8 +203,12 @@ let health_handler _request reqd =
 (** MCP POST handler - async body reading with callback-based response *)
 let mcp_post_handler server _request reqd =
   Request.read_body_async reqd (fun body_str ->
-    let response_str = process_mcp_request_sync server body_str in
-    Response.json response_str reqd
+    match classify_message body_str with
+    | `Notification | `Response ->
+        Response.accepted reqd
+    | `Request | `Unknown ->
+        let response_str = process_mcp_request_sync server body_str in
+        Response.json response_str reqd
   )
 
 (** MCP SSE handler for streamable-http protocol (GET /mcp) *)

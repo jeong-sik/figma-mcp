@@ -103,6 +103,14 @@ let parse_request json_str : (json_rpc_request, string) result =
   | Yojson.Json_error msg -> Result.Error (sprintf "JSON parse error: %s" msg)
   | _ -> Result.Error "Unknown parse error"
 
+let is_notification_id = function
+  | None -> true
+  | Some `Null -> true
+  | _ -> false
+
+let is_notification req =
+  is_notification_id req.id
+
 (** ============== 응답 생성 ============== *)
 
 let make_success_response id result : Yojson.Safe.t =
@@ -363,7 +371,7 @@ let process_request server req : Yojson.Safe.t Lwt.t =
   | "initialize" ->
       Lwt.return (make_success_response id (handle_initialize req.params))
 
-  | "initialized" ->
+  | "initialized" | "notifications/initialized" ->
       (* 알림 - 응답 불필요하지만 여기서는 빈 응답 *)
       Lwt.return (make_success_response id `Null)
 
@@ -410,11 +418,15 @@ let run_stdio_server server =
       if String.trim line <> "" then begin
         match parse_request line with
         | Ok req ->
-            (* stdio 모드: Lwt_main.run으로 비동기 핸들러 실행 *)
-            let response = Lwt_main.run (process_request server req) in
-            let response_str = Yojson.Safe.to_string response in
-            print_endline response_str;
-            flush stdout
+            if is_notification req then
+              (* Notification: no response on stdout per JSON-RPC *)
+              ignore (Lwt_main.run (process_request server req))
+            else
+              (* stdio 모드: Lwt_main.run으로 비동기 핸들러 실행 *)
+              let response = Lwt_main.run (process_request server req) in
+              let response_str = Yojson.Safe.to_string response in
+              print_endline response_str;
+              flush stdout
         | Error msg ->
             let err_response = make_error_response `Null parse_error msg None in
             print_endline (Yojson.Safe.to_string err_response);
