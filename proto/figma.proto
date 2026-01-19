@@ -348,6 +348,12 @@ message GetNodeRequest {
   bool plugin_data = 8;       // plugin_data=shared
   bool branch_data = 9;
   string version = 10;        // specific file version
+
+  // Recursive mode (fetch subtree by expanding children IDs)
+  bool recursive = 11;                 // default: false
+  optional int32 recursive_max_depth = 12;       // default: 20 (server env override)
+  optional int32 recursive_max_nodes = 13;       // default: 5000 (server env override)
+  optional int32 recursive_depth_per_call = 14;  // default: 1 (server env override)
 }
 
 // Streamed node - one per node in the tree
@@ -362,7 +368,7 @@ message FigmaNode {
   int32 child_count = 12;
 
   // DSL representation (compressed)
-  bytes dsl = 20;  // Fidelity DSL, gzip compressed
+  bytes dsl = 20;  // Fidelity DSL (raw bytes, uncompressed by default)
 
   // Progress info
   int32 node_index = 30;
@@ -423,12 +429,12 @@ message FidelityProgress {
   float current_score = 3;
 
   // DSL at current depth (allows early termination)
-  bytes dsl = 10;  // gzip compressed
+  bytes dsl = 10;  // raw bytes (uncompressed by default)
 
   // Result (only when done or failed)
   bool done = 20;
   bool success = 21;
-  bytes final_dsl = 22;  // gzip compressed
+  bytes final_dsl = 22;  // raw bytes (uncompressed by default)
   string error = 23;
 
   // Stats
@@ -633,6 +639,12 @@ message PlanTasksRequest {
   string token = 3;
   optional int32 depth = 4;         // Max depth to traverse (default: unlimited)
   optional int32 max_tasks = 5;     // Max tasks to return (default: 100)
+
+  // Recursive mode (expand subtree via per-node fetch)
+  bool recursive = 10;              // default: false
+  optional int32 recursive_max_depth = 11;       // default: 20 (server env override)
+  optional int32 recursive_max_nodes = 12;       // default: 5000 (server env override)
+  optional int32 recursive_depth_per_call = 13;  // default: 1 (server env override)
 }
 
 // Response containing the ordered task list
@@ -640,6 +652,8 @@ message PlanTasksResponse {
   repeated Task tasks = 1;          // Tasks in execution order
   int32 total_estimated_tokens = 2; // Sum of all task token estimates
   string root_node_id = 3;          // Starting node ID
+  string summary = 4;               // Human-readable summary
+  string requirements_json = 5;     // JSON-encoded requirements breakdown
 }
 
 // ============================================================

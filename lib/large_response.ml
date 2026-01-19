@@ -30,6 +30,19 @@ let human_size bytes =
   else if bytes < 1024 * 1024 then sprintf "%.1f KB" (float_of_int bytes /. 1024.0)
   else sprintf "%.1f MB" (float_of_int bytes /. 1024.0 /. 1024.0)
 
+(** MCP content wrapper *)
+let text_content text =
+  `Assoc [
+    ("content", `List [
+      `Assoc [("type", `String "text"); ("text", `String text)]
+    ])
+  ]
+
+let add_meta base meta =
+  match base with
+  | `Assoc fields -> `Assoc (fields @ meta)
+  | _ -> base
+
 (** 고유 파일명 생성 *)
 let generate_filename ~prefix =
   let timestamp = Unix.gettimeofday () in
@@ -107,16 +120,20 @@ let wrap_string_result ~prefix ~format (content : string) : Yojson.Safe.t =
   let size = String.length content in
 
   if size <= max_inline_size then
-    `Assoc [("type", `String "text"); ("text", `String content)]
+    text_content content
   else begin
     let filepath = save_to_file ~prefix content in
-    `Assoc [
+    let message = sprintf
+      "Large result saved to %s (%s). Use read_file or chunked loading."
+      filepath (human_size size)
+    in
+    add_meta (text_content message) [
       ("status", `String "large_result");
       ("file_path", `String filepath);
       ("size_bytes", `Int size);
       ("size_human", `String (human_size size));
       ("format", `String format);
-      ("hint", `String "Content saved to file. Use read_file or cat to access.");
+      ("hint", `String "Content saved to file. Use read_file or figma_get_node_chunk for progressive loading.");
     ]
   end
 
@@ -194,7 +211,7 @@ let analyze_node_count count : node_analysis =
     | Critical -> [
         "REQUIRED: Use figma_get_node_chunk with depth ranges";
         "Example: figma_get_node_chunk(depth_start=0, depth_end=2) → then (depth_start=3, depth_end=5)";
-        "Or use figma_get_file_nodes to fetch specific node IDs only";
+        "Or use figma_get_nodes to fetch specific node IDs only";
       ]
   in
   { total_nodes = count; estimated_tokens = tokens; level; message; recommendations }
@@ -277,17 +294,19 @@ let wrap_dsl_with_warning ~prefix ~format ~node_count (dsl : string) : Yojson.Sa
   if size <= max_inline_size then begin
     (* 인라인 가능 *)
     if analysis.level = Info then
-      `Assoc [("type", `String "text"); ("text", `String dsl)]
+      text_content dsl
     else
-      `Assoc [
+      add_meta (text_content dsl) [
         ("_warning", analysis_to_json analysis);
-        ("type", `String "text");
-        ("text", `String dsl);
       ]
   end else begin
     (* 파일로 저장 *)
     let filepath = save_to_file ~prefix dsl in
-    `Assoc [
+    let message = sprintf
+      "Large DSL saved to %s (%s). Use chunked loading if needed."
+      filepath (human_size size)
+    in
+    add_meta (text_content message) [
       ("_warning", analysis_to_json analysis);
       ("status", `String "large_result");
       ("file_path", `String filepath);

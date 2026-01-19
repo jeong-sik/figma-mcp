@@ -9,10 +9,12 @@ let test_small_response_inline () =
   let small_content = String.make 1000 'x' in (* 1KB *)
   let result = Large_response.wrap_string_result ~prefix:"test" ~format:"fidelity" small_content in
   let open Yojson.Safe.Util in
-  let result_type = result |> member "type" |> to_string_option in
+  let content = result |> member "content" |> to_list in
+  let first = List.hd content in
+  let result_type = first |> member "type" |> to_string_option in
   check (option string) "small response has type" (Some "text") result_type;
-  let text = result |> member "text" |> to_string_option in
-  check bool "text content preserved" true (Option.is_some text)
+  let text = first |> member "text" |> to_string_option in
+  check (option string) "text content preserved" (Some small_content) text
 
 let test_large_response_to_file () =
   (* 500KB 초과는 파일로 저장 *)

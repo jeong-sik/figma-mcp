@@ -24,6 +24,7 @@
   ; Standard dependencies
   (yojson (>= 2.0))
   (cohttp-lwt-unix (>= 5.0))
+  (conduit-lwt-unix (>= 5.0))
   (lwt (>= 5.6))
   (uri (>= 4.2))
   (cmdliner (>= 1.1))

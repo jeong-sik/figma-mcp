@@ -21,7 +21,7 @@ type config = {
 
 let default_config = {
   port = 8933;
-  host = "127.0.0.1";
+  host = "localhost";
   max_connections = 64;
 }
 
@@ -33,6 +33,7 @@ module Response = struct
       ("content-type", "text/plain; charset=utf-8");
       ("content-length", string_of_int (String.length body));
       ("access-control-allow-origin", "*");
+      ("access-control-allow-private-network", "true");
     ] in
     let response = Httpun.Response.create ~headers status in
     Httpun.Reqd.respond_with_string reqd response body
@@ -43,7 +44,8 @@ module Response = struct
       ("content-length", string_of_int (String.length body));
       ("access-control-allow-origin", "*");
       ("access-control-allow-methods", "GET, POST, OPTIONS");
-      ("access-control-allow-headers", "Content-Type, Accept");
+      ("access-control-allow-headers", "Content-Type, Accept, Access-Control-Request-Private-Network");
+      ("access-control-allow-private-network", "true");
     ] in
     let response = Httpun.Response.create ~headers status in
     Httpun.Reqd.respond_with_string reqd response body
@@ -53,7 +55,8 @@ module Response = struct
       ("content-length", "0");
       ("access-control-allow-origin", "*");
       ("access-control-allow-methods", "GET, POST, OPTIONS");
-      ("access-control-allow-headers", "Content-Type, Accept");
+      ("access-control-allow-headers", "Content-Type, Accept, Access-Control-Request-Private-Network");
+      ("access-control-allow-private-network", "true");
     ] in
     let response = Httpun.Response.create ~headers `Accepted in
     Httpun.Reqd.respond_with_string reqd response ""
@@ -65,7 +68,8 @@ module Response = struct
     let headers = Httpun.Headers.of_list [
       ("access-control-allow-origin", "*");
       ("access-control-allow-methods", "GET, POST, OPTIONS");
-      ("access-control-allow-headers", "Content-Type, Accept");
+      ("access-control-allow-headers", "Content-Type, Accept, Access-Control-Request-Private-Network");
+      ("access-control-allow-private-network", "true");
       ("content-length", "0");
     ] in
     let response = Httpun.Response.create ~headers `No_content in
@@ -78,6 +82,7 @@ module Response = struct
       ("cache-control", "no-cache");
       ("connection", "keep-alive");
       ("access-control-allow-origin", "*");
+      ("access-control-allow-private-network", "true");
     ] in
     let response = Httpun.Response.create ~headers `OK in
     let body = Httpun.Reqd.respond_with_streaming reqd response in
@@ -117,7 +122,7 @@ let process_mcp_request_sync (server : Mcp_protocol.mcp_server) body_str =
   Mcp_tools.is_http_mode := true;
   match Mcp_protocol.parse_request body_str with
   | Ok req ->
-      (* HTTP 모드에서는 wrap_sync가 Effect 없이 직접 실행하므로
+      (* HTTP 모드: wrap_sync가 Effect 없이 직접 실행하므로
          여기서 한 번만 Lwt_main.run 호출 *)
       let response_json = Figma_effects.run_with_real_api (fun () ->
         Lwt_main.run (Mcp_protocol.process_request server req)
@@ -201,16 +206,21 @@ let health_handler _request reqd =
   Response.json json reqd
 
 (** MCP POST handler - async body reading with callback-based response *)
-let mcp_post_handler server _request reqd =
+let run_mcp_request ~domain_mgr server body_str =
+  match domain_mgr with
+  | Some mgr -> Eio.Domain_manager.run mgr (fun () -> process_mcp_request_sync server body_str)
+  | None -> process_mcp_request_sync server body_str
+
+let mcp_post_handler ~domain_mgr server _request reqd =
   Request.read_body_async reqd (fun body_str ->
     match classify_message body_str with
     | `Notification ->
-        ignore (process_mcp_request_sync server body_str);
+        ignore (run_mcp_request ~domain_mgr server body_str);
         Response.accepted reqd
     | `Response ->
         Response.accepted reqd
     | `Request | `Unknown ->
-        let response_str = process_mcp_request_sync server body_str in
+        let response_str = run_mcp_request ~domain_mgr server body_str in
         Response.json response_str reqd
   )
 
@@ -239,6 +249,17 @@ let mcp_sse_handler ~clock _request reqd =
   )
 
 (** ============== Plugin Bridge Handlers ============== *)
+
+let plugin_ttl_seconds =
+  try float_of_int (int_of_string (Sys.getenv "FIGMA_PLUGIN_TTL"))
+  with Not_found -> 1800.0
+
+let plugin_poll_max_ms =
+  try int_of_string (Sys.getenv "FIGMA_PLUGIN_POLL_MAX_MS")
+  with Not_found -> 30000
+
+let plugin_cleanup () =
+  Figma_plugin_bridge.cleanup_inactive ~ttl_seconds:plugin_ttl_seconds
 
 let json_error ?(status=`Bad_request) msg reqd =
   let body = Yojson.Safe.to_string (`Assoc [("error", `String msg)]) in
@@ -279,13 +300,49 @@ let get_payload_field key = function
        | _ -> None)
   | _ -> None
 
+let clamp_poll_ms value =
+  let value = max 0 value in
+  if value > plugin_poll_max_ms then plugin_poll_max_ms else value
+
+let wait_for_commands ~clock ~channel_id ~max ~timeout_ms =
+  let commands = Figma_plugin_bridge.poll_commands ~channel_id ~max in
+  if commands <> [] || timeout_ms <= 0 then
+    commands
+  else begin
+    let promise, resolver = Eio.Promise.create () in
+    let waiter_id =
+      Figma_plugin_bridge.register_waiter ~channel_id ~notify:(fun () ->
+        try Eio.Promise.resolve resolver () with _ -> ())
+    in
+    let commands_after = Figma_plugin_bridge.poll_commands ~channel_id ~max in
+    if commands_after <> [] then begin
+      Figma_plugin_bridge.unregister_waiter ~channel_id ~waiter_id;
+      commands_after
+    end else begin
+      let wait_s = float_of_int timeout_ms /. 1000.0 in
+      let result =
+        match Eio.Time.with_timeout clock wait_s (fun () ->
+          Eio.Promise.await promise;
+          Ok `Woke) with
+        | Ok `Woke -> `Woke
+        | Error `Timeout -> `Timeout
+      in
+      Figma_plugin_bridge.unregister_waiter ~channel_id ~waiter_id;
+      match result with
+      | `Woke -> Figma_plugin_bridge.poll_commands ~channel_id ~max
+      | `Timeout -> []
+    end
+  end
+
 let plugin_connect_handler _request reqd =
   Request.read_body_async reqd (fun body_str ->
+    plugin_cleanup ();
     match parse_json body_str with
     | Error msg -> json_error msg reqd
     | Ok json ->
         let channel_id = get_string_field "channel_id" json in
         let channel_id = Figma_plugin_bridge.register_channel ?channel_id () in
+        eprintf "[Plugin] connect channel=%s\n%!" channel_id;
         let body = `Assoc [
           ("status", `String "ok");
           ("channel_id", `String channel_id);
@@ -293,8 +350,9 @@ let plugin_connect_handler _request reqd =
         Response.json (Yojson.Safe.to_string body) reqd
   )
 
-let plugin_poll_handler _request reqd =
+let plugin_poll_handler ~clock _request reqd =
   Request.read_body_async reqd (fun body_str ->
+    plugin_cleanup ();
     match parse_json body_str with
     | Error msg -> json_error msg reqd
     | Ok json ->
@@ -302,9 +360,23 @@ let plugin_poll_handler _request reqd =
          | None -> json_error "Missing channel_id" reqd
          | Some channel_id ->
              let max_commands = get_int_field "max_commands" json |> Option.value ~default:1 in
-             let commands : Figma_plugin_bridge.command list =
-               Figma_plugin_bridge.poll_commands ~channel_id ~max:max_commands
+             let wait_ms =
+               match get_int_field "wait_ms" json with
+               | Some value -> clamp_poll_ms value
+               | None ->
+                   (match get_int_field "timeout_ms" json with
+                    | Some value -> clamp_poll_ms value
+                    | None -> 0)
              in
+             let commands : Figma_plugin_bridge.command list =
+               if wait_ms > 0 then
+                 wait_for_commands ~clock ~channel_id ~max:max_commands ~timeout_ms:wait_ms
+               else
+                 Figma_plugin_bridge.poll_commands ~channel_id ~max:max_commands
+             in
+             if commands <> [] then
+               eprintf "[Plugin] poll channel=%s max=%d wait_ms=%d -> %d commands\n%!"
+                 channel_id max_commands wait_ms (List.length commands);
              let commands_json =
                `List (List.map (fun (cmd : Figma_plugin_bridge.command) ->
                  `Assoc [
@@ -322,22 +394,36 @@ let plugin_poll_handler _request reqd =
 
 let plugin_result_handler _request reqd =
   Request.read_body_async reqd (fun body_str ->
+    plugin_cleanup ();
     match parse_json body_str with
     | Error msg -> json_error msg reqd
     | Ok json ->
         let channel_id = get_string_field "channel_id" json in
         let command_id = get_string_field "command_id" json in
         let ok = get_bool_field "ok" json |> Option.value ~default:true in
-        let payload = get_payload_field "payload" json |> Option.value ~default:`Null in
+        let payload =
+          match get_payload_field "payload" json with
+          | Some (`String s) -> (
+              try Yojson.Safe.from_string s
+              with _ -> `Assoc [
+                ("error", `String "Failed to parse payload string");
+                ("raw", `String s);
+              ])
+          | Some payload -> payload
+          | None -> `Null
+        in
         (match (channel_id, command_id) with
          | (Some channel_id, Some command_id) ->
              Figma_plugin_bridge.store_result ~channel_id ~command_id ~ok ~payload;
+             eprintf "[Plugin] result channel=%s cmd=%s ok=%b\n%!"
+               channel_id command_id ok;
              let body = `Assoc [("status", `String "ok")] in
              Response.json (Yojson.Safe.to_string body) reqd
          | _ ->
              json_error "Missing channel_id or command_id" reqd))
 
 let plugin_status_handler _request reqd =
+  plugin_cleanup ();
   let channels = Figma_plugin_bridge.list_channels () in
   let default_channel = Figma_plugin_bridge.get_default_channel () in
   let body = `Assoc [
@@ -348,7 +434,7 @@ let plugin_status_handler _request reqd =
 
 (** ============== Router ============== *)
 
-let route_request ~clock server request reqd =
+let route_request ~clock ~domain_mgr server request reqd =
   let path = Request.path request in
   let meth = Request.method_ request in
 
@@ -370,13 +456,13 @@ let route_request ~clock server request reqd =
       plugin_status_handler request reqd
 
   | `POST, "/" | `POST, "/mcp" ->
-      mcp_post_handler server request reqd
+      mcp_post_handler ~domain_mgr server request reqd
 
   | `POST, "/plugin/connect" ->
       plugin_connect_handler request reqd
 
   | `POST, "/plugin/poll" ->
-      plugin_poll_handler request reqd
+      plugin_poll_handler ~clock request reqd
 
   | `POST, "/plugin/result" ->
       plugin_result_handler request reqd
@@ -386,11 +472,11 @@ let route_request ~clock server request reqd =
 
 (** ============== httpun-eio Server ============== *)
 
-let make_request_handler ~clock server =
+let make_request_handler ~clock ~domain_mgr server =
   fun _client_addr gluten_reqd ->
     let reqd = gluten_reqd.Gluten.Reqd.reqd in
     let request = Httpun.Reqd.request reqd in
-    route_request ~clock server request reqd
+    route_request ~clock ~domain_mgr server request reqd
 
 let error_handler _client_addr ?request:_ error start_response =
   let response_body = start_response Httpun.Headers.empty in
@@ -404,14 +490,61 @@ let error_handler _client_addr ?request:_ error start_response =
   Httpun.Body.Writer.close response_body
 
 (** Run HTTP server with Eio *)
-let run ~sw ~net ~clock config server =
-  let request_handler = make_request_handler ~clock server in
-  let ip = match Ipaddr.of_string config.host with
-    | Ok addr -> Eio.Net.Ipaddr.of_raw (Ipaddr.to_octets addr)
-    | Error _ -> Eio.Net.Ipaddr.V4.loopback
+let run ~sw ~net ~clock ~domain_mgr config server =
+  let request_handler = make_request_handler ~clock ~domain_mgr server in
+  let resolve_listen_ips host =
+    match String.lowercase_ascii host with
+    | "localhost" ->
+        [Eio.Net.Ipaddr.V4.loopback; Eio.Net.Ipaddr.V6.loopback]
+    | _ ->
+        (match Ipaddr.of_string host with
+         | Ok addr -> [Eio.Net.Ipaddr.of_raw (Ipaddr.to_octets addr)]
+         | Error _ -> [Eio.Net.Ipaddr.V4.loopback])
   in
-  let addr = `Tcp (ip, config.port) in
-  let socket = Eio.Net.listen net ~sw ~reuse_addr:true ~backlog:config.max_connections addr in
+  let listen_socket ip =
+    let addr = `Tcp (ip, config.port) in
+    try Some (Eio.Net.listen net ~sw ~reuse_addr:true ~backlog:config.max_connections addr)
+    with exn ->
+      let ip_str = Format.asprintf "%a" Eio.Net.Ipaddr.pp ip in
+      eprintf "[%s] Failed to listen on %s:%d (%s)\n%!"
+        Mcp_protocol.server_name
+        ip_str
+        config.port
+        (Printexc.to_string exn);
+      None
+  in
+  let sockets =
+    resolve_listen_ips config.host
+    |> List.filter_map listen_socket
+  in
+  let first_socket =
+    match sockets with
+    | [] -> failwith "No listening sockets available"
+    | socket :: rest ->
+        List.iter
+          (fun extra ->
+            Eio.Fiber.fork ~sw (fun () ->
+              let rec accept_loop () =
+                let flow, client_addr = Eio.Net.accept ~sw extra in
+                Eio.Fiber.fork ~sw (fun () ->
+                  try
+                    Httpun_eio.Server.create_connection_handler
+                      ~sw
+                      ~request_handler
+                      ~error_handler
+                      client_addr
+                      flow
+                  with exn ->
+                    eprintf "[%s] Connection error: %s\n%!"
+                      Mcp_protocol.server_name
+                      (Printexc.to_string exn)
+                );
+                accept_loop ()
+              in
+              accept_loop ()))
+          rest;
+        socket
+  in
 
   eprintf "🎨 %s MCP Server (Eio)\n" Mcp_protocol.server_name;
   eprintf "   Protocol: %s\n" Mcp_protocol.protocol_version;
@@ -421,7 +554,7 @@ let run ~sw ~net ~clock config server =
   eprintf "   Graceful shutdown: SIGTERM/SIGINT supported\n%!";
 
   let rec accept_loop () =
-    let flow, client_addr = Eio.Net.accept ~sw socket in
+    let flow, client_addr = Eio.Net.accept ~sw first_socket in
     Eio.Fiber.fork ~sw (fun () ->
       try
         Httpun_eio.Server.create_connection_handler
@@ -447,6 +580,7 @@ let start_server ?(config = default_config) server =
   Eio_main.run @@ fun env ->
   let net = Eio.Stdenv.net env in
   let clock = Eio.Stdenv.clock env in
+  let domain_mgr = Some (Eio.Stdenv.domain_mgr env) in
 
   (* Graceful shutdown setup *)
   let switch_ref = ref None in
@@ -474,7 +608,7 @@ let start_server ?(config = default_config) server =
   (try
     Eio.Switch.run @@ fun sw ->
     switch_ref := Some sw;
-    run ~sw ~net ~clock config server
+    run ~sw ~net ~clock ~domain_mgr config server
   with
   | Shutdown ->
       eprintf "🎨 %s: Shutdown complete.\n%!" Mcp_protocol.server_name

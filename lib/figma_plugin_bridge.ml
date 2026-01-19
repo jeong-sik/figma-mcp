@@ -14,15 +14,22 @@ type result = {
   received_at: float;
 }
 
+type waiter = {
+  id: int;
+  notify: unit -> unit;
+}
+
 type session = {
   mutable last_seen: float;
   commands: command Queue.t;
   results: (string, result) Hashtbl.t;
+  mutable waiters: waiter list;
 }
 
 let channels : (string, session) Hashtbl.t = Hashtbl.create 32
 let lock = Mutex.create ()
 let default_channel : string option ref = ref None
+let next_waiter_id = ref 0
 
 let () = Random.self_init ()
 
@@ -43,6 +50,7 @@ let ensure_session channel_id =
         last_seen = now ();
         commands = Queue.create ();
         results = Hashtbl.create 32;
+        waiters = [];
       } in
       Hashtbl.add channels channel_id session;
       session
@@ -68,12 +76,36 @@ let list_channels () =
     |> List.sort String.compare)
 
 let enqueue_command ~channel_id ~name ~payload =
-  with_lock (fun () ->
+  let pending_waiters = ref [] in
+  let id = with_lock (fun () ->
     let session = ensure_session channel_id in
     session.last_seen <- now ();
     let id = new_id "cmd" in
     Queue.add { id; name; payload; created_at = now () } session.commands;
+    let waiters = session.waiters in
+    session.waiters <- [];
+    pending_waiters := waiters;
     id)
+  in
+  List.iter (fun waiter ->
+    try waiter.notify () with _ -> ()
+  ) !pending_waiters;
+  id
+
+let register_waiter ~channel_id ~notify =
+  with_lock (fun () ->
+    let session = ensure_session channel_id in
+    incr next_waiter_id;
+    let id = !next_waiter_id in
+    session.waiters <- { id; notify } :: session.waiters;
+    id)
+
+let unregister_waiter ~channel_id ~waiter_id =
+  with_lock (fun () ->
+    match Hashtbl.find_opt channels channel_id with
+    | None -> ()
+    | Some session ->
+        session.waiters <- List.filter (fun waiter -> waiter.id <> waiter_id) session.waiters)
 
 let poll_commands ~channel_id ~max =
   with_lock (fun () ->

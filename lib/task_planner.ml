@@ -47,6 +47,15 @@ type task = {
   hints: string list;         (** Agent에게 전달할 힌트 *)
 }
 
+(** Flat node representation for recursive streams *)
+type flat_node = {
+  node: ui_node;
+  parent_node_id: string option;
+  depth: int;
+}
+
+let task_id_of_node_id node_id = "task_" ^ node_id
+
 (** ============== Node Type Classification ============== *)
 
 (** 노드 타입에 따른 기본 우선순위 결정 *)
@@ -194,6 +203,10 @@ let task_of_node ?(parent_id = None) (node : ui_node) =
     hints = generate_hints node;
   }
 
+let task_of_node_with_parent ~(parent_node_id : string option) (node : ui_node) =
+  let parent_id = Option.map task_id_of_node_id parent_node_id in
+  task_of_node ~parent_id node
+
 (** 노드 트리에서 모든 태스크 생성 (Outside-In 순서) *)
 let rec collect_tasks ?(parent_id = None) (node : ui_node) =
   let task = task_of_node ~parent_id node in
@@ -203,6 +216,12 @@ let rec collect_tasks ?(parent_id = None) (node : ui_node) =
     |> List.flatten
   in
   task :: child_tasks
+
+(** Flat node list → tasks with dependency links *)
+let tasks_from_flat (nodes : flat_node list) =
+  nodes
+  |> List.map (fun flat ->
+       task_of_node_with_parent ~parent_node_id:flat.parent_node_id flat.node)
 
 (** ============== Task Sorting (by Priority) ============== *)
 

@@ -1,6 +1,23 @@
 figma.showUI(__html__, { width: 360, height: 260 });
 
 const MIXED = figma.mixed;
+const MAX_PAYLOAD_CHARS = 2000000;
+
+function normalizeNodeId(value) {
+  if (!value || typeof value !== "string") return value;
+  if (value.includes(":")) return value;
+  if (value.includes("-")) return value.replace(/-/g, ":");
+  return value;
+}
+
+async function getNodeById(nodeId) {
+  if (!nodeId) return null;
+  const normalized = normalizeNodeId(nodeId);
+  if (typeof figma.getNodeByIdAsync === "function") {
+    return await figma.getNodeByIdAsync(normalized);
+  }
+  return figma.getNodeById(normalized);
+}
 
 function serializeColor(color) {
   if (!color || typeof color !== "object") return null;
@@ -32,6 +49,21 @@ function serializePaint(paint) {
     base.imageHash = paint.imageHash || null;
   }
   return base;
+}
+
+function safeStringify(value) {
+  const seen = new WeakSet();
+  return JSON.stringify(value, (key, val) => {
+    if (val === MIXED) return { mixed: true };
+    if (typeof val === "bigint") return Number(val);
+    if (typeof val === "symbol") return String(val);
+    if (typeof val === "function") return undefined;
+    if (val && typeof val === "object") {
+      if (seen.has(val)) return "[Circular]";
+      seen.add(val);
+    }
+    return val;
+  });
 }
 
 function serializePaints(paints) {
@@ -255,7 +287,8 @@ function serializeLayout(node) {
   };
 }
 
-function serializeNode(node, depth, maxDepth) {
+function serializeNode(node, depth, maxDepth, options) {
+  const includeGeometry = !(options && options.includeGeometry === false);
   const base = {
     id: node.id,
     name: node.name,
@@ -284,10 +317,12 @@ function serializeNode(node, depth, maxDepth) {
   if ("strokeAlign" in node) base.strokeAlign = node.strokeAlign;
   if ("strokeCap" in node) base.strokeCap = node.strokeCap;
   if ("strokeJoin" in node) base.strokeJoin = node.strokeJoin;
-  if ("strokeGeometry" in node) base.strokeGeometry = node.strokeGeometry;
-  if ("fillGeometry" in node) base.fillGeometry = node.fillGeometry;
-  if ("vectorPaths" in node) base.vectorPaths = node.vectorPaths;
-  if ("vectorNetwork" in node) base.vectorNetwork = node.vectorNetwork;
+  if (includeGeometry) {
+    if ("strokeGeometry" in node) base.strokeGeometry = node.strokeGeometry;
+    if ("fillGeometry" in node) base.fillGeometry = node.fillGeometry;
+    if ("vectorPaths" in node) base.vectorPaths = node.vectorPaths;
+    if ("vectorNetwork" in node) base.vectorNetwork = node.vectorNetwork;
+  }
 
   if ("effects" in node) base.effects = serializeEffects(node.effects);
 
@@ -317,7 +352,7 @@ function serializeNode(node, depth, maxDepth) {
   if ("variantProperties" in node) base.variantProperties = node.variantProperties;
 
   if (depth < maxDepth && "children" in node && Array.isArray(node.children)) {
-    base.children = node.children.map(child => serializeNode(child, depth + 1, maxDepth));
+    base.children = node.children.map(child => serializeNode(child, depth + 1, maxDepth, options));
   }
 
   return base;
@@ -419,7 +454,7 @@ async function applyOps(ops) {
       if (action === "create") {
         const nodeType = op.node_type || op.nodeType || "FRAME";
         const parentId = op.parent_id || op.parentId;
-        const parent = parentId ? figma.getNodeById(parentId) : figma.currentPage;
+        const parent = parentId ? await getNodeById(parentId) : figma.currentPage;
         if (!parent || !("appendChild" in parent)) {
           results.push({ action, status: "error", message: "Invalid parent" });
           continue;
@@ -430,7 +465,7 @@ async function applyOps(ops) {
         results.push({ action, status: "ok", node_id: node.id });
       } else if (action === "update") {
         const nodeId = op.node_id || op.nodeId;
-        const node = nodeId ? figma.getNodeById(nodeId) : null;
+        const node = nodeId ? await getNodeById(nodeId) : null;
         if (!node) {
           results.push({ action, status: "error", message: "Node not found" });
           continue;
@@ -439,7 +474,7 @@ async function applyOps(ops) {
         results.push({ action, status: "ok", node_id: node.id });
       } else if (action === "delete") {
         const nodeId = op.node_id || op.nodeId;
-        const node = nodeId ? figma.getNodeById(nodeId) : null;
+        const node = nodeId ? await getNodeById(nodeId) : null;
         if (!node) {
           results.push({ action, status: "error", message: "Node not found" });
           continue;
@@ -476,16 +511,17 @@ figma.ui.onmessage = async (msg) => {
     } else if (command.name === "get_node") {
       const nodeId = command.payload && command.payload.node_id ? command.payload.node_id : null;
       const depth = command.payload && typeof command.payload.depth === "number" ? command.payload.depth : 6;
-      const node = nodeId ? figma.getNodeById(nodeId) : null;
+      const node = nodeId ? await getNodeById(nodeId) : null;
+      const includeGeometry = command.payload && command.payload.include_geometry !== false;
       if (!node) {
         ok = false;
         payload = { error: "Node not found" };
       } else {
-        payload = serializeNode(node, 0, depth);
+        payload = serializeNode(node, 0, depth, { includeGeometry });
       }
     } else if (command.name === "export_node_image") {
       const nodeId = command.payload && command.payload.node_id ? command.payload.node_id : null;
-      const node = nodeId ? figma.getNodeById(nodeId) : null;
+      const node = nodeId ? await getNodeById(nodeId) : null;
       if (!node) {
         ok = false;
         payload = { error: "Node not found" };
@@ -509,6 +545,20 @@ figma.ui.onmessage = async (msg) => {
     type: "command_result",
     command_id: command.id,
     ok,
-    payload
+    payload_json: (() => {
+      try {
+        const json = safeStringify(payload);
+        if (json && json.length > MAX_PAYLOAD_CHARS) {
+          return safeStringify({
+            error: "Payload too large",
+            size: json.length,
+            hint: "Reduce depth or request a smaller selection"
+          });
+        }
+        return json;
+      } catch (err) {
+        return safeStringify({ error: "Failed to serialize payload", details: String(err) });
+      }
+    })()
   });
 };

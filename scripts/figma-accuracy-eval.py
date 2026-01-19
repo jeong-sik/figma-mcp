@@ -152,7 +152,7 @@ def summarize_bundle(result):
 
 def main():
     parser = argparse.ArgumentParser(description="Figma MCP accuracy evaluation (LLM-free loop)")
-    parser.add_argument("--mcp-url", default=os.getenv("FIGMA_MCP_URL", "http://127.0.0.1:8940/mcp"))
+    parser.add_argument("--mcp-url", default=os.getenv("FIGMA_MCP_URL", "http://localhost:8940/mcp"))
     parser.add_argument("--file-key", required=True)
     parser.add_argument("--node-id", required=True)
     parser.add_argument("--token", required=True)

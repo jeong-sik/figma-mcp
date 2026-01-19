@@ -13,93 +13,9 @@ open Printf
 let default_port = 50052  (* Separate from MCP server *)
 let max_chunk_size = 64 * 1024  (* 64KB per chunk *)
 
-(** ============== Simple Protobuf-like Binary Encoding ============== *)
-(** Note: We use a simple length-prefixed format instead of full protobuf.
-    This keeps the implementation simple while still achieving significant
-    compression vs JSON text. *)
+(** ============== Protobuf Encoding/Decoding ============== *)
 
-module Proto = struct
-  (** Identity compression - placeholder for real gzip compression.
-      TODO: Add camlzip dependency for actual gzip compression. *)
-  let compress s = s
-
-  (** Encode a string with length prefix (varint + bytes) *)
-  let encode_string s =
-    let len = String.length s in
-    let buf = Buffer.create (len + 5) in
-    (* Simple varint encoding for length *)
-    let rec write_varint n =
-      if n < 128 then Buffer.add_char buf (Char.chr n)
-      else begin
-        Buffer.add_char buf (Char.chr ((n land 0x7f) lor 0x80));
-        write_varint (n lsr 7)
-      end
-    in
-    write_varint len;
-    Buffer.add_string buf s;
-    Buffer.contents buf
-
-  (** Decode a length-prefixed string safely. *)
-  let decode_string bytes offset =
-    let total_len = String.length bytes in
-    if offset < 0 || offset >= total_len then
-      Error "decode_string: offset out of bounds"
-    else
-      let rec read_varint pos shift acc =
-        if pos >= total_len then
-          Error "decode_string: truncated varint"
-        else if shift > 28 then
-          Error "decode_string: varint too long"
-        else
-          let b = Char.code (String.get bytes pos) in
-          let acc' = acc lor ((b land 0x7f) lsl shift) in
-          if b land 0x80 = 0 then Ok (acc', pos + 1)
-          else read_varint (pos + 1) (shift + 7) acc'
-      in
-      match read_varint offset 0 0 with
-      | Error _ as err -> err
-      | Ok (len, pos) ->
-          let end_pos = pos + len in
-          if len < 0 || end_pos > total_len then
-            Error "decode_string: truncated string"
-          else
-            Ok (String.sub bytes pos len, end_pos)
-
-  (** Write a varint to buffer *)
-  let write_varint buf n =
-    let rec go n =
-      if n < 128 then Buffer.add_char buf (Char.chr n)
-      else begin
-        Buffer.add_char buf (Char.chr ((n land 0x7f) lor 0x80));
-        go (n lsr 7)
-      end
-    in
-    go n
-
-  (** Encode a FigmaNode message *)
-  let encode_figma_node ~node_id ~depth ~parent_id ~dsl ~node_index ~total_nodes =
-    let buf = Buffer.create 256 in
-    (* Field 1: node_id (string) *)
-    Buffer.add_char buf '\x0a';  (* field 1, wire type 2 *)
-    Buffer.add_string buf (encode_string node_id);
-    (* Field 2: depth (varint) *)
-    Buffer.add_char buf '\x10';  (* field 2, wire type 0 *)
-    write_varint buf depth;
-    (* Field 3: parent_id (string) *)
-    Buffer.add_char buf '\x1a';  (* field 3, wire type 2 *)
-    Buffer.add_string buf (encode_string parent_id);
-    (* Field 4: dsl (bytes, compressed) *)
-    Buffer.add_char buf '\x22';  (* field 4, wire type 2 *)
-    let compressed = compress dsl in
-    Buffer.add_string buf (encode_string compressed);
-    (* Field 5: node_index (varint) *)
-    Buffer.add_char buf '\x28';  (* field 5, wire type 0 *)
-    write_varint buf node_index;
-    (* Field 6: total_nodes (varint) *)
-    Buffer.add_char buf '\x30';  (* field 6, wire type 0 *)
-    write_varint buf total_nodes;
-    Buffer.contents buf
-end
+module Proto = Grpc_proto
 
 (** ============== JSON to Streaming Converter ============== *)
 
@@ -113,6 +29,14 @@ module Streamer = struct
          | _ -> "unknown")
     | _ -> "unknown"
 
+  let get_node_name json =
+    match json with
+    | `Assoc fields ->
+        (match List.assoc_opt "name" fields with
+         | Some (`String name) -> name
+         | _ -> "")
+    | _ -> ""
+
   (** Extract node type from JSON *)
   let get_node_type json =
     match json with
@@ -121,6 +45,14 @@ module Streamer = struct
          | Some (`String t) -> t
          | _ -> "UNKNOWN")
     | _ -> "UNKNOWN"
+
+  let get_child_count json =
+    match json with
+    | `Assoc fields ->
+        (match List.assoc_opt "children" fields with
+         | Some (`List kids) -> List.length kids
+         | _ -> 0)
+    | _ -> 0
 
   (** Count total nodes in tree *)
   let rec count_nodes json =
@@ -145,6 +77,8 @@ module Streamer = struct
     while not (Queue.is_empty queue) do
       let (node, depth, parent_id) = Queue.pop queue in
       let node_id = get_node_id node in
+      let node_name = get_node_name node in
+      let child_count = get_child_count node in
 
       (* Convert node to DSL format *)
       let dsl = match format with
@@ -159,7 +93,7 @@ module Streamer = struct
 
       (* Encode and add to stream *)
       let proto_bytes = Proto.encode_figma_node
-        ~node_id ~depth ~parent_id ~dsl
+        ~node_id ~node_name ~depth ~parent_id ~child_count ~dsl
         ~node_index:!index ~total_nodes:total
       in
       Eio.Stream.add stream proto_bytes;
@@ -213,181 +147,147 @@ module Splitter = struct
                    let g = get_float "g" c |> Option.value ~default:0.0 in
                    let b = get_float "b" c |> Option.value ~default:0.0 in
                    let a = get_float "a" c |> Option.value ~default:1.0 in
-                   Some (Printf.sprintf "rgba(%d,%d,%d,%.2f)"
-                     (int_of_float (r *. 255.))
-                     (int_of_float (g *. 255.))
-                     (int_of_float (b *. 255.)) a)
+                   Some (Proto.{ r; g; b; a })
                | _ -> None)
           | _ -> None
         ) fills
     | _ -> []
 
-  (** StyleChunk JSON 생성 *)
+  (** StyleChunk 생성 *)
   let extract_style node_id fields =
-    let buf = Buffer.create 256 in
-    Buffer.add_string buf (Printf.sprintf {|{"id":"%s-style","node_id":"%s"|} node_id node_id);
-
-    (* Colors *)
     let fill_colors = extract_colors "fills" fields in
-    if fill_colors <> [] then
-      Buffer.add_string buf (Printf.sprintf {|,"fill_colors":[%s]|}
-        (String.concat "," (List.map (Printf.sprintf {|"%s"|}) fill_colors)));
-
     let stroke_colors = extract_colors "strokes" fields in
-    if stroke_colors <> [] then
-      Buffer.add_string buf (Printf.sprintf {|,"stroke_colors":[%s]|}
-        (String.concat "," (List.map (Printf.sprintf {|"%s"|}) stroke_colors)));
+    let (font_family, font_size, font_weight, line_height, letter_spacing) =
+      match List.assoc_opt "style" fields with
+      | Some (`Assoc style) ->
+          (get_string "fontFamily" style,
+           get_float "fontSize" style,
+           get_float "fontWeight" style |> Option.map int_of_float,
+           get_float "lineHeightPx" style,
+           get_float "letterSpacing" style)
+      | _ -> (None, None, None, None, None)
+    in
+    {
+      Proto.id = node_id ^ "-style";
+      node_id;
+      fill_colors;
+      stroke_colors;
+      font_family;
+      font_size;
+      font_weight;
+      line_height;
+      letter_spacing;
+      opacity = get_float "opacity" fields;
+      corner_radius = get_float "cornerRadius" fields;
+      stroke_weight = get_float "strokeWeight" fields;
+    }
 
-    (* Typography *)
-    (match List.assoc_opt "style" fields with
-     | Some (`Assoc style) ->
-         Option.iter (fun v -> Buffer.add_string buf (Printf.sprintf {|,"font_family":"%s"|} v))
-           (get_string "fontFamily" style);
-         Option.iter (fun v -> Buffer.add_string buf (Printf.sprintf {|,"font_size":%.1f|} v))
-           (get_float "fontSize" style);
-         Option.iter (fun v -> Buffer.add_string buf (Printf.sprintf {|,"font_weight":%d|} (int_of_float v)))
-           (get_float "fontWeight" style);
-         Option.iter (fun v -> Buffer.add_string buf (Printf.sprintf {|,"line_height":%.2f|} v))
-           (get_float "lineHeightPx" style);
-         Option.iter (fun v -> Buffer.add_string buf (Printf.sprintf {|,"letter_spacing":%.2f|} v))
-           (get_float "letterSpacing" style);
-     | _ -> ());
-
-    (* Effects *)
-    Option.iter (fun v -> Buffer.add_string buf (Printf.sprintf {|,"opacity":%.2f|} v))
-      (get_float "opacity" fields);
-    Option.iter (fun v -> Buffer.add_string buf (Printf.sprintf {|,"corner_radius":%.1f|} v))
-      (get_float "cornerRadius" fields);
-    Option.iter (fun v -> Buffer.add_string buf (Printf.sprintf {|,"stroke_weight":%.1f|} v))
-      (get_float "strokeWeight" fields);
-
-    Buffer.add_char buf '}';
-    Buffer.contents buf
-
-  (** LayoutChunk JSON 생성 *)
+  (** LayoutChunk 생성 *)
   let extract_layout node_id parent_id fields =
-    let buf = Buffer.create 256 in
-    Buffer.add_string buf (Printf.sprintf {|{"id":"%s-layout","node_id":"%s"|} node_id node_id);
+    let (x, y, width, height) =
+      match List.assoc_opt "absoluteBoundingBox" fields with
+      | Some (`Assoc bbox) ->
+          (get_float "x" bbox,
+           get_float "y" bbox,
+           get_float "width" bbox,
+           get_float "height" bbox)
+      | _ -> (None, None, None, None)
+    in
+    let (horizontal_constraint, vertical_constraint) =
+      match List.assoc_opt "constraints" fields with
+      | Some (`Assoc c) ->
+          (get_string "horizontal" c, get_string "vertical" c)
+      | _ -> (None, None)
+    in
+    {
+      Proto.id = node_id ^ "-layout";
+      node_id;
+      parent_id = if parent_id = "" then None else Some parent_id;
+      x;
+      y;
+      width;
+      height;
+      horizontal_constraint;
+      vertical_constraint;
+      layout_mode = get_string "layoutMode" fields;
+      primary_axis_align = get_string "primaryAxisAlignItems" fields;
+      counter_axis_align = get_string "counterAxisAlignItems" fields;
+      item_spacing = get_float "itemSpacing" fields;
+      padding_left = get_float "paddingLeft" fields;
+      padding_right = get_float "paddingRight" fields;
+      padding_top = get_float "paddingTop" fields;
+      padding_bottom = get_float "paddingBottom" fields;
+      clips_content = get_bool "clipsContent" fields;
+    }
 
-    Option.iter (fun p -> Buffer.add_string buf (Printf.sprintf {|,"parent_id":"%s"|} p))
-      (if parent_id = "" then None else Some parent_id);
-
-    (* Position & Size from absoluteBoundingBox *)
-    (match List.assoc_opt "absoluteBoundingBox" fields with
-     | Some (`Assoc bbox) ->
-         Option.iter (fun v -> Buffer.add_string buf (Printf.sprintf {|,"x":%.1f|} v))
-           (get_float "x" bbox);
-         Option.iter (fun v -> Buffer.add_string buf (Printf.sprintf {|,"y":%.1f|} v))
-           (get_float "y" bbox);
-         Option.iter (fun v -> Buffer.add_string buf (Printf.sprintf {|,"width":%.1f|} v))
-           (get_float "width" bbox);
-         Option.iter (fun v -> Buffer.add_string buf (Printf.sprintf {|,"height":%.1f|} v))
-           (get_float "height" bbox);
-     | _ -> ());
-
-    (* Constraints *)
-    (match List.assoc_opt "constraints" fields with
-     | Some (`Assoc c) ->
-         Option.iter (fun v -> Buffer.add_string buf (Printf.sprintf {|,"horizontal_constraint":"%s"|} v))
-           (get_string "horizontal" c);
-         Option.iter (fun v -> Buffer.add_string buf (Printf.sprintf {|,"vertical_constraint":"%s"|} v))
-           (get_string "vertical" c);
-     | _ -> ());
-
-    (* Auto Layout *)
-    Option.iter (fun v -> Buffer.add_string buf (Printf.sprintf {|,"layout_mode":"%s"|} v))
-      (get_string "layoutMode" fields);
-    Option.iter (fun v -> Buffer.add_string buf (Printf.sprintf {|,"primary_axis_align":"%s"|} v))
-      (get_string "primaryAxisAlignItems" fields);
-    Option.iter (fun v -> Buffer.add_string buf (Printf.sprintf {|,"counter_axis_align":"%s"|} v))
-      (get_string "counterAxisAlignItems" fields);
-    Option.iter (fun v -> Buffer.add_string buf (Printf.sprintf {|,"item_spacing":%.1f|} v))
-      (get_float "itemSpacing" fields);
-
-    (* Padding *)
-    Option.iter (fun v -> Buffer.add_string buf (Printf.sprintf {|,"padding_left":%.1f|} v))
-      (get_float "paddingLeft" fields);
-    Option.iter (fun v -> Buffer.add_string buf (Printf.sprintf {|,"padding_right":%.1f|} v))
-      (get_float "paddingRight" fields);
-    Option.iter (fun v -> Buffer.add_string buf (Printf.sprintf {|,"padding_top":%.1f|} v))
-      (get_float "paddingTop" fields);
-    Option.iter (fun v -> Buffer.add_string buf (Printf.sprintf {|,"padding_bottom":%.1f|} v))
-      (get_float "paddingBottom" fields);
-
-    (* Clips *)
-    Option.iter (fun v -> Buffer.add_string buf (Printf.sprintf {|,"clips_content":%b|} v))
-      (get_bool "clipsContent" fields);
-
-    Buffer.add_char buf '}';
-    Buffer.contents buf
-
-  (** ContentChunk JSON 생성 *)
+  (** ContentChunk 생성 *)
   let extract_content node_id node_type name fields =
-    let buf = Buffer.create 256 in
-    Buffer.add_string buf (Printf.sprintf
-      {|{"id":"%s-content","node_id":"%s","node_type":"%s","name":"%s"|}
-      node_id node_id node_type (String.escaped name));
-
-    (* Text content *)
-    Option.iter (fun v ->
-      Buffer.add_string buf (Printf.sprintf {|,"text_content":"%s"|} (String.escaped v)))
-      (get_string "characters" fields);
-
-    (* Image reference (from fills) *)
-    (match List.assoc_opt "fills" fields with
-     | Some (`List fills) ->
-         List.iter (fun fill ->
-           match fill with
-           | `Assoc f ->
-               (match get_string "imageRef" f with
-                | Some img_ref ->
-                    Buffer.add_string buf (Printf.sprintf {|,"image_ref":"%s"|} img_ref)
-                | None -> ())
-           | _ -> ()
-         ) fills
-     | _ -> ());
-
-    (* Component info *)
-    Option.iter (fun v -> Buffer.add_string buf (Printf.sprintf {|,"component_id":"%s"|} v))
-      (get_string "componentId" fields);
-    (match node_type with
-     | "COMPONENT" -> Buffer.add_string buf {|,"is_component":true|}
-     | "INSTANCE" -> Buffer.add_string buf {|,"is_instance":true|}
-     | _ -> ());
-
-    Buffer.add_char buf '}';
-    Buffer.contents buf
+    let image_ref =
+      match List.assoc_opt "fills" fields with
+      | Some (`List fills) ->
+          let refs =
+            List.filter_map (fun fill ->
+              match fill with
+              | `Assoc f -> get_string "imageRef" f
+              | _ -> None
+            ) fills
+          in
+          (match refs with
+           | x :: _ -> Some x
+           | [] -> None)
+      | _ -> None
+    in
+    {
+      Proto.id = node_id ^ "-content";
+      node_id;
+      node_type;
+      name;
+      text_content = get_string "characters" fields;
+      image_ref;
+    }
 
   (** 노드를 Style/Layout/Content로 분리하여 스트림에 추가 *)
-  let stream_split_node ~seq ~total ~node_id ~parent_id ~node_type ~name ~fields stream =
-    (* Style chunk *)
-    let style_json = extract_style node_id fields in
-    let style_chunk = Printf.sprintf
-      {|{"sequence":%d,"total_chunks":%d,"node_id":"%s","style":%s}|}
-      !seq total node_id style_json in
-    Eio.Stream.add stream style_chunk;
-    incr seq;
+  let stream_split_node ~seq ~total ~node_id ~parent_id ~node_type ~name ~fields
+      ~include_styles ~include_layouts ~include_contents stream =
+    if include_styles then begin
+      let style_chunk = extract_style node_id fields in
+      let payload = Proto.encode_split_chunk
+        ~sequence:!seq ~total_chunks:total ~node_id
+        ~chunk:(Proto.Style style_chunk)
+      in
+      Eio.Stream.add stream payload;
+      incr seq;
+    end;
 
-    (* Layout chunk *)
-    let layout_json = extract_layout node_id parent_id fields in
-    let layout_chunk = Printf.sprintf
-      {|{"sequence":%d,"total_chunks":%d,"node_id":"%s","layout":%s}|}
-      !seq total node_id layout_json in
-    Eio.Stream.add stream layout_chunk;
-    incr seq;
+    if include_layouts then begin
+      let layout_chunk = extract_layout node_id parent_id fields in
+      let payload = Proto.encode_split_chunk
+        ~sequence:!seq ~total_chunks:total ~node_id
+        ~chunk:(Proto.Layout layout_chunk)
+      in
+      Eio.Stream.add stream payload;
+      incr seq;
+    end;
 
-    (* Content chunk *)
-    let content_json = extract_content node_id node_type name fields in
-    let content_chunk = Printf.sprintf
-      {|{"sequence":%d,"total_chunks":%d,"node_id":"%s","content":%s}|}
-      !seq total node_id content_json in
-    Eio.Stream.add stream content_chunk;
-    incr seq
+    if include_contents then begin
+      let content_chunk = extract_content node_id node_type name fields in
+      let payload = Proto.encode_split_chunk
+        ~sequence:!seq ~total_chunks:total ~node_id
+        ~chunk:(Proto.Content content_chunk)
+      in
+      Eio.Stream.add stream payload;
+      incr seq;
+    end
 
   (** 전체 트리를 Split Stream으로 변환 (BFS) *)
-  let stream_split json stream =
+  let stream_split json stream ~include_styles ~include_layouts ~include_contents =
     let total_nodes = Streamer.count_nodes json in
-    let total_chunks = total_nodes * 3 in  (* 각 노드당 3개 청크 *)
+    let per_node =
+      (if include_styles then 1 else 0)
+      + (if include_layouts then 1 else 0)
+      + (if include_contents then 1 else 0)
+    in
+    let total_chunks = max 1 (total_nodes * per_node) in
     let seq = ref 0 in
 
     (* BFS *)
@@ -404,7 +304,8 @@ module Splitter = struct
             | Some n -> n | None -> "" in
 
           stream_split_node ~seq ~total:total_chunks ~node_id ~parent_id
-            ~node_type ~name ~fields stream;
+            ~node_type ~name ~fields ~include_styles ~include_layouts
+            ~include_contents stream;
 
           (* Children *)
           (match List.assoc_opt "children" fields with
@@ -418,187 +319,553 @@ end
 (** ============== gRPC Service Handlers ============== *)
 
 module Handlers = struct
-  (** Parse GetNodeRequest from bytes - returns (file_key, node_id, token, format, depth) *)
+  let normalize_node_id id = Figma_api.normalize_node_id id
+  let normalize_node_id_opt value = Option.map normalize_node_id value
+
+  type node_request = {
+    file_key: string option;
+    node_id: string option;
+    token: string option;
+    format: string;
+    depth: int option;
+    depth_start: int option;
+    depth_end: int option;
+    geometry: string option;
+    plugin_data: string option;
+    version: string option;
+    recursive: bool;
+    recursive_max_depth: int option;
+    recursive_max_nodes: int option;
+    recursive_depth_per_call: int option;
+  }
+
+  let env_int name default =
+    match Sys.getenv_opt name with
+    | Some raw -> (match int_of_string_opt raw with Some v -> v | None -> default)
+    | None -> default
+
+  let extract_node_document node_id json =
+    match json with
+    | `Assoc fields ->
+        (match List.assoc_opt "nodes" fields with
+         | Some (`Assoc nodes) ->
+             (match List.assoc_opt node_id nodes with
+              | Some (`Assoc node_fields) ->
+                  (match List.assoc_opt "document" node_fields with
+                   | Some doc -> doc
+                   | None -> json)
+              | _ -> json)
+         | _ -> json)
+    | _ -> json
+
+  let strip_children json =
+    match json with
+    | `Assoc fields ->
+        `Assoc (List.filter (fun (key, _) -> key <> "children") fields)
+    | _ -> json
+
+  let child_ids json =
+    match json with
+    | `Assoc fields ->
+        (match List.assoc_opt "children" fields with
+         | Some (`List kids) ->
+             kids
+             |> List.filter_map (function
+                  | `Assoc child_fields ->
+                      (match List.assoc_opt "id" child_fields with
+                       | Some (`String id) -> Some (normalize_node_id id)
+                       | _ -> None)
+                  | _ -> None)
+         | _ -> [])
+    | _ -> []
+
+  type requirements_stats = {
+    total_nodes: int;
+    parsed_nodes: int;
+    skipped_nodes: int;
+    frames: int;
+    texts: int;
+    vectors: int;
+    rectangles: int;
+    components: int;
+    instances: int;
+    auto_layout: int;
+    image_fills: int;
+  }
+
+  let empty_requirements = {
+    total_nodes = 0;
+    parsed_nodes = 0;
+    skipped_nodes = 0;
+    frames = 0;
+    texts = 0;
+    vectors = 0;
+    rectangles = 0;
+    components = 0;
+    instances = 0;
+    auto_layout = 0;
+    image_fills = 0;
+  }
+
+  let is_frame_node = function
+    | Figma_types.Frame
+    | Figma_types.Group
+    | Figma_types.Section -> true
+    | _ -> false
+
+  let is_vector_node = function
+    | Figma_types.Vector
+    | Figma_types.Line
+    | Figma_types.Star
+    | Figma_types.Ellipse
+    | Figma_types.RegularPolygon -> true
+    | _ -> false
+
+  let is_component_node = function
+    | Figma_types.Component
+    | Figma_types.ComponentSet -> true
+    | _ -> false
+
+  let has_image_fill (node : Figma_types.ui_node) =
+    List.exists
+      (fun paint -> paint.Figma_types.paint_type = Figma_types.Image)
+      node.Figma_types.fills
+
+  let add_node_stats stats (node : Figma_types.ui_node) =
+    let inc cond value = if cond then value + 1 else value in
+    {
+      total_nodes = stats.total_nodes + 1;
+      parsed_nodes = stats.parsed_nodes + 1;
+      skipped_nodes = stats.skipped_nodes;
+      frames = inc (is_frame_node node.Figma_types.node_type) stats.frames;
+      texts = inc (node.Figma_types.node_type = Figma_types.Text) stats.texts;
+      vectors = inc (is_vector_node node.Figma_types.node_type) stats.vectors;
+      rectangles = inc (node.Figma_types.node_type = Figma_types.Rectangle) stats.rectangles;
+      components = inc (is_component_node node.Figma_types.node_type) stats.components;
+      instances = inc (node.Figma_types.node_type = Figma_types.Instance) stats.instances;
+      auto_layout = inc (node.Figma_types.layout_mode <> Figma_types.None') stats.auto_layout;
+      image_fills = inc (has_image_fill node) stats.image_fills;
+    }
+
+  let add_skipped stats =
+    { stats with
+      total_nodes = stats.total_nodes + 1;
+      skipped_nodes = stats.skipped_nodes + 1;
+    }
+
+  let requirements_json stats top_level =
+    let top_level =
+      top_level
+      |> List.rev
+      |> List.filter (fun s -> s <> "")
+      |> List.fold_left (fun acc name ->
+           if List.mem name acc then acc else name :: acc) []
+      |> List.rev
+    in
+    let json = `Assoc [
+      ("total_nodes", `Int stats.total_nodes);
+      ("parsed_nodes", `Int stats.parsed_nodes);
+      ("skipped_nodes", `Int stats.skipped_nodes);
+      ("frames", `Int stats.frames);
+      ("texts", `Int stats.texts);
+      ("vectors", `Int stats.vectors);
+      ("rectangles", `Int stats.rectangles);
+      ("components", `Int stats.components);
+      ("instances", `Int stats.instances);
+      ("auto_layout", `Int stats.auto_layout);
+      ("image_fills", `Int stats.image_fills);
+      ("top_level", `List (List.map (fun name -> `String name) top_level));
+    ] in
+    Yojson.Safe.to_string json
+
+  let rec flatten_ui_node ?(parent_id=None) ?(depth=0) (node : Figma_types.ui_node) =
+    let current : Task_planner.flat_node = {
+      Task_planner.node = node;
+      parent_node_id = parent_id;
+      depth;
+    } in
+    let children =
+      node.Figma_types.children
+      |> List.map (flatten_ui_node ~parent_id:(Some node.Figma_types.id) ~depth:(depth + 1))
+      |> List.flatten
+    in
+    current :: children
+
+  let requirements_from_flat_nodes flat_nodes =
+    let stats = ref empty_requirements in
+    let top_level = ref [] in
+    List.iter (fun (flat : Task_planner.flat_node) ->
+      stats := add_node_stats !stats flat.Task_planner.node;
+      if flat.Task_planner.depth = 1 && List.length !top_level < 30 then
+        top_level := flat.Task_planner.node.Figma_types.name :: !top_level
+    ) flat_nodes;
+    requirements_json !stats !top_level
+
+  (** Parse GetNodeRequest from bytes *)
   let parse_node_request bytes =
-    try
-      let json = Yojson.Safe.from_string bytes in
-      match json with
-      | `Assoc fields ->
-          let get s = match List.assoc_opt s fields with
-            | Some (`String v) -> Some v
-            | _ -> None
-          in
-          let get_int s = match List.assoc_opt s fields with
-            | Some (`Int v) -> Some v
-            | _ -> None
-          in
-          (get "file_key",
-           get "node_id",
-           get "token",
-           Option.value (get "format") ~default:"fidelity",
-           get_int "depth")
-      | _ -> (None, None, None, "fidelity", None)
-    with _ -> (None, None, None, "fidelity", None)
+    let req = Proto.decode_get_node_request bytes in
+    let format = Option.value req.format ~default:"fidelity" in
+    let depth =
+      match req.depth_end with
+      | Some d when d >= 0 -> Some d
+      | _ -> None
+    in
+    let geometry = if req.geometry then Some "paths" else None in
+    let plugin_data = if req.plugin_data then Some "shared" else None in
+    let node_id = normalize_node_id_opt req.node_id in
+    {
+      file_key = req.file_key;
+      node_id;
+      token = req.token;
+      format;
+      depth;
+      depth_start = req.depth_start;
+      depth_end = req.depth_end;
+      geometry;
+      plugin_data;
+      version = req.version;
+      recursive = req.recursive;
+      recursive_max_depth = req.recursive_max_depth;
+      recursive_max_nodes = req.recursive_max_nodes;
+      recursive_depth_per_call = req.recursive_depth_per_call;
+    }
 
   (** GetNodeStream: Stream nodes progressively *)
   let get_node_stream request_bytes =
     let stream = Eio.Stream.create 64 in
 
-    let (file_key_opt, node_id_opt, token_opt, format, depth_opt) =
-      parse_node_request request_bytes
-    in
+    let req = parse_node_request request_bytes in
 
-    match (file_key_opt, node_id_opt, token_opt) with
+    match (req.file_key, req.node_id, req.token) with
     | (Some file_key, Some node_id, Some token) ->
-        (* Fetch from Figma API using Lwt bridge *)
-        let result =
-          Lwt_eio.run_lwt @@ fun () ->
-          Figma_api.get_file_nodes
-            ?depth:depth_opt
-            ~token ~file_key ~node_ids:[node_id] ()
-        in
-        (match result with
-         | Ok json ->
-             (* Extract the specific node from response *)
-             let node_json = match json with
-               | `Assoc fields ->
-                   (match List.assoc_opt "nodes" fields with
-                    | Some (`Assoc nodes) ->
-                        (match List.assoc_opt node_id nodes with
-                         | Some (`Assoc node_fields) ->
-                             (match List.assoc_opt "document" node_fields with
-                              | Some doc -> doc
-                              | None -> json)
-                         | _ -> json)
-                    | _ -> json)
-               | _ -> json
-             in
-             Streamer.stream_nodes ~format node_json stream
-         | Error err ->
-             let error_msg = Figma_api.error_to_string err in
-             Eio.Stream.add stream (sprintf "ERROR: %s" error_msg));
-        stream
+        if req.recursive then begin
+          let max_depth =
+            match req.recursive_max_depth with
+            | Some d when d > 0 -> d
+            | _ -> env_int "FIGMA_RECURSIVE_MAX_DEPTH" 20
+          in
+          let max_nodes =
+            match req.recursive_max_nodes with
+            | Some d when d > 0 -> d
+            | _ -> env_int "FIGMA_RECURSIVE_MAX_NODES" 5000
+          in
+          let depth_per_call =
+            match req.recursive_depth_per_call with
+            | Some d when d > 0 -> d
+            | _ -> env_int "FIGMA_RECURSIVE_DEPTH_PER_CALL" 1
+          in
+          let cache_options =
+            List.filter_map Fun.id [
+              Some (Printf.sprintf "depth:%d" depth_per_call);
+              Option.map (Printf.sprintf "geometry:%s") req.geometry;
+              Option.map (Printf.sprintf "plugin:%s") req.plugin_data;
+            ]
+          in
+          eprintf "[gRPC] GetNodeStream (recursive) file_key=%s node_id=%s depth=%d max_nodes=%d token_len=%d\n%!"
+            file_key node_id max_depth max_nodes (String.length token);
+          let visited : (string, unit) Hashtbl.t = Hashtbl.create 1024 in
+          let queue : (string * string * int) Queue.t = Queue.create () in
+          Queue.add (node_id, "", 0) queue;
+          let node_index = ref 0 in
+          let total_nodes = if max_nodes > 0 then max_nodes else 0 in
+          while not (Queue.is_empty queue) &&
+                (max_nodes <= 0 || !node_index < max_nodes) do
+            let (current_id, parent_id, depth) = Queue.pop queue in
+            if not (Hashtbl.mem visited current_id) then begin
+              Hashtbl.add visited current_id ();
+              let fetched =
+                match Figma_cache.get ~file_key ~node_id:current_id ~options:cache_options () with
+                | Some json -> Ok json
+                | None ->
+                    let result =
+                      Lwt_main.run
+                        (Figma_api.get_file_nodes
+                           ~depth:depth_per_call ?geometry:req.geometry ?plugin_data:req.plugin_data ?version:req.version
+                           ~token ~file_key ~node_ids:[current_id] ())
+                    in
+                    (match result with
+                     | Ok json ->
+                         Figma_cache.set ~file_key ~node_id:current_id ~options:cache_options json;
+                         Ok json
+                     | Error err -> Error err)
+              in
+              (match fetched with
+               | Ok json ->
+                   let node_json = extract_node_document current_id json in
+                   let children = child_ids node_json in
+                   let child_count = List.length children in
+                   let node_name = Streamer.get_node_name node_json in
+                   let dsl_source = strip_children node_json in
+                   let dsl = match req.format with
+                     | "raw" -> Yojson.Safe.to_string dsl_source
+                     | "fidelity" | "html" ->
+                         (match Mcp_tools.process_json_string ~format:req.format (Yojson.Safe.to_string dsl_source) with
+                          | Ok result -> result
+                          | Error _ -> Yojson.Safe.to_string dsl_source)
+                     | _ -> Yojson.Safe.to_string dsl_source
+                   in
+                   let payload =
+                     Proto.encode_figma_node
+                       ~node_id:current_id ~node_name ~depth ~parent_id
+                       ~child_count ~dsl
+                       ~node_index:!node_index ~total_nodes
+                   in
+                   Eio.Stream.add stream payload;
+                   incr node_index;
+                   if depth < max_depth then
+                     List.iter (fun child_id ->
+                       if not (Hashtbl.mem visited child_id) then
+                         Queue.add (child_id, current_id, depth + 1) queue
+                     ) children
+               | Error err ->
+                   let error_msg = Figma_api.error_to_string err in
+                   let payload =
+                     Proto.encode_figma_node
+                       ~node_id:current_id ~node_name:"" ~depth ~parent_id
+                       ~child_count:0 ~dsl:("{\"error\":\"" ^ error_msg ^ "\"}")
+                       ~node_index:!node_index ~total_nodes
+                   in
+                   Eio.Stream.add stream payload;
+                   incr node_index)
+            end
+          done;
+          stream
+        end else begin
+          eprintf "[gRPC] GetNodeStream file_key=%s node_id=%s token_len=%d\n%!"
+            file_key node_id (String.length token);
+          (* Fetch from Figma API using Lwt bridge *)
+          let result =
+            Lwt_main.run
+              (Figma_api.get_file_nodes
+                 ?depth:req.depth ?geometry:req.geometry ?plugin_data:req.plugin_data ?version:req.version
+                 ~token ~file_key ~node_ids:[node_id] ())
+          in
+          (match result with
+           | Ok json ->
+               (* Extract the specific node from response *)
+               let node_json = extract_node_document node_id json in
+               Streamer.stream_nodes ~format:req.format node_json stream
+           | Error err ->
+               let error_msg = Figma_api.error_to_string err in
+               let payload =
+                 Proto.encode_figma_node
+                   ~node_id ~node_name:"" ~depth:0 ~parent_id:""
+                   ~child_count:0 ~dsl:("{\"error\":\"" ^ error_msg ^ "\"}")
+                   ~node_index:0 ~total_nodes:1
+               in
+               Eio.Stream.add stream payload);
+          stream
+        end
     | _ ->
-        Eio.Stream.add stream "ERROR: Missing required parameters (file_key, node_id, token)";
+        let payload =
+          Proto.encode_figma_node
+            ~node_id:"" ~node_name:"" ~depth:0 ~parent_id:""
+            ~child_count:0 ~dsl:"{\"error\":\"Missing required parameters\"}"
+            ~node_index:0 ~total_nodes:1
+        in
+        Eio.Stream.add stream payload;
         stream
 
   (** GetFileMeta: Unary call for file metadata *)
   let get_file_meta request_bytes =
-    let (file_key_opt, _, token_opt, _, _) = parse_node_request request_bytes in
+    let req = Proto.decode_file_meta_request request_bytes in
+    let file_key_opt = req.file_key in
+    let token_opt = req.token in
+    let version = req.version in
 
     match (file_key_opt, token_opt) with
     | (Some file_key, Some token) ->
+        eprintf "[gRPC] GetFileMeta file_key=%s token_len=%d\n%!"
+          file_key (String.length token);
         let result =
-          Lwt_eio.run_lwt @@ fun () ->
-          Figma_api.get_file_meta ~token ~file_key ()
+          Lwt_main.run
+            (Figma_api.get_file_meta ~token ~file_key ?version ())
         in
         (match result with
-         | Ok json -> Yojson.Safe.to_string json
-         | Error err -> sprintf {|{"error": "%s"}|} (Figma_api.error_to_string err))
+         | Ok json ->
+             let open Yojson.Safe.Util in
+             let file_meta = json |> member "file" in
+             let name = file_meta |> member "name" |> to_string_option in
+             let last_modified = file_meta |> member "last_touched_at" |> to_string_option in
+             let thumbnail_url = file_meta |> member "thumbnail_url" |> to_string_option in
+             let version = file_meta |> member "version" |> to_string_option in
+             let role = file_meta |> member "role" |> to_string_option in
+             let component_count = None in
+             let style_count = None in
+             Proto.encode_file_meta_response
+               ?name ?last_modified ?thumbnail_url ?version ?role
+               ?component_count ?style_count ()
+         | Error err ->
+             Proto.encode_file_meta_response
+               ~name:(Printf.sprintf "ERROR: %s" (Figma_api.error_to_string err)) ())
     | _ ->
-        {|{"error": "Missing required parameters (file_key, token)"}|}
+        Proto.encode_file_meta_response ~name:"ERROR: Missing required parameters" ()
 
   (** FidelityLoop: Stream progressive depth increases *)
   let fidelity_loop request_bytes =
     let stream = Eio.Stream.create 16 in
+    let req = Proto.decode_fidelity_loop_request request_bytes in
 
-    let json = try Some (Yojson.Safe.from_string request_bytes) with _ -> None in
+    match (req.file_key, req.node_id, req.token) with
+    | (Some fk, Some nid, Some tok) ->
+        let node_id = normalize_node_id nid in
+        let attempt = ref 0 in
+        let current_depth = ref req.start_depth in
+        let done_flag = ref false in
 
-    match json with
-    | Some (`Assoc fields) ->
-        let get s = match List.assoc_opt s fields with
-          | Some (`String v) -> Some v
-          | _ -> None
-        in
-        let get_float s default = match List.assoc_opt s fields with
-          | Some (`Float v) -> v
-          | Some (`Int v) -> float_of_int v
-          | _ -> default
-        in
-        let get_int s default = match List.assoc_opt s fields with
-          | Some (`Int v) -> v
-          | _ -> default
-        in
+        while not !done_flag && !current_depth <= req.max_depth do
+          incr attempt;
 
-        let file_key = get "file_key" in
-        let node_id = get "node_id" in
-        let token = get "token" in
-        let target_score = get_float "target_score" 0.92 in
-        let start_depth = get_int "start_depth" 4 in
-        let max_depth = get_int "max_depth" 20 in
-        let depth_step = get_int "depth_step" 4 in
+          let result =
+            Lwt_main.run
+              (Figma_api.get_file_nodes ~depth:!current_depth ~token:tok ~file_key:fk ~node_ids:[node_id] ())
+          in
 
-        (match (file_key, node_id, token) with
-         | (Some fk, Some nid, Some tok) ->
-             (* Iteratively increase depth until target score reached *)
-             let attempt = ref 0 in
-             let current_depth = ref start_depth in
-             let done_flag = ref false in
+          (match result with
+           | Ok json ->
+               let dsl = Yojson.Safe.to_string json in
+               let raw_size = String.length dsl in
+               let compressed = Proto.compress dsl in
+               let compressed_size = String.length compressed in
+               let score = Figma_early_stop.calculate_text_density json in
 
-             while not !done_flag && !current_depth <= max_depth do
-               incr attempt;
-
-               let result =
-                 Lwt_eio.run_lwt @@ fun () ->
-                 Figma_api.get_file_nodes ~depth:!current_depth ~token:tok ~file_key:fk ~node_ids:[nid] ()
+               let done_now = score >= req.target_score in
+               let progress =
+                 Proto.encode_fidelity_progress {
+                   Proto.attempt = !attempt;
+                   current_depth = !current_depth;
+                   current_score = score;
+                   dsl = Some compressed;
+                   done_ = done_now;
+                   success = done_now;
+                   final_dsl = (if done_now then Some compressed else None);
+                   error = None;
+                   node_count = None;
+                   raw_size = Some raw_size;
+                   compressed_size = Some compressed_size;
+                 }
                in
+               Eio.Stream.add stream progress;
 
-               (match result with
-                | Ok json ->
-                    let dsl = Yojson.Safe.to_string json in
-                    let raw_size = String.length dsl in
-                    let compressed = Proto.compress dsl in
-                    let compressed_size = String.length compressed in
+               if done_now then done_flag := true
+               else current_depth := !current_depth + req.depth_step
+           | Error err ->
+               let error_msg = Figma_api.error_to_string err in
+               let progress =
+                 Proto.encode_fidelity_progress {
+                   Proto.attempt = !attempt;
+                   current_depth = !current_depth;
+                   current_score = 0.0;
+                   dsl = None;
+                   done_ = true;
+                   success = false;
+                   final_dsl = None;
+                   error = Some error_msg;
+                   node_count = None;
+                   raw_size = None;
+                   compressed_size = None;
+                 }
+               in
+               Eio.Stream.add stream progress;
+               done_flag := true)
+        done;
 
-                    (* Calculate simple coverage score based on text density *)
-                    let score = Figma_early_stop.calculate_text_density json in
-
-                    (* Build progress message - base64 inline for final DSL *)
-                    let final_dsl_part =
-                      if score >= target_score then
-                        sprintf {|,"done":true,"success":true,"final_dsl":"%s"|}
-                          (Base64.encode_exn compressed)
-                      else ""
-                    in
-                    let progress_json = sprintf
-                      {|{"attempt":%d,"current_depth":%d,"current_score":%.3f,"raw_size":%d,"compressed_size":%d%s}|}
-                      !attempt !current_depth score raw_size compressed_size final_dsl_part
-                    in
-                    Eio.Stream.add stream progress_json;
-
-                    if score >= target_score then done_flag := true
-                    else current_depth := !current_depth + depth_step
-                | Error err ->
-                    let error_msg = Figma_api.error_to_string err in
-                    Eio.Stream.add stream (sprintf {|{"error":"%s","done":true,"success":false}|} error_msg);
-                    done_flag := true)
-             done;
-
-             if not !done_flag then
-               Eio.Stream.add stream {|{"done":true,"success":false,"error":"Max depth reached"}|}
-         | _ ->
-             Eio.Stream.add stream {|{"error":"Missing required parameters"}|});
+        if not !done_flag then begin
+          let progress =
+            Proto.encode_fidelity_progress {
+              Proto.attempt = !attempt;
+              current_depth = !current_depth;
+              current_score = 0.0;
+              dsl = None;
+              done_ = true;
+              success = false;
+              final_dsl = None;
+              error = Some "Max depth reached";
+              node_count = None;
+              raw_size = None;
+              compressed_size = None;
+            }
+          in
+          Eio.Stream.add stream progress
+        end;
         stream
     | _ ->
-        Eio.Stream.add stream {|{"error":"Invalid request format"}|};
+        let progress =
+          Proto.encode_fidelity_progress {
+            Proto.attempt = 0;
+            current_depth = 0;
+            current_score = 0.0;
+            dsl = None;
+            done_ = true;
+            success = false;
+            final_dsl = None;
+            error = Some "Missing required parameters";
+            node_count = None;
+            raw_size = None;
+            compressed_size = None;
+          }
+        in
+        Eio.Stream.add stream progress;
         stream
 
   (** GetSplitStream: Stream nodes split into Style/Layout/Content chunks *)
   let get_split_stream request_bytes =
-    let stream = Eio.Stream.create 128 in
+    let req = Proto.decode_split_stream_request request_bytes in
 
-    let (file_key_opt, node_id_opt, token_opt, _, depth_opt) =
-      parse_node_request request_bytes
-    in
-
-    match (file_key_opt, node_id_opt, token_opt) with
+    match (req.file_key, req.node_id, req.token) with
     | (Some file_key, Some node_id, Some token) ->
-        (* Fetch from Figma API using Lwt bridge *)
+        let node_id = normalize_node_id node_id in
+        let cache_options =
+          match req.depth with
+          | Some depth -> [Printf.sprintf "depth:%d" depth]
+          | None -> []
+        in
+        let cached_json =
+          match Figma_cache.get ~file_key ~node_id ~options:cache_options () with
+          | Some json ->
+              eprintf "[gRPC] SplitStream cache HIT (exact) node=%s\n%!" node_id;
+              Some json
+          | None ->
+              let fallback_options =
+                let depth_fallback =
+                  match req.depth with
+                  | Some depth when depth > 2 ->
+                      [([Printf.sprintf "depth:%d" 2], "depth:2")]
+                  | _ -> []
+                in
+                let no_depth =
+                  if cache_options <> [] then [([], "no-depth")] else []
+                in
+                depth_fallback @ no_depth
+              in
+              let rec find_fallback = function
+                | [] -> None
+                | (options, label) :: rest ->
+                    (match Figma_cache.get ~file_key ~node_id ~options () with
+                     | Some json ->
+                         eprintf "[gRPC] SplitStream cache HIT (%s) node=%s\n%!"
+                           label node_id;
+                         Some json
+                     | None -> find_fallback rest)
+              in
+              find_fallback fallback_options
+        in
         let result =
-          Lwt_eio.run_lwt @@ fun () ->
-          Figma_api.get_file_nodes
-            ?depth:depth_opt
-            ~token ~file_key ~node_ids:[node_id] ()
+          match cached_json with
+          | Some json -> Ok json
+          | None ->
+              (* Fetch from Figma API using Lwt bridge *)
+              let fetched =
+                Lwt_main.run
+                  (Figma_api.get_file_nodes
+                     ?depth:req.depth
+                     ~token ~file_key ~node_ids:[node_id] ())
+              in
+              (match fetched with
+               | Ok json ->
+                   Figma_cache.set ~file_key ~node_id ~options:cache_options json;
+                   Ok json
+               | Error err -> Error err)
         in
         (match result with
          | Ok json ->
@@ -616,13 +883,49 @@ module Handlers = struct
                     | _ -> json)
                | _ -> json
              in
+             let total_nodes = Streamer.count_nodes node_json in
+             let per_node =
+               (if req.include_styles then 1 else 0)
+               + (if req.include_layouts then 1 else 0)
+               + (if req.include_contents then 1 else 0)
+             in
+             let total_chunks = max 1 (total_nodes * per_node) in
+             let stream = Eio.Stream.create total_chunks in
              Splitter.stream_split node_json stream
+               ~include_styles:req.include_styles
+               ~include_layouts:req.include_layouts
+               ~include_contents:req.include_contents;
+             stream
          | Error err ->
              let error_msg = Figma_api.error_to_string err in
-             Eio.Stream.add stream (sprintf {|{"error":"%s"}|} error_msg));
-        stream
+             let stream = Eio.Stream.create 1 in
+             let payload =
+               Proto.encode_split_chunk ~sequence:0 ~total_chunks:1 ~node_id
+                 ~chunk:(Proto.Content Proto.{
+                   id = "error-content";
+                   node_id;
+                   node_type = "ERROR";
+                   name = "error";
+                   text_content = Some error_msg;
+                   image_ref = None;
+                 })
+             in
+             Eio.Stream.add stream payload;
+             stream)
     | _ ->
-        Eio.Stream.add stream {|{"error":"Missing required parameters (file_key, node_id, token)"}|};
+        let stream = Eio.Stream.create 1 in
+        let payload =
+          Proto.encode_split_chunk ~sequence:0 ~total_chunks:1 ~node_id:""
+            ~chunk:(Proto.Content Proto.{
+              id = "error-content";
+              node_id = "";
+              node_type = "ERROR";
+              name = "error";
+              text_content = Some "Missing required parameters";
+              image_ref = None;
+            })
+        in
+        Eio.Stream.add stream payload;
         stream
 
   (** PlanTasks: Generate ROI-based implementation tasks from Figma node
@@ -638,57 +941,183 @@ module Handlers = struct
       - P4_Specialist: vectors, animations, components
   *)
   let plan_tasks request_bytes =
-    let (file_key_opt, node_id_opt, token_opt, _, depth_opt) =
-      parse_node_request request_bytes
+    let req = Proto.decode_plan_tasks_request request_bytes in
+    let limit_tasks tasks =
+      match req.max_tasks with
+      | Some limit when limit > 0 ->
+          let rec take n lst =
+            match (n, lst) with
+            | (n, _) when n <= 0 -> []
+            | (_, []) -> []
+            | (n, x :: xs) -> x :: take (n - 1) xs
+          in
+          take limit tasks
+      | _ -> tasks
     in
-    match (file_key_opt, node_id_opt, token_opt) with
-    | (Some file_key, Some node_id, Some token) ->
-        let result =
-          Lwt_eio.run_lwt @@ fun () ->
-          Figma_api.get_file_nodes
-            ?depth:depth_opt
-            ~token ~file_key ~node_ids:[node_id] ()
+    let to_proto_tasks tasks =
+      List.map (fun (t : Task_planner.task) ->
+        let priority =
+          match t.Task_planner.priority with
+          | Task_planner.P1_Layout -> 0
+          | Task_planner.P2_Style -> 1
+          | Task_planner.P3_Text -> 2
+          | Task_planner.P4_Specialist -> 3
         in
-        (match result with
-         | Ok json ->
-             (* Extract node document from API response *)
-             let node_json = match json with
-               | `Assoc fields ->
-                   (match List.assoc_opt "nodes" fields with
-                    | Some (`Assoc nodes) ->
-                        (match List.assoc_opt node_id nodes with
-                         | Some (`Assoc node_fields) ->
-                             (match List.assoc_opt "document" node_fields with
-                              | Some doc -> doc
-                              | None -> json)
-                         | _ -> json)
-                    | _ -> json)
-               | _ -> json
-             in
-             (* Parse JSON to ui_node, then generate tasks *)
-             (match Figma_parser.parse_json node_json with
-              | Some ui_node ->
-                  let tasks = Task_planner.collect_tasks ui_node in
-                  let sorted = Task_planner.sort_by_priority tasks in
-                  (* Build response with summary *)
-                  let total_tokens = List.fold_left
-                    (fun acc t -> acc + t.Task_planner.estimated_tokens) 0 sorted in
-                  sprintf {|{
-  "tasks": %s,
-  "summary": "%s",
-  "total_estimated_tokens": %d,
-  "root_node_id": "%s"
-}|}
-                    (Task_planner.tasks_to_json sorted)
-                    (Task_planner.summarize_plan sorted)
-                    total_tokens
-                    node_id
-              | None ->
-                  sprintf {|{"error": "Failed to parse node JSON for %s"}|} node_id)
-         | Error err ->
-             sprintf {|{"error": "%s"}|} (Figma_api.error_to_string err))
+        Proto.{
+          id = t.id;
+          node_id = t.node_id;
+          node_name = t.node_name;
+          node_type = t.node_type;
+          priority;
+          dependencies = t.dependencies;
+          estimated_tokens = t.estimated_tokens;
+          semantic_dsl = t.semantic_dsl;
+          hints = t.hints;
+        }
+      ) tasks
+    in
+    match (req.file_key, req.node_id, req.token) with
+    | (Some file_key, Some node_id, Some token) ->
+        let node_id = normalize_node_id node_id in
+        if req.recursive then begin
+          let max_depth =
+            match req.recursive_max_depth with
+            | Some d when d > 0 -> d
+            | _ -> env_int "FIGMA_RECURSIVE_MAX_DEPTH" 20
+          in
+          let max_nodes =
+            match req.recursive_max_nodes with
+            | Some d when d > 0 -> d
+            | _ -> env_int "FIGMA_RECURSIVE_MAX_NODES" 5000
+          in
+          let depth_per_call =
+            match req.recursive_depth_per_call with
+            | Some d when d > 0 -> d
+            | _ -> env_int "FIGMA_RECURSIVE_DEPTH_PER_CALL" 1
+          in
+          let cache_options =
+            List.filter_map Fun.id [
+              Some (Printf.sprintf "depth:%d" depth_per_call);
+            ]
+          in
+          let visited : (string, unit) Hashtbl.t = Hashtbl.create 1024 in
+          let queue : (string * string option * int) Queue.t = Queue.create () in
+          Queue.add (node_id, None, 0) queue;
+          let flat_nodes = ref [] in
+          let stats = ref empty_requirements in
+          let top_level = ref [] in
+          let processed = ref 0 in
+
+          while not (Queue.is_empty queue)
+                && (max_nodes <= 0 || !processed < max_nodes) do
+            let (current_id, parent_id, depth) = Queue.pop queue in
+            if not (Hashtbl.mem visited current_id) then begin
+              Hashtbl.add visited current_id ();
+              incr processed;
+
+              let fetched =
+                match Figma_cache.get ~file_key ~node_id:current_id ~options:cache_options () with
+                | Some json -> Ok json
+                | None ->
+                    let result =
+                      Lwt_main.run
+                        (Figma_api.get_file_nodes
+                           ~depth:depth_per_call
+                           ~token ~file_key ~node_ids:[current_id] ())
+                    in
+                    (match result with
+                     | Ok json ->
+                         Figma_cache.set ~file_key ~node_id:current_id ~options:cache_options json;
+                         Ok json
+                     | Error err -> Error err)
+              in
+
+              (match fetched with
+               | Ok json ->
+                   let node_json_full = extract_node_document current_id json in
+                   let children = child_ids node_json_full in
+                   let node_json = strip_children node_json_full in
+                   (match Figma_parser.parse_json node_json with
+                    | Some ui_node ->
+                        let flat : Task_planner.flat_node = {
+                          Task_planner.node = ui_node;
+                          parent_node_id = parent_id;
+                          depth;
+                        } in
+                        flat_nodes := flat :: !flat_nodes;
+                        stats := add_node_stats !stats ui_node;
+                        if depth = 1 && List.length !top_level < 30 then
+                          top_level := ui_node.Figma_types.name :: !top_level
+                    | None ->
+                        stats := add_skipped !stats);
+                   if depth < max_depth then
+                     List.iter (fun child_id ->
+                       if not (Hashtbl.mem visited child_id) then
+                         Queue.add (child_id, Some current_id, depth + 1) queue
+                     ) children
+               | Error _ ->
+                   stats := add_skipped !stats)
+            end
+          done;
+
+          let flat_nodes = List.rev !flat_nodes in
+          let tasks = Task_planner.tasks_from_flat flat_nodes in
+          let sorted = Task_planner.sort_by_priority tasks |> limit_tasks in
+          let total_tokens = List.fold_left
+            (fun acc t -> acc + t.Task_planner.estimated_tokens) 0 sorted in
+          let summary = Task_planner.summarize_plan sorted in
+          let requirements_payload = requirements_json !stats !top_level in
+          Proto.encode_plan_tasks_response
+            ~summary:(Some summary)
+            ~requirements_json:(Some requirements_payload)
+            ~tasks:(to_proto_tasks sorted)
+            ~total_estimated_tokens:total_tokens
+            ~root_node_id:node_id
+        end else begin
+          let result =
+            Lwt_main.run
+              (Figma_api.get_file_nodes
+                 ?depth:req.depth
+                 ~token ~file_key ~node_ids:[node_id] ())
+          in
+          (match result with
+           | Ok json ->
+               (* Extract node document from API response *)
+               let node_json = extract_node_document node_id json in
+               (* Parse JSON to ui_node, then generate tasks *)
+               (match Figma_parser.parse_json node_json with
+                | Some ui_node ->
+                    let tasks = Task_planner.collect_tasks ui_node in
+                    let sorted = Task_planner.sort_by_priority tasks |> limit_tasks in
+                    let total_tokens = List.fold_left
+                      (fun acc t -> acc + t.Task_planner.estimated_tokens) 0 sorted in
+                    let summary = Task_planner.summarize_plan sorted in
+                    let flat_nodes = flatten_ui_node ui_node in
+                    let requirements_payload = requirements_from_flat_nodes flat_nodes in
+                    Proto.encode_plan_tasks_response
+                      ~summary:(Some summary)
+                      ~requirements_json:(Some requirements_payload)
+                      ~tasks:(to_proto_tasks sorted)
+                      ~total_estimated_tokens:total_tokens
+                      ~root_node_id:node_id
+                | None ->
+                    Proto.encode_plan_tasks_response
+                      ~summary:None
+                      ~requirements_json:None
+                      ~tasks:[] ~total_estimated_tokens:0 ~root_node_id:node_id)
+           | Error err ->
+               Proto.encode_plan_tasks_response
+                 ~summary:None
+                 ~requirements_json:None
+                 ~tasks:[] ~total_estimated_tokens:0
+                 ~root_node_id:(Printf.sprintf "ERROR: %s" (Figma_api.error_to_string err)))
+        end
     | _ ->
-        {|{"error":"Missing required parameters (file_key, node_id, token)"|}
+        Proto.encode_plan_tasks_response
+          ~summary:None
+          ~requirements_json:None
+          ~tasks:[] ~total_estimated_tokens:0
+          ~root_node_id:"ERROR: Missing required parameters"
 end
 
 (** ============== gRPC Server Setup ============== *)
