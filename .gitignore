@@ -14,6 +14,9 @@ node_modules/
 *~
 .idea/
 
+# Git worktrees
+.worktrees/
+
 # OS
 .DS_Store
 Thumbs.db
