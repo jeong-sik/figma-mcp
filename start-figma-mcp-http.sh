@@ -61,7 +61,9 @@ LOCAL_EXE="$SCRIPT_DIR/_build/default/bin/main.exe"
 INSTALLED_EXE="$(command -v figma-mcp || true)"
 FIGMA_EXE=""
 
-if [ -x "$WORKSPACE_EXE" ]; then
+if [ -n "${FIGMA_MCP_EXE:-}" ] && [ -x "$FIGMA_MCP_EXE" ]; then
+  FIGMA_EXE="$FIGMA_MCP_EXE"
+elif [ -x "$WORKSPACE_EXE" ]; then
   FIGMA_EXE="$WORKSPACE_EXE"
 elif [ -x "$LOCAL_EXE" ]; then
   FIGMA_EXE="$LOCAL_EXE"
@@ -91,7 +93,9 @@ if [ -z "$FIGMA_EXE" ]; then
 fi
 
 if [ -n "$GRPC_PORT" ]; then
+  echo "Using figma-mcp binary: $FIGMA_EXE" >&2
   exec "$FIGMA_EXE" --port "$PORT" --grpc-port "$GRPC_PORT"
 else
+  echo "Using figma-mcp binary: $FIGMA_EXE" >&2
   exec "$FIGMA_EXE" --port "$PORT"
 fi

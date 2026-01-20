@@ -13,6 +13,11 @@ PID_FILE="${FIGMA_MCP_PID_FILE:-/tmp/figma-mcp-${PORT}.pid}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 START_SCRIPT="$SCRIPT_DIR/../start-figma-mcp-http.sh"
+DEFAULT_EXE="$SCRIPT_DIR/../_build/default/bin/main.exe"
+
+if [ -z "${FIGMA_MCP_EXE:-}" ] && [ -x "$DEFAULT_EXE" ]; then
+  export FIGMA_MCP_EXE="$DEFAULT_EXE"
+fi
 
 if [ -f "$PID_FILE" ]; then
   existing_pid="$(cat "$PID_FILE" 2>/dev/null || true)"
