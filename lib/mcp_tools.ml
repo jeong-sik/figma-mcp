@@ -3447,21 +3447,25 @@ let truncate_string ~max_len value =
 let is_utf8_continuation byte =
   byte land 0b1100_0000 = 0b1000_0000
 
+let utf8_safe_boundary ~start ~max_bytes value =
+  let len = String.length value in
+  let pos = min (start + max_bytes) len in
+  let rec back i =
+    if i <= start then start
+    else
+      let byte = Char.code value.[i - 1] in
+      if is_utf8_continuation byte then back (i - 1) else i
+  in
+  back pos
+
 let truncate_utf8 ~max_bytes value =
   if max_bytes <= 0 then (value, false)
   else
     let len = String.length value in
     if len <= max_bytes then (value, false)
     else
-      let pos = min max_bytes len in
-      let rec back i =
-        if i <= 0 then 0
-        else
-          let byte = Char.code value.[i - 1] in
-          if is_utf8_continuation byte then back (i - 1) else i
-      in
-      let cut = back pos in
-      let cut = if cut = 0 then pos else cut in
+      let cut = utf8_safe_boundary ~start:0 ~max_bytes value in
+      let cut = if cut = 0 then min max_bytes len else cut in
       (String.sub value 0 cut, true)
 
 let take_n n items =
@@ -3591,10 +3595,10 @@ let chunkify_text ~chunk_size text =
   let rec loop idx acc =
     if idx >= len then List.rev acc
     else
-      let remaining = len - idx in
-      let chunk_len = min size remaining in
-      let chunk = String.sub text idx chunk_len in
-      loop (idx + chunk_len) (chunk :: acc)
+      let next = utf8_safe_boundary ~start:idx ~max_bytes:size text in
+      let next = if next <= idx then min (idx + size) len else next in
+      let chunk = String.sub text idx (next - idx) in
+      loop next (chunk :: acc)
   in
   let chunks = loop 0 [] in
   let total = List.length chunks in
