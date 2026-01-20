@@ -130,13 +130,14 @@ let tool_figma_get_node : tool_def = {
   input_schema = object_schema [
     ("file_key", string_prop "Figma 파일 키");
     ("node_id", string_prop "노드 ID (예: 123:456)");
+    ("url", string_prop "Figma URL (file_key/node_id 자동 추출)");
     ("token", string_prop "Figma Personal Access Token");
     ("format", enum_prop ["fidelity"; "raw"; "html"] "출력 포맷");
     ("depth", number_prop "트리 깊이 제한 (Figma API depth 파라미터)");
     ("geometry", enum_prop ["paths"] "벡터 경로 포함 (geometry=paths)");
     ("plugin_data", string_prop "plugin_data 파라미터 (쉼표 구분 plugin ID 또는 shared)");
     ("version", string_prop "특정 파일 버전 ID");
-  ] ["file_key"; "node_id"; "token"];
+  ] ["token"];
 }
 
 let tool_figma_get_node_with_image : tool_def = {
@@ -145,6 +146,7 @@ let tool_figma_get_node_with_image : tool_def = {
   input_schema = object_schema [
     ("file_key", string_prop "Figma 파일 키");
     ("node_id", string_prop "노드 ID (예: 123:456)");
+    ("url", string_prop "Figma URL (file_key/node_id 자동 추출)");
     ("token", string_prop "Figma Personal Access Token");
     ("format", enum_prop ["fidelity"; "raw"; "html"] "DSL 출력 포맷 (기본값: fidelity)");
     ("image_format", enum_prop ["png"; "jpg"; "svg"; "pdf"] "이미지 포맷 (기본값: png)");
@@ -156,7 +158,7 @@ let tool_figma_get_node_with_image : tool_def = {
     ("geometry", enum_prop ["paths"] "벡터 경로 포함 (geometry=paths)");
     ("plugin_data", string_prop "plugin_data 파라미터 (쉼표 구분 plugin ID 또는 shared)");
     ("version", string_prop "특정 파일 버전 ID");
-  ] ["file_key"; "node_id"; "token"];
+  ] ["token"];
 }
 
 let tool_figma_get_node_bundle : tool_def = {
@@ -165,6 +167,7 @@ let tool_figma_get_node_bundle : tool_def = {
   input_schema = object_schema [
     ("file_key", string_prop "Figma 파일 키");
     ("node_id", string_prop "노드 ID (예: 123:456)");
+    ("url", string_prop "Figma URL (file_key/node_id 자동 추출)");
     ("token", string_prop "Figma Personal Access Token");
     ("format", enum_prop ["fidelity"; "raw"; "html"] "DSL 출력 포맷 (기본값: fidelity)");
     ("image_format", enum_prop ["png"; "jpg"; "svg"; "pdf"] "이미지 포맷 (기본값: png)");
@@ -177,6 +180,7 @@ let tool_figma_get_node_bundle : tool_def = {
     ("include_variables", bool_prop "변수/해석 포함 여부 (기본값: true)");
     ("include_image_fills", bool_prop "image fills 포함 여부 (기본값: true)");
     ("include_plugin", bool_prop "플러그인 스냅샷 포함 여부 (기본값: false)");
+    ("auto_plugin", bool_prop "url 제공 시 플러그인 자동 포함 (기본값: url 존재 시 true)");
     ("include_plugin_variables", bool_prop "플러그인 변수 보강 포함 여부 (기본값: false)");
     ("include_plugin_image", bool_prop "플러그인 이미지(base64) 포함 여부 (기본값: false)");
     ("plugin_include_geometry", bool_prop "플러그인 스냅샷에 벡터/지오메트리 포함 여부 (기본값: false)");
@@ -189,7 +193,7 @@ let tool_figma_get_node_bundle : tool_def = {
     ("geometry", enum_prop ["paths"] "벡터 경로 포함 (geometry=paths)");
     ("plugin_data", string_prop "plugin_data 파라미터 (쉼표 구분 plugin ID 또는 shared)");
     ("version", string_prop "특정 파일 버전 ID");
-  ] ["file_key"; "node_id"; "token"];
+  ] ["token"];
 }
 
 (** 경량 구조 요약 - 큰 노드를 탐색할 때 전체 로드 없이 구조 파악 *)
@@ -199,10 +203,11 @@ let tool_figma_get_node_summary : tool_def = {
   input_schema = object_schema [
     ("file_key", string_prop "Figma 파일 키");
     ("node_id", string_prop "노드 ID (예: 123:456)");
+    ("url", string_prop "Figma URL (file_key/node_id 자동 추출)");
     ("token", string_prop "Figma Personal Access Token");
     ("max_children", number_prop "반환할 최대 자식 수 (기본값: 50)");
     ("version", string_prop "특정 파일 버전 ID");
-  ] ["file_key"; "node_id"; "token"];
+  ] ["token"];
 }
 
 (** 깊이 범위별 청크 로드 - 대형 노드를 점진적으로 로드 *)
@@ -212,13 +217,50 @@ let tool_figma_get_node_chunk : tool_def = {
   input_schema = object_schema [
     ("file_key", string_prop "Figma 파일 키");
     ("node_id", string_prop "노드 ID (예: 123:456)");
+    ("url", string_prop "Figma URL (file_key/node_id 자동 추출)");
     ("token", string_prop "Figma Personal Access Token");
     ("depth_start", number_prop "시작 깊이 (기본값: 0)");
     ("depth_end", number_prop "종료 깊이 (기본값: 2)");
     ("format", enum_prop ["fidelity"; "raw"; "html"] "출력 포맷 (기본값: fidelity)");
     ("include_styles", bool_prop "스타일 정의 포함 여부 (기본값: false)");
     ("version", string_prop "특정 파일 버전 ID");
-  ] ["file_key"; "node_id"; "token"];
+  ] ["token"];
+}
+
+let tool_figma_chunk_index : tool_def = {
+  name = "figma_chunk_index";
+  description = "Figma DSL을 청킹한 뒤 청크 인덱스와 요약 통계를 반환합니다.";
+  input_schema = object_schema [
+    ("file_key", string_prop "Figma 파일 키");
+    ("node_id", string_prop "노드 ID (예: 123:456)");
+    ("url", string_prop "Figma URL (file_key/node_id 자동 추출)");
+    ("token", string_prop "Figma Personal Access Token");
+    ("format", enum_prop ["fidelity"; "raw"] "청킹 대상 포맷 (기본값: fidelity)");
+    ("depth", number_prop "Figma API depth");
+    ("geometry", enum_prop ["paths"] "벡터 경로 포함 (geometry=paths)");
+    ("chunk_size", number_prop "청크당 children 수 (기본값: 50)");
+    ("sample_size", number_prop "인덱스 샘플 크기 (기본값: 6)");
+    ("context_max_depth", number_prop "컨텍스트 최대 깊이 (기본값: 6)");
+    ("context_max_children", number_prop "컨텍스트 자식 최대 수 (기본값: 200)");
+    ("context_max_list_items", number_prop "컨텍스트 리스트 최대 항목 수 (기본값: 200)");
+    ("context_max_string", number_prop "컨텍스트 문자열 최대 길이 (기본값: 2000)");
+    ("selection_mode", enum_prop ["none"; "heuristic"; "llm"] "청크 선택 전략 (기본값: none)");
+    ("selection_limit", number_prop "선택할 청크 수 (기본값: 4)");
+    ("selection_task", string_prop "청크 선택 기준 설명 (옵션)");
+    ("selection_provider", enum_prop ["mcp-http"; "stub"] "LLM provider (기본값: mcp-http)");
+    ("selection_llm_tool", enum_prop ["codex"; "claude-cli"; "gemini"; "ollama"] "LLM 도구 (기본값: codex)");
+    ("selection_llm_args", object_prop "LLM 호출 인자 (model/timeout/...)");
+    ("selection_mcp_url", string_prop "MCP endpoint URL override");
+  ] ["token"];
+}
+
+let tool_figma_chunk_get : tool_def = {
+  name = "figma_chunk_get";
+  description = "청크 인덱스에서 특정 청크 데이터를 가져옵니다.";
+  input_schema = object_schema [
+    ("file_path", string_prop "청크 파일 경로 (figma_chunk_index 결과)");
+    ("chunk_index", number_prop "청크 인덱스 (1-based)");
+  ] ["file_path"; "chunk_index"];
 }
 
 let tool_figma_fidelity_loop : tool_def = {
@@ -227,6 +269,7 @@ let tool_figma_fidelity_loop : tool_def = {
   input_schema = object_schema [
     ("file_key", string_prop "Figma 파일 키");
     ("node_id", string_prop "노드 ID (예: 123:456)");
+    ("url", string_prop "Figma URL (file_key/node_id 자동 추출)");
     ("token", string_prop "Figma Personal Access Token");
     ("target_score", number_prop "목표 fidelity score (0-1, 기본값: 0.92)");
     ("start_depth", number_prop "초기 depth (기본값: 4)");
@@ -240,11 +283,12 @@ let tool_figma_fidelity_loop : tool_def = {
     ("include_variables", bool_prop "변수/해석 포함 여부 (기본값: true)");
     ("include_image_fills", bool_prop "image fills 포함 여부 (기본값: true)");
     ("include_plugin", bool_prop "플러그인 스냅샷 포함 여부 (기본값: false)");
+    ("auto_plugin", bool_prop "url 제공 시 플러그인 자동 포함 (기본값: url 존재 시 true)");
     ("include_plugin_variables", bool_prop "플러그인 변수 보강 포함 여부 (기본값: false)");
     ("plugin_channel_id", string_prop "플러그인 채널 ID (옵션)");
     ("plugin_depth", number_prop "플러그인 depth (기본값: 6)");
     ("plugin_timeout_ms", number_prop "플러그인 응답 대기 시간 (기본값: 20000)");
-  ] ["file_key"; "node_id"; "token"];
+  ] ["token"];
 }
 
 let tool_figma_image_similarity : tool_def = {
@@ -516,10 +560,11 @@ let tool_figma_plugin_get_node : tool_def = {
   input_schema = object_schema [
     ("channel_id", string_prop "채널 ID (옵션)");
     ("node_id", string_prop "노드 ID (예: 123:456)");
+    ("url", string_prop "Figma URL (node_id 자동 추출)");
     ("depth", number_prop "자식 탐색 깊이 (기본값: 6)");
     ("include_geometry", bool_prop "벡터/지오메트리 포함 여부 (기본값: true)");
     ("timeout_ms", number_prop "응답 대기 시간 (기본값: 20000)");
-  ] ["node_id"];
+  ] [];
 }
 
 let tool_figma_plugin_export_node_image : tool_def = {
@@ -528,10 +573,11 @@ let tool_figma_plugin_export_node_image : tool_def = {
   input_schema = object_schema [
     ("channel_id", string_prop "채널 ID (옵션)");
     ("node_id", string_prop "노드 ID (예: 123:456)");
+    ("url", string_prop "Figma URL (node_id 자동 추출)");
     ("format", enum_prop ["png"; "jpg"; "svg"; "pdf"] "이미지 포맷 (기본값: png)");
     ("scale", number_prop "스케일 (기본값: 1)");
     ("timeout_ms", number_prop "응답 대기 시간 (기본값: 20000)");
-  ] ["node_id"];
+  ] [];
 }
 
 let tool_figma_plugin_get_variables : tool_def = {
@@ -578,6 +624,7 @@ let tool_figma_llm_task : tool_def = {
   description = "Figma DSL + Plugin 스냅샷을 컨텍스트로 MCP LLM 작업을 수행합니다.";
   input_schema = object_schema [
     ("task", string_prop "LLM 작업 지시문 (필수)");
+    ("preset", enum_prop ["draft"; "balanced"; "fidelity"; "text"; "icon"] "LLM 작업 프리셋 (기본값: 없음)");
     ("quality", enum_prop ["best"; "balanced"; "fast"] "컨텍스트/속도 프리셋 (기본값: best)");
     ("provider", enum_prop ["mcp-http"; "stub"] "LLM provider (기본값: mcp-http)");
     ("llm_provider", string_prop "provider alias (하위 호환)");
@@ -588,18 +635,40 @@ let tool_figma_llm_task : tool_def = {
     ("llm_url", string_prop "MCP endpoint alias (하위 호환)");
     ("file_key", string_prop "Figma 파일 키 (DSL/변수/이미지 fill 추출용)");
     ("node_id", string_prop "노드 ID (예: 123:456)");
+    ("url", string_prop "Figma URL (file_key/node_id 자동 추출)");
     ("token", string_prop "Figma Personal Access Token");
     ("depth", number_prop "Figma API depth");
     ("geometry", enum_prop ["paths"] "벡터 경로 포함 (geometry=paths)");
     ("include_variables", bool_prop "변수 포함 여부 (기본값: quality에 따라 자동)");
     ("include_image_fills", bool_prop "이미지 fill 포함 여부 (기본값: quality에 따라 자동)");
     ("include_plugin", bool_prop "플러그인 스냅샷 포함 여부 (기본값: quality에 따라 자동)");
+    ("auto_plugin", bool_prop "url 제공 시 플러그인 자동 포함 (기본값: url 존재 시 true)");
     ("plugin_channel_id", string_prop "플러그인 채널 ID (옵션)");
     ("plugin_mode", enum_prop ["selection"; "node"] "플러그인 스냅샷 모드 (기본값: selection)");
     ("plugin_depth", number_prop "플러그인 depth (기본값: 0)");
     ("plugin_include_geometry", bool_prop "플러그인 지오메트리 포함 여부 (기본값: false)");
     ("plugin_timeout_ms", number_prop "플러그인 응답 대기 시간 (기본값: 20000)");
+    ("plugin_context_mode", enum_prop ["full"; "summary"; "both"] "플러그인 컨텍스트 모드 (기본값: full)");
+    ("plugin_summary_sample_size", number_prop "플러그인 요약 샘플 수 (기본값: 5)");
+    ("context_strategy", enum_prop ["raw"; "compact"; "chunked"] "컨텍스트 압축/청킹 전략 (기본값: raw)");
+    ("context_max_depth", number_prop "컨텍스트 최대 깊이 (compact/chunked, 기본값: 6)");
+    ("context_max_children", number_prop "컨텍스트 자식 최대 수 (compact/chunked, 기본값: 200)");
+    ("context_max_list_items", number_prop "컨텍스트 리스트 최대 항목 수 (compact/chunked, 기본값: 200)");
+    ("context_max_string", number_prop "컨텍스트 문자열 최대 길이 (compact/chunked, 기본값: 2000)");
+    ("context_chunk_size", number_prop "chunked 모드에서 청크 크기 (기본값: 50)");
+    ("chunk_select_mode", enum_prop ["none"; "heuristic"; "llm"] "청크 선택 전략 (기본값: none)");
+    ("chunk_select_limit", number_prop "선택할 청크 수 (기본값: 4)");
+    ("chunk_select_task", string_prop "청크 선택 기준 설명 (옵션)");
+    ("chunk_select_llm_tool", enum_prop ["codex"; "claude-cli"; "gemini"; "ollama"] "청크 선택용 LLM 도구 (기본값: codex)");
+    ("chunk_select_llm_args", object_prop "청크 선택용 LLM 인자 (model/timeout/...)");
+    ("chunk_select_provider", enum_prop ["mcp-http"; "stub"] "청크 선택 LLM provider (기본값: mcp-http)");
+    ("chunk_select_mcp_url", string_prop "청크 선택 MCP endpoint URL override");
+    ("chunk_select_sample_size", number_prop "청크 인덱스 샘플 수 (기본값: 6)");
     ("max_context_chars", number_prop "LLM 프롬프트 컨텍스트 최대 길이 (기본값: 120000)");
+    ("retry_on_llm_error", bool_prop "LLM 에러 시 컨텍스트 축소 후 재시도 (기본값: false)");
+    ("max_retries", number_prop "LLM 에러 재시도 횟수 (기본값: 1)");
+    ("min_context_chars", number_prop "재시도 시 컨텍스트 최소 길이 (기본값: 120000)");
+    ("retry_context_scale", number_prop "재시도 시 컨텍스트 축소 비율 (0-1, 기본값: 0.5)");
     ("return_metadata", bool_prop "raw JSON 및 메타데이터 반환 여부 (기본값: false)");
   ] ["task"];
 }
@@ -779,6 +848,8 @@ let all_tools = [
   tool_figma_get_node_bundle;
   tool_figma_get_node_summary;
   tool_figma_get_node_chunk;
+  tool_figma_chunk_index;
+  tool_figma_chunk_get;
   tool_figma_fidelity_loop;
   tool_figma_image_similarity;
   tool_figma_verify_visual;
@@ -851,6 +922,34 @@ let get_string key json =
   | Some (`String s) -> Some (normalize_node_id_key key s)
   | _ -> None
 
+let prefer_some primary fallback =
+  match primary with
+  | Some _ -> primary
+  | None -> fallback
+
+let resolve_url_info args =
+  match get_string "url" args with
+  | Some url -> Some (Figma_api.parse_figma_url url)
+  | None -> None
+
+let resolve_file_key_node_id args =
+  let file_key = get_string "file_key" args in
+  let node_id = get_string "node_id" args in
+  match resolve_url_info args with
+  | None -> (file_key, node_id)
+  | Some info ->
+      let file_key = prefer_some file_key info.file_key in
+      let node_id = prefer_some node_id info.node_id in
+      (file_key, node_id)
+
+let resolve_node_id args =
+  match get_string "node_id" args with
+  | Some _ as node_id -> node_id
+  | None ->
+      (match resolve_url_info args with
+       | Some info -> info.node_id
+       | None -> None)
+
 let get_json key json =
   member key json
 
@@ -885,6 +984,14 @@ let get_bool_or key default json =
   match get_bool key json with
   | Some b -> b
   | None -> default
+
+(** 실행 모드 설정 - HTTP 서버에서 변경됨 *)
+let is_http_mode = ref false
+
+(** Ensure effect handler in stdio mode for non-wrapped Lwt handlers. *)
+let run_with_effects f =
+  if !is_http_mode then f ()
+  else Figma_effects.run_with_real_api f
 
 let resolve_channel_id args =
   match get_string "channel_id" args with
@@ -1476,8 +1583,7 @@ let handle_list_screens args : (Yojson.Safe.t, string) result =
 
 (** figma_get_node 핸들러 *)
 let handle_get_node args : (Yojson.Safe.t, string) result =
-  let file_key = get_string "file_key" args in
-  let node_id = get_string "node_id" args in
+  let (file_key, node_id) = resolve_file_key_node_id args in
   let token = get_string "token" args in
   let format = get_string_or "format" "fidelity" args in
   let depth = get_int "depth" args in
@@ -1505,12 +1611,11 @@ let handle_get_node args : (Yojson.Safe.t, string) result =
                  | Error msg -> Error msg)
             | None -> Error (sprintf "Node not found: %s" node_id))
        | Error err -> Error err)
-  | _ -> Error "Missing required parameters: file_key, node_id, token"
+  | _ -> Error "Missing required parameters: file_key/node_id or url, token"
 
 (** figma_get_node_with_image 핸들러 *)
 let handle_get_node_with_image args : (Yojson.Safe.t, string) result =
-  let file_key = get_string "file_key" args in
-  let node_id = get_string "node_id" args in
+  let (file_key, node_id) = resolve_file_key_node_id args in
   let token = get_string "token" args in
   let format = get_string_or "format" "fidelity" args in
   let image_format = get_string_or "image_format" "png" args in
@@ -1579,12 +1684,11 @@ let handle_get_node_with_image args : (Yojson.Safe.t, string) result =
                  | Error msg -> Error msg)
             | None -> Error (sprintf "Node not found: %s" node_id))
        | Error err -> Error err)
-  | _ -> Error "Missing required parameters: file_key, node_id, token"
+  | _ -> Error "Missing required parameters: file_key/node_id or url, token"
 
 (** figma_get_node_bundle 핸들러 *)
 let handle_get_node_bundle args : (Yojson.Safe.t, string) result =
-  let file_key = get_string "file_key" args in
-  let node_id = get_string "node_id" args in
+  let (file_key, node_id) = resolve_file_key_node_id args in
   let token = get_string "token" args in
   let format = get_string_or "format" "fidelity" args in
   let image_format = get_string_or "image_format" "png" args in
@@ -1596,7 +1700,16 @@ let handle_get_node_bundle args : (Yojson.Safe.t, string) result =
   let include_meta = get_bool_or "include_meta" true args in
   let include_variables = get_bool_or "include_variables" true args in
   let include_image_fills = get_bool_or "include_image_fills" true args in
-  let include_plugin = get_bool_or "include_plugin" false args in
+  let auto_plugin =
+    match get_bool "auto_plugin" args with
+    | Some b -> b
+    | None -> Option.is_some (get_string "url" args)
+  in
+  let include_plugin =
+    match get_bool "include_plugin" args with
+    | Some b -> b
+    | None -> auto_plugin
+  in
   let include_plugin_variables = get_bool_or "include_plugin_variables" false args in
   let include_plugin_image = get_bool_or "include_plugin_image" false args in
   let plugin_include_geometry = get_bool_or "plugin_include_geometry" false args in
@@ -1881,12 +1994,11 @@ let handle_get_node_bundle args : (Yojson.Safe.t, string) result =
                 let result_str = Yojson.Safe.pretty_to_string result in
                 let prefix = Printf.sprintf "node_%s" (sanitize_node_id node_id) in
                 Ok (Large_response.wrap_string_result ~prefix ~format result_str)))
-  | _ -> Error "Missing required parameters: file_key, node_id, token"
+  | _ -> Error "Missing required parameters: file_key/node_id or url, token"
 
 (** figma_get_node_summary 핸들러 - 경량 구조 요약 *)
 let handle_get_node_summary args : (Yojson.Safe.t, string) result =
-  let file_key = get_string "file_key" args in
-  let node_id = get_string "node_id" args in
+  let (file_key, node_id) = resolve_file_key_node_id args in
   let token = get_string "token" args in
   let max_children = match get_int "max_children" args with Some n when n > 0 -> n | _ -> 50 in
   let version = get_string "version" args in
@@ -1942,12 +2054,11 @@ let handle_get_node_summary args : (Yojson.Safe.t, string) result =
              ("truncated", `Bool (children_count > max_children));
              ("hint", `String "Use figma_get_node_chunk for progressive loading of specific depth ranges");
            ]))))
-  | _ -> Error "Missing required parameters: file_key, node_id, token"
+  | _ -> Error "Missing required parameters: file_key/node_id or url, token"
 
 (** figma_get_node_chunk 핸들러 - 깊이 범위별 청크 로드 *)
 let handle_get_node_chunk args : (Yojson.Safe.t, string) result =
-  let file_key = get_string "file_key" args in
-  let node_id = get_string "node_id" args in
+  let (file_key, node_id) = resolve_file_key_node_id args in
   let token = get_string "token" args in
   let depth_start = match get_int "depth_start" args with Some d when d >= 0 -> d | _ -> 0 in
   let depth_end = match get_int "depth_end" args with Some d when d >= 0 -> d | _ -> 2 in
@@ -2032,12 +2143,11 @@ let handle_get_node_chunk args : (Yojson.Safe.t, string) result =
              let result_str = Yojson.Safe.pretty_to_string result in
              let prefix = Printf.sprintf "chunk_%s_%d_%d" (sanitize_node_id node_id) depth_start depth_end in
              Ok (Large_response.wrap_string_result ~prefix ~format result_str))))
-  | _ -> Error "Missing required parameters: file_key, node_id, token"
+  | _ -> Error "Missing required parameters: file_key/node_id or url, token"
 
 (** figma_fidelity_loop 핸들러 *)
 let handle_fidelity_loop args : (Yojson.Safe.t, string) result =
-  let file_key = get_string "file_key" args in
-  let node_id = get_string "node_id" args in
+  let (file_key, node_id) = resolve_file_key_node_id args in
   let token = get_string "token" args in
   let format = get_string_or "format" "fidelity" args in
   let target_score = get_float_or "target_score" 0.92 args in
@@ -2050,7 +2160,16 @@ let handle_fidelity_loop args : (Yojson.Safe.t, string) result =
   let include_meta = get_bool_or "include_meta" true args in
   let include_variables = get_bool_or "include_variables" true args in
   let include_image_fills = get_bool_or "include_image_fills" true args in
-  let include_plugin = get_bool_or "include_plugin" false args in
+  let auto_plugin =
+    match get_bool "auto_plugin" args with
+    | Some b -> b
+    | None -> Option.is_some (get_string "url" args)
+  in
+  let include_plugin =
+    match get_bool "include_plugin" args with
+    | Some b -> b
+    | None -> auto_plugin
+  in
   let include_plugin_variables = get_bool_or "include_plugin_variables" false args in
   let plugin_channel_id = get_string "plugin_channel_id" args in
   let plugin_depth = match get_int "plugin_depth" args with Some d when d > 0 -> d | _ -> 6 in
@@ -3207,8 +3326,8 @@ let handle_plugin_read_selection args : (Yojson.Safe.t, string) result =
 
 (** figma_plugin_get_node 핸들러 *)
 let handle_plugin_get_node args : (Yojson.Safe.t, string) result =
-  match (get_string "node_id" args, resolve_channel_id args) with
-  | (None, _) -> Error "Missing required parameter: node_id"
+  match (resolve_node_id args, resolve_channel_id args) with
+  | (None, _) -> Error "Missing required parameter: node_id (or url)"
   | (Some _, Error msg) -> Error msg
   | (Some node_id, Ok channel_id) ->
       let depth = get_int "depth" args |> Option.value ~default:6 in
@@ -3233,8 +3352,8 @@ let handle_plugin_get_node args : (Yojson.Safe.t, string) result =
 
 (** figma_plugin_export_node_image 핸들러 *)
 let handle_plugin_export_node_image args : (Yojson.Safe.t, string) result =
-  match (get_string "node_id" args, resolve_channel_id args) with
-  | (None, _) -> Error "Missing required parameter: node_id"
+  match (resolve_node_id args, resolve_channel_id args) with
+  | (None, _) -> Error "Missing required parameter: node_id (or url)"
   | (Some _, Error msg) -> Error msg
   | (Some node_id, Ok channel_id) ->
       let timeout_ms = get_int "timeout_ms" args |> Option.value ~default:20000 in
@@ -3296,14 +3415,6 @@ let handle_plugin_apply_ops args : (Yojson.Safe.t, string) result =
             ] in
            Ok (make_text_content (Yojson.Safe.pretty_to_string response)))
 
-(** 실행 모드 설정 - HTTP 서버에서 변경됨 *)
-let is_http_mode = ref false
-
-(** Ensure effect handler in stdio mode for non-wrapped Lwt handlers. *)
-let run_with_effects f =
-  if !is_http_mode then f ()
-  else Figma_effects.run_with_real_api f
-
 (** ============== LLM Bridge 핸들러 ============== *)
 
 let has_field key fields =
@@ -3325,6 +3436,853 @@ let get_string_any keys json =
          | None -> loop rest)
   in
   loop keys
+
+let truncate_string ~max_len value =
+  if max_len <= 0 then value
+  else if String.length value > max_len then
+    String.sub value 0 max_len ^ "...(truncated)"
+  else
+    value
+
+let take_n n items =
+  let rec loop acc remaining = function
+    | [] -> List.rev acc
+    | _ when remaining <= 0 -> List.rev acc
+    | x :: xs -> loop (x :: acc) (remaining - 1) xs
+  in
+  loop [] n items
+
+let chunk_list chunk_size items =
+  let size = if chunk_size <= 0 then 1 else chunk_size in
+  let rec loop acc current = function
+    | [] ->
+        let acc =
+          if current = [] then acc
+          else List.rev current :: acc
+        in
+        List.rev acc
+    | x :: xs ->
+        let current = x :: current in
+        if List.length current >= size then
+          loop (List.rev current :: acc) [] xs
+        else
+          loop acc current xs
+  in
+  loop [] [] items
+
+let rec compact_json
+    ~depth
+    ~max_depth
+    ~max_children
+    ~max_list_items
+    ~max_string
+    json =
+  match json with
+  | `Assoc fields ->
+      let fields =
+        List.filter (fun (k, _) -> not (String.ends_with ~suffix:"_missing" k)) fields
+      in
+      let fields =
+        if depth >= max_depth then
+          List.filter (fun (k, _) -> k <> "children") fields
+          |> fun filtered -> ("_depth_truncated", `Bool true) :: filtered
+        else
+          fields
+      in
+      let fields =
+        List.map (fun (k, v) ->
+          if k = "children" then
+            match v with
+            | `List items ->
+                let total = List.length items in
+                let items = take_n max_children items in
+                let items =
+                  List.map (compact_json
+                              ~depth:(depth + 1)
+                              ~max_depth
+                              ~max_children
+                              ~max_list_items
+                              ~max_string) items
+                in
+                if total > List.length items then
+                  (k, `List (items @ [`Assoc [("_truncated", `Bool true); ("total", `Int total)]]))
+                else
+                  (k, `List items)
+            | _ ->
+                (k, compact_json
+                      ~depth:(depth + 1)
+                      ~max_depth
+                      ~max_children
+                      ~max_list_items
+                      ~max_string
+                      v)
+          else
+            (k, compact_json
+                  ~depth:(depth + 1)
+                  ~max_depth
+                  ~max_children
+                  ~max_list_items
+                  ~max_string
+                  v)
+        ) fields
+      in
+      `Assoc fields
+  | `List items ->
+      let total = List.length items in
+      let items = take_n max_list_items items in
+      let items =
+        List.map (compact_json
+                    ~depth:(depth + 1)
+                    ~max_depth
+                    ~max_children
+                    ~max_list_items
+                    ~max_string) items
+      in
+      if total > List.length items then
+        `List (items @ [`Assoc [("_truncated", `Bool true); ("total", `Int total)]])
+      else
+        `List items
+  | `String s -> `String (truncate_string ~max_len:max_string s)
+  | other -> other
+
+let chunkify_children ~chunk_size json =
+  match json with
+  | `Assoc fields -> (
+      match List.assoc_opt "children" fields with
+      | Some (`List children) ->
+          let chunks = chunk_list chunk_size children in
+          let total = List.length chunks in
+          let chunks =
+            List.mapi (fun idx chunk ->
+              `Assoc [
+                ("chunk_index", `Int (idx + 1));
+                ("chunk_total", `Int total);
+                ("children", `List chunk);
+              ]) chunks
+          in
+          let fields = List.filter (fun (k, _) -> k <> "children") fields in
+          `Assoc (("chunks", `List chunks) :: ("chunk_total", `Int total) :: fields)
+      | _ -> json)
+  | _ -> json
+
+let select_chunked_json ~selected json =
+  match json with
+  | `Assoc fields -> (
+      match List.assoc_opt "chunks" fields with
+      | Some (`List chunks) ->
+          let selected_set =
+            selected
+            |> List.map (fun v -> (v, ()))
+            |> List.to_seq
+            |> Hashtbl.of_seq
+          in
+          let keep chunk =
+            match chunk with
+            | `Assoc chunk_fields ->
+                (match List.assoc_opt "chunk_index" chunk_fields with
+                 | Some (`Int idx) -> Hashtbl.mem selected_set idx
+                 | Some (`Float f) -> Hashtbl.mem selected_set (int_of_float f)
+                 | _ -> false)
+            | _ -> false
+          in
+          let chunks = List.filter keep chunks in
+          let fields = List.filter (fun (k, _) -> k <> "chunks") fields in
+          `Assoc (("chunks", `List chunks) :: ("chunk_selected", `List (List.map (fun v -> `Int v) selected)) :: fields)
+      | _ -> json)
+  | _ -> json
+
+type chunk_stats = {
+  mutable total_nodes: int;
+  type_counts: (string, int) Hashtbl.t;
+}
+
+let create_chunk_stats () =
+  { total_nodes = 0; type_counts = Hashtbl.create 32 }
+
+let bump_count counts key =
+  let current = match Hashtbl.find_opt counts key with
+    | Some v -> v
+    | None -> 0
+  in
+  Hashtbl.replace counts key (current + 1)
+
+let rec collect_chunk_stats stats json =
+  match json with
+  | `Assoc fields ->
+      stats.total_nodes <- stats.total_nodes + 1;
+      (match List.assoc_opt "type" fields with
+       | Some (`String t) -> bump_count stats.type_counts t
+       | _ -> ());
+      (match List.assoc_opt "children" fields with
+       | Some (`List kids) ->
+           List.iter (collect_chunk_stats stats) kids
+       | _ -> ())
+  | _ -> ()
+
+let count_for stats key =
+  match Hashtbl.find_opt stats.type_counts key with
+  | Some v -> v
+  | None -> 0
+
+let score_for_chunk stats =
+  let frames = count_for stats "FRAME" in
+  let components =
+    count_for stats "COMPONENT" + count_for stats "COMPONENT_SET"
+  in
+  let instances = count_for stats "INSTANCE" in
+  let texts = count_for stats "TEXT" in
+  let vectors =
+    count_for stats "VECTOR"
+    + count_for stats "BOOLEAN_OPERATION"
+    + count_for stats "ELLIPSE"
+    + count_for stats "RECTANGLE"
+    + count_for stats "LINE"
+  in
+  stats.total_nodes
+  + (frames * 5)
+  + (components * 4)
+  + (instances * 3)
+  + (texts * 3)
+  + vectors
+
+let type_counts_to_json counts =
+  let items =
+    Hashtbl.to_seq counts
+    |> List.of_seq
+    |> List.sort (fun (a, _) (b, _) -> String.compare a b)
+  in
+  `Assoc (List.map (fun (k, v) -> (k, `Int v)) items)
+
+let string_field key json =
+  match json with
+  | `Assoc fields ->
+      (match List.assoc_opt key fields with
+       | Some (`String s) -> Some s
+       | _ -> None)
+  | _ -> None
+
+let collect_samples key children sample_size =
+  children
+  |> List.filter_map (string_field key)
+  |> take_n sample_size
+
+type chunk_entry = {
+  index: int;
+  total: int;
+  child_count: int;
+  node_count: int;
+  type_counts: Yojson.Safe.t;
+  name_samples: string list;
+  id_samples: string list;
+  size_chars: int;
+  score: int;
+}
+
+let chunk_entry_to_json entry =
+  `Assoc [
+    ("chunk_index", `Int entry.index);
+    ("chunk_total", `Int entry.total);
+    ("child_count", `Int entry.child_count);
+    ("node_count", `Int entry.node_count);
+    ("type_counts", entry.type_counts);
+    ("name_samples", `List (List.map (fun s -> `String s) entry.name_samples));
+    ("id_samples", `List (List.map (fun s -> `String s) entry.id_samples));
+    ("size_chars", `Int entry.size_chars);
+    ("score", `Int entry.score);
+  ]
+
+let build_chunk_entries ~chunk_size ~sample_size json =
+  let chunked = chunkify_children ~chunk_size json in
+  match chunked with
+  | `Assoc fields -> (
+      match List.assoc_opt "chunks" fields with
+      | Some (`List chunks) ->
+          let total = List.length chunks in
+          let entries =
+            List.filter_map (fun chunk ->
+              match chunk with
+              | `Assoc chunk_fields ->
+                  let index =
+                    match List.assoc_opt "chunk_index" chunk_fields with
+                    | Some (`Int i) -> i
+                    | _ -> 0
+                  in
+                  let children =
+                    match List.assoc_opt "children" chunk_fields with
+                    | Some (`List kids) -> kids
+                    | _ -> []
+                  in
+                  let stats = create_chunk_stats () in
+                  List.iter (collect_chunk_stats stats) children;
+                  let name_samples = collect_samples "name" children sample_size in
+                  let id_samples = collect_samples "id" children sample_size in
+                  let size_chars = String.length (Yojson.Safe.to_string chunk) in
+                  let entry = {
+                    index;
+                    total;
+                    child_count = List.length children;
+                    node_count = stats.total_nodes;
+                    type_counts = type_counts_to_json stats.type_counts;
+                    name_samples;
+                    id_samples;
+                    size_chars;
+                    score = score_for_chunk stats;
+                  } in
+                  Some entry
+              | _ -> None
+            ) chunks
+          in
+          (chunked, entries)
+      | _ -> (chunked, [])
+    )
+  | _ -> (json, [])
+
+let select_chunks_heuristic entries limit =
+  let sorted =
+    List.sort (fun a b -> compare b.score a.score) entries
+  in
+  take_n limit sorted |> List.map (fun e -> e.index)
+
+type plugin_stats = {
+  mutable node_count: int;
+  mutable text_nodes: int;
+  mutable segment_count: int;
+  mutable segment_bounds_count: int;
+  type_counts: (string, int) Hashtbl.t;
+  mutable name_samples: string list;
+  mutable text_samples: string list;
+  mutable selection_count: int option;
+}
+
+let create_plugin_stats () =
+  {
+    node_count = 0;
+    text_nodes = 0;
+    segment_count = 0;
+    segment_bounds_count = 0;
+    type_counts = Hashtbl.create 32;
+    name_samples = [];
+    text_samples = [];
+    selection_count = None;
+  }
+
+let append_sample ~max items value =
+  if value = "" then items
+  else if List.length items >= max then items
+  else value :: items
+
+let count_segment_bounds segments =
+  List.fold_left (fun acc seg ->
+    match seg with
+    | `Assoc fields ->
+        (match List.assoc_opt "bounds" fields with
+         | Some (`Null) | None -> acc
+         | _ -> acc + 1)
+    | _ -> acc
+  ) 0 segments
+
+let rec collect_plugin_stats ~sample_size stats json =
+  match json with
+  | `Assoc fields ->
+      stats.node_count <- stats.node_count + 1;
+      (match List.assoc_opt "type" fields with
+       | Some (`String t) -> bump_count stats.type_counts t
+       | _ -> ());
+      (match List.assoc_opt "name" fields with
+       | Some (`String name) ->
+           stats.name_samples <- append_sample ~max:sample_size stats.name_samples name
+       | _ -> ());
+      (match List.assoc_opt "text" fields with
+       | Some (`Assoc text_fields) ->
+           stats.text_nodes <- stats.text_nodes + 1;
+           (match List.assoc_opt "characters" text_fields with
+            | Some (`String chars) ->
+                let snippet = truncate_string ~max_len:80 chars in
+                stats.text_samples <- append_sample ~max:sample_size stats.text_samples snippet
+            | _ -> ());
+           (match List.assoc_opt "segments" text_fields with
+            | Some (`List segments) ->
+                stats.segment_count <- stats.segment_count + List.length segments;
+                stats.segment_bounds_count <-
+                  stats.segment_bounds_count + count_segment_bounds segments
+            | _ -> ())
+       | _ -> ());
+      (match List.assoc_opt "children" fields with
+       | Some (`List kids) ->
+           List.iter (collect_plugin_stats ~sample_size stats) kids
+       | _ -> ())
+  | `List items ->
+      List.iter (collect_plugin_stats ~sample_size stats) items
+  | _ -> ()
+
+let summarize_plugin_payload ~sample_size payload =
+  match payload with
+  | `Assoc fields -> (
+      match List.assoc_opt "error" fields with
+      | Some (`String err) -> `Assoc [("error", `String err)]
+      | Some _ -> `Assoc [("error", `String "Plugin payload error")]
+      | None ->
+          let stats = create_plugin_stats () in
+          (match List.assoc_opt "selectionCount" fields with
+           | Some (`Int v) -> stats.selection_count <- Some v
+           | Some (`Float f) -> stats.selection_count <- Some (int_of_float f)
+           | _ -> ());
+          let nodes =
+            match List.assoc_opt "nodes" fields with
+            | Some (`List nodes) -> `List nodes
+            | _ -> payload
+          in
+          collect_plugin_stats ~sample_size stats nodes;
+          let summary = [
+            ("node_count", `Int stats.node_count);
+            ("text_nodes", `Int stats.text_nodes);
+            ("segment_count", `Int stats.segment_count);
+            ("segment_bounds_count", `Int stats.segment_bounds_count);
+            ("type_counts", type_counts_to_json stats.type_counts);
+            ("name_samples", `List (List.rev_map (fun s -> `String s) stats.name_samples |> List.rev));
+            ("text_samples", `List (List.rev_map (fun s -> `String s) stats.text_samples |> List.rev));
+          ] in
+          let summary =
+            match stats.selection_count with
+            | Some v -> ("selection_count", `Int v) :: summary
+            | None -> summary
+          in
+          `Assoc summary
+    )
+  | _ -> `Assoc [("error", `String "Invalid plugin payload")]
+
+let strip_llm_prefix text =
+  if String.starts_with ~prefix:"RES|" text then
+    let len = String.length text in
+    let rec loop idx pipes =
+      if idx >= len then text
+      else if text.[idx] = '|' then
+        if pipes >= 3 then String.sub text (idx + 1) (len - idx - 1)
+        else loop (idx + 1) (pipes + 1)
+      else
+        loop (idx + 1) pipes
+    in
+    loop 0 0
+  else
+    text
+
+let parse_json_int_list text =
+  try
+    match Yojson.Safe.from_string text with
+    | `List items ->
+        let values =
+          List.filter_map (function
+            | `Int i -> Some i
+            | `Float f -> Some (int_of_float f)
+            | `String s -> (try Some (int_of_string s) with _ -> None)
+            | _ -> None) items
+        in
+        values
+    | _ -> []
+  with _ -> []
+
+let extract_json_array text =
+  match (String.index_opt text '[', String.rindex_opt text ']') with
+  | Some start_idx, Some end_idx when end_idx > start_idx ->
+      let len = end_idx - start_idx + 1 in
+      let slice = String.sub text start_idx len in
+      parse_json_int_list slice
+  | _ -> []
+
+let extract_ints text =
+  let re = Str.regexp "[0-9]+" in
+  let rec loop pos acc =
+    try
+      let _ = Str.search_forward re text pos in
+      let value = int_of_string (Str.matched_string text) in
+      loop (Str.match_end ()) (value :: acc)
+    with Not_found -> List.rev acc
+  in
+  loop 0 []
+
+let dedup_sorted values =
+  List.sort_uniq compare values
+
+let parse_chunk_indices ~chunk_total text =
+  let text = strip_llm_prefix text |> String.trim in
+  let values =
+    let parsed = parse_json_int_list text in
+    if parsed <> [] then parsed
+    else
+      let parsed = extract_json_array text in
+      if parsed <> [] then parsed else extract_ints text
+  in
+  values
+  |> List.filter (fun v -> v >= 1 && v <= chunk_total)
+  |> dedup_sorted
+
+type llm_task_preset = {
+  quality: string option;
+  context_strategy: string option;
+  chunk_select_mode: string option;
+  chunk_select_limit: int option;
+  chunk_select_sample_size: int option;
+  chunk_select_task: string option;
+  plugin_context_mode: string option;
+  plugin_summary_sample_size: int option;
+  plugin_depth: int option;
+  plugin_include_geometry: bool option;
+  include_plugin: bool option;
+  include_variables: bool option;
+  include_image_fills: bool option;
+  max_context_chars: int option;
+  retry_on_llm_error: bool option;
+  max_retries: int option;
+  min_context_chars: int option;
+  retry_context_scale: float option;
+}
+
+let empty_preset = {
+  quality = None;
+  context_strategy = None;
+  chunk_select_mode = None;
+  chunk_select_limit = None;
+  chunk_select_sample_size = None;
+  chunk_select_task = None;
+  plugin_context_mode = None;
+  plugin_summary_sample_size = None;
+  plugin_depth = None;
+  plugin_include_geometry = None;
+  include_plugin = None;
+  include_variables = None;
+  include_image_fills = None;
+  max_context_chars = None;
+  retry_on_llm_error = None;
+  max_retries = None;
+  min_context_chars = None;
+  retry_context_scale = None;
+}
+
+let resolve_llm_task_preset name =
+  match String.lowercase_ascii name with
+  | "draft" | "fast" ->
+      Some { empty_preset with
+        quality = Some "fast";
+        include_plugin = Some false;
+        include_variables = Some false;
+        include_image_fills = Some false;
+        context_strategy = Some "raw";
+        max_context_chars = Some 120000;
+        retry_on_llm_error = Some false;
+      }
+  | "balanced" ->
+      Some { empty_preset with
+        quality = Some "balanced";
+        context_strategy = Some "chunked";
+        chunk_select_mode = Some "heuristic";
+        chunk_select_limit = Some 4;
+        plugin_context_mode = Some "summary";
+        plugin_summary_sample_size = Some 5;
+        include_variables = Some true;
+        include_image_fills = Some false;
+        max_context_chars = Some 600000;
+        retry_on_llm_error = Some true;
+        max_retries = Some 1;
+        min_context_chars = Some 400000;
+        retry_context_scale = Some 0.6;
+      }
+  | "fidelity" | "pixel" ->
+      Some { empty_preset with
+        quality = Some "best";
+        context_strategy = Some "chunked";
+        chunk_select_mode = Some "llm";
+        chunk_select_limit = Some 6;
+        plugin_context_mode = Some "both";
+        plugin_depth = Some 1;
+        include_variables = Some true;
+        include_image_fills = Some true;
+        max_context_chars = Some 1000000;
+        retry_on_llm_error = Some true;
+        max_retries = Some 1;
+        min_context_chars = Some 600000;
+        retry_context_scale = Some 0.5;
+      }
+  | "text" ->
+      Some { empty_preset with
+        quality = Some "best";
+        context_strategy = Some "chunked";
+        chunk_select_mode = Some "heuristic";
+        chunk_select_limit = Some 4;
+        chunk_select_task = Some "Focus on text-heavy chunks and typography fidelity.";
+        plugin_context_mode = Some "full";
+        plugin_depth = Some 0;
+        include_image_fills = Some false;
+      }
+  | "icon" | "vector" ->
+      Some { empty_preset with
+        quality = Some "best";
+        context_strategy = Some "chunked";
+        chunk_select_mode = Some "heuristic";
+        chunk_select_limit = Some 4;
+        chunk_select_task = Some "Focus on icon/vector-heavy chunks.";
+        plugin_context_mode = Some "full";
+        plugin_depth = Some 0;
+        plugin_include_geometry = Some true;
+        include_image_fills = Some false;
+      }
+  | _ -> None
+
+let handle_chunk_index args : (Yojson.Safe.t, string) result Lwt.t =
+  let open Lwt.Syntax in
+  let (file_key, node_id) = resolve_file_key_node_id args in
+  let token = get_string "token" args in
+  let format = get_string_or "format" "fidelity" args in
+  let depth = get_int "depth" args in
+  let geometry = get_string "geometry" args in
+  let chunk_size = match get_int "chunk_size" args with Some n when n > 0 -> n | _ -> 50 in
+  let sample_size = match get_int "sample_size" args with Some n when n > 0 -> n | _ -> 6 in
+  let context_max_depth = get_int "context_max_depth" args |> Option.value ~default:6 in
+  let context_max_children = get_int "context_max_children" args |> Option.value ~default:200 in
+  let context_max_list_items = get_int "context_max_list_items" args |> Option.value ~default:200 in
+  let context_max_string = get_int "context_max_string" args |> Option.value ~default:2000 in
+  let selection_mode = get_string_or "selection_mode" "none" args in
+  let selection_limit = match get_int "selection_limit" args with Some n when n > 0 -> n | _ -> 4 in
+  let selection_task = get_string "selection_task" args in
+  let selection_provider =
+    match get_string "selection_provider" args with
+    | Some v -> Some v
+    | None ->
+        (match get_string "provider" args with
+         | Some v -> Some v
+         | None -> get_string "llm_provider" args)
+  in
+  let selection_llm_tool =
+    match get_string "selection_llm_tool" args with
+    | Some v -> v
+    | None ->
+        (match get_string "llm_tool" args with
+         | Some v -> v
+         | None ->
+             (match get_string "tool_name" args with
+              | Some v -> v
+              | None -> "codex"))
+  in
+  let selection_llm_args = get_json "selection_llm_args" args in
+  let selection_mcp_url = get_string "selection_mcp_url" args in
+
+  let warnings = ref [] in
+  let add_warning msg = warnings := msg :: !warnings in
+
+  match (file_key, node_id, token) with
+  | (Some file_key, Some node_id, Some token) ->
+      let cache_options =
+        List.filter_map Fun.id [
+          Option.map (Printf.sprintf "depth:%d") depth;
+          Option.map (Printf.sprintf "geometry:%s") geometry;
+          Some (Printf.sprintf "format:%s" format);
+        ]
+      in
+      let json_result =
+        run_with_effects (fun () ->
+          match Figma_cache.get ~file_key ~node_id ~options:cache_options () with
+          | Some json -> Ok json
+          | None ->
+              match Figma_effects.Perform.get_nodes ~token ~file_key ~node_ids:[node_id] ?depth ?geometry () with
+              | Ok json ->
+                  Figma_cache.set ~file_key ~node_id ~options:cache_options json;
+                  Ok json
+              | Error err -> Error err)
+      in
+      (match json_result with
+       | Error err -> Lwt.return (Error err)
+       | Ok json ->
+           let node_data = match member "nodes" json with
+             | Some (`Assoc nodes_map) ->
+                 (match List.assoc_opt node_id nodes_map with
+                  | Some n -> member "document" n
+                  | None -> None)
+             | _ -> None
+           in
+           (match node_data with
+            | None -> Lwt.return (Error (Printf.sprintf "Node not found: %s" node_id))
+            | Some node ->
+                let base_json =
+                  match format with
+                  | "raw" -> node
+                  | _ ->
+                      let node_str = Yojson.Safe.to_string node in
+                      (match process_json_string ~format:"fidelity" node_str with
+                       | Ok dsl_str ->
+                           (try Yojson.Safe.from_string dsl_str with _ ->
+                              add_warning "Fidelity DSL parse failed; falling back to raw";
+                              node)
+                       | Error msg ->
+                           add_warning ("DSL conversion failed: " ^ msg);
+                           node)
+                in
+                let compacted =
+                  compact_json
+                    ~depth:0
+                    ~max_depth:context_max_depth
+                    ~max_children:context_max_children
+                    ~max_list_items:context_max_list_items
+                    ~max_string:context_max_string
+                    base_json
+                in
+                let (chunked_json, entries) =
+                  build_chunk_entries ~chunk_size ~sample_size compacted
+                in
+                let chunk_total = List.length entries in
+                let effective_limit = min selection_limit chunk_total in
+                let chunked_str = Yojson.Safe.to_string chunked_json in
+                let prefix = Printf.sprintf "chunk_index_%s" (sanitize_node_id node_id) in
+                let file_path = Large_response.save_to_file ~prefix chunked_str in
+                let size_bytes = String.length chunked_str in
+                let chunk_store = `Assoc [
+                  ("file_path", `String file_path);
+                  ("size_bytes", `Int size_bytes);
+                  ("size_human", `String (Large_response.human_size size_bytes));
+                  ("ttl_seconds", `Int Large_response.response_ttl);
+                ] in
+
+                let index_json =
+                  `List (List.map chunk_entry_to_json entries)
+                in
+
+                let* selection_json =
+                  if selection_mode = "heuristic" then
+                    let selected =
+                      if effective_limit <= 0 then []
+                      else select_chunks_heuristic entries effective_limit
+                    in
+                    Lwt.return (`Assoc [
+                      ("mode", `String "heuristic");
+                      ("selected", `List (List.map (fun v -> `Int v) selected));
+                    ])
+                  else if selection_mode = "llm" then
+                    if effective_limit <= 0 then
+                      Lwt.return (`Assoc [
+                        ("mode", `String "llm");
+                        ("selected", `List []);
+                      ])
+                    else
+                      let prompt_task =
+                        match selection_task with
+                        | Some t -> t
+                        | None -> "Select the most relevant chunks for high-fidelity output."
+                      in
+                      let prompt =
+                        Printf.sprintf
+                          "Task: %s\n\nChunk index (JSON):\n%s\n\nReturn JSON array of chunk_index values (max %d)."
+                          prompt_task
+                          (Yojson.Safe.pretty_to_string (`Assoc [
+                             ("chunk_total", `Int chunk_total);
+                             ("chunk_size", `Int chunk_size);
+                             ("chunks", index_json);
+                           ]))
+                          selection_limit
+                      in
+                      let llm_args_fields =
+                        match selection_llm_args with
+                        | None -> Ok []
+                        | Some (`Assoc fields) -> Ok fields
+                        | Some _ -> Error "selection_llm_args must be an object"
+                      in
+                      match llm_args_fields with
+                      | Error msg ->
+                          add_warning msg;
+                          Lwt.return (`Assoc [("mode", `String "llm"); ("error", `String msg)])
+                      | Ok fields ->
+                          let fields = set_field "prompt" (`String prompt) fields in
+                          let fields =
+                            if has_field "response_format" fields then fields
+                            else add_if_missing "response_format" (`String "compact") fields
+                          in
+                          let fields = add_if_missing "stream" (`Bool false) fields in
+                          match Llm_provider.resolve ?provider:selection_provider () with
+                          | Error msg ->
+                              add_warning msg;
+                              Lwt.return (`Assoc [("mode", `String "llm"); ("error", `String msg)])
+                          | Ok provider ->
+                              let llm_url =
+                                Option.value selection_mcp_url ~default:provider.default_url
+                              in
+                              let* llm_result =
+                                provider.call_tool ~url:llm_url ~name:selection_llm_tool ~arguments:(`Assoc fields)
+                              in
+                              match llm_result with
+                              | Error err ->
+                                  add_warning err;
+                                  Lwt.return (`Assoc [("mode", `String "llm"); ("error", `String err)])
+                              | Ok response ->
+                                  let indices =
+                                    parse_chunk_indices ~chunk_total response.text
+                                    |> take_n effective_limit
+                                  in
+                                  let selected =
+                                    if indices = [] then
+                                      select_chunks_heuristic entries effective_limit
+                                    else
+                                      indices
+                                  in
+                                  Lwt.return (`Assoc [
+                                    ("mode", `String "llm");
+                                    ("selected", `List (List.map (fun v -> `Int v) selected));
+                                    ("raw_response", `String response.text);
+                                  ])
+                  else
+                    Lwt.return `Null
+                in
+
+                let result =
+                  let base = [
+                    ("file_key", `String file_key);
+                    ("node_id", `String node_id);
+                    ("format", `String format);
+                    ("chunk_size", `Int chunk_size);
+                    ("chunk_total", `Int chunk_total);
+                    ("chunk_store", chunk_store);
+                    ("index", index_json);
+                    ("selection", selection_json);
+                  ] in
+                  let base =
+                    if !warnings = [] then base
+                    else ("warnings", `List (List.map (fun s -> `String s) (List.rev !warnings))) :: base
+                  in
+                  `Assoc base
+                in
+                Lwt.return (Ok result))
+       )
+  | _ -> Lwt.return (Error "Missing required parameters: file_key/node_id or url, token")
+
+let handle_chunk_get args : (Yojson.Safe.t, string) result =
+  let file_path = get_string "file_path" args in
+  let chunk_index = get_int "chunk_index" args in
+  match (file_path, chunk_index) with
+  | (Some path, Some index) ->
+      let storage_dir = Large_response.storage_dir in
+      if not (is_under_dir ~dir:storage_dir path) then
+        Error (Printf.sprintf "file_path must be under %s" storage_dir)
+      else if not (Sys.file_exists path) then
+        Error (Printf.sprintf "File not found: %s" path)
+      else
+        (match Yojson.Safe.from_file path with
+         | json ->
+             let chunks =
+               match member "chunks" json with
+               | Some (`List items) -> items
+               | _ -> []
+             in
+             let chunk_total = List.length chunks in
+             if index <= 0 || index > chunk_total then
+               Error (Printf.sprintf "chunk_index out of range (1-%d)" chunk_total)
+             else
+               let chunk = List.nth chunks (index - 1) in
+               let payload = `Assoc [
+                 ("chunk_index", `Int index);
+                 ("chunk_total", `Int chunk_total);
+                 ("chunk", chunk);
+               ] in
+               let prefix = Printf.sprintf "chunk_%d" index in
+               Ok (Large_response.wrap_json_result ~prefix ~format:"json" payload)
+         | exception exn ->
+             Error (Printexc.to_string exn))
+  | _ -> Error "Missing required parameters: file_path, chunk_index"
 
 let handle_llm_call args : (Yojson.Safe.t, string) result Lwt.t =
   let open Lwt.Syntax in
@@ -3388,32 +4346,173 @@ let handle_llm_task args : (Yojson.Safe.t, string) result Lwt.t =
   | Some task ->
       let provider_name = get_string_any ["provider"; "llm_provider"] args in
       let llm_tool = get_string_any ["tool_name"; "llm_tool"] args |> Option.value ~default:"codex" in
-      let quality = get_string_or "quality" "best" args in
+      let preset_name = get_string "preset" args in
+      let preset_cfg = Option.bind preset_name resolve_llm_task_preset in
+      let preset_unknown =
+        match (preset_name, preset_cfg) with
+        | (Some name, None) -> Some name
+        | _ -> None
+      in
+      let preset_or default f =
+        match preset_cfg with
+        | Some cfg -> Option.value ~default (f cfg)
+        | None -> default
+      in
+      let quality_default = preset_or "best" (fun p -> p.quality) in
+      let quality = get_string_or "quality" quality_default args in
       let return_metadata = get_bool_or "return_metadata" false args in
+      let max_context_chars_default =
+        preset_or 120000 (fun p -> p.max_context_chars)
+      in
       let max_context_chars =
-        get_int "max_context_chars" args |> Option.value ~default:120000
+        get_int "max_context_chars" args |> Option.value ~default:max_context_chars_default
+      in
+      let retry_on_llm_error_default =
+        preset_or false (fun p -> p.retry_on_llm_error)
+      in
+      let retry_on_llm_error =
+        get_bool_or "retry_on_llm_error" retry_on_llm_error_default args
+      in
+      let max_retries_default = preset_or 1 (fun p -> p.max_retries) in
+      let max_retries =
+        get_int "max_retries" args |> Option.value ~default:max_retries_default |> max 0
+      in
+      let min_context_chars_default =
+        preset_or 120000 (fun p -> p.min_context_chars)
+      in
+      let min_context_chars =
+        get_int "min_context_chars" args |> Option.value ~default:min_context_chars_default |> max 1
+      in
+      let retry_context_scale_default =
+        preset_or 0.5 (fun p -> p.retry_context_scale)
+      in
+      let retry_context_scale =
+        let scale = get_float_or "retry_context_scale" retry_context_scale_default args in
+        if scale > 0.0 && scale < 1.0 then scale else 0.5
+      in
+      let auto_plugin =
+        match get_bool "auto_plugin" args with
+        | Some b -> b
+        | None -> Option.is_some (get_string "url" args)
+      in
+      let include_plugin_default =
+        preset_or (if auto_plugin then true else (quality <> "fast")) (fun p -> p.include_plugin)
       in
       let include_plugin =
-        get_bool_or "include_plugin" (quality <> "fast") args
+        get_bool_or "include_plugin" include_plugin_default args
+      in
+      let include_variables_default =
+        preset_or (quality <> "fast") (fun p -> p.include_variables)
       in
       let include_variables =
-        get_bool_or "include_variables" (quality <> "fast") args
+        get_bool_or "include_variables" include_variables_default args
+      in
+      let include_image_fills_default =
+        preset_or (quality = "best") (fun p -> p.include_image_fills)
       in
       let include_image_fills =
-        get_bool_or "include_image_fills" (quality = "best") args
+        get_bool_or "include_image_fills" include_image_fills_default args
       in
-      let plugin_depth = get_int "plugin_depth" args |> Option.value ~default:0 in
-      let plugin_include_geometry = get_bool_or "plugin_include_geometry" false args in
+      let plugin_context_mode_default =
+        preset_or "full" (fun p -> p.plugin_context_mode)
+      in
+      let plugin_context_mode =
+        get_string_or "plugin_context_mode" plugin_context_mode_default args
+      in
+      let plugin_summary_sample_size_default =
+        preset_or 5 (fun p -> p.plugin_summary_sample_size)
+      in
+      let plugin_summary_sample_size =
+        get_int "plugin_summary_sample_size" args
+        |> Option.value ~default:plugin_summary_sample_size_default
+      in
+      let context_strategy_default =
+        preset_or "raw" (fun p -> p.context_strategy)
+      in
+      let context_strategy =
+        get_string_or "context_strategy" context_strategy_default args
+      in
+      let context_max_depth =
+        get_int "context_max_depth" args |> Option.value ~default:6
+      in
+      let context_max_children =
+        get_int "context_max_children" args |> Option.value ~default:200
+      in
+      let context_max_list_items =
+        get_int "context_max_list_items" args |> Option.value ~default:200
+      in
+      let context_max_string =
+        get_int "context_max_string" args |> Option.value ~default:2000
+      in
+      let context_chunk_size =
+        get_int "context_chunk_size" args |> Option.value ~default:50
+      in
+      let chunk_select_mode_default =
+        preset_or "none" (fun p -> p.chunk_select_mode)
+      in
+      let chunk_select_mode =
+        get_string_or "chunk_select_mode" chunk_select_mode_default args
+      in
+      let chunk_select_limit_default =
+        preset_or 4 (fun p -> p.chunk_select_limit)
+      in
+      let chunk_select_limit =
+        get_int "chunk_select_limit" args |> Option.value ~default:chunk_select_limit_default
+      in
+      let chunk_select_sample_size_default =
+        preset_or 6 (fun p -> p.chunk_select_sample_size)
+      in
+      let chunk_select_sample_size =
+        get_int "chunk_select_sample_size" args |> Option.value ~default:chunk_select_sample_size_default
+      in
+      let chunk_select_task =
+        match get_string "chunk_select_task" args with
+        | Some v -> Some v
+        | None ->
+            (match preset_cfg with
+             | Some cfg -> cfg.chunk_select_task
+             | None -> None)
+      in
+      let chunk_select_provider =
+        match get_string "chunk_select_provider" args with
+        | Some v -> Some v
+        | None -> provider_name
+      in
+      let chunk_select_llm_tool =
+        match get_string "chunk_select_llm_tool" args with
+        | Some v -> v
+        | None -> llm_tool
+      in
+      let chunk_select_llm_args = get_json "chunk_select_llm_args" args in
+      let chunk_select_mcp_url = get_string "chunk_select_mcp_url" args in
+      let plugin_depth_default =
+        preset_or 0 (fun p -> p.plugin_depth)
+      in
+      let plugin_depth = get_int "plugin_depth" args |> Option.value ~default:plugin_depth_default in
+      let plugin_include_geometry_default =
+        preset_or false (fun p -> p.plugin_include_geometry)
+      in
+      let plugin_include_geometry =
+        get_bool_or "plugin_include_geometry" plugin_include_geometry_default args
+      in
       let plugin_timeout_ms = get_int "plugin_timeout_ms" args |> Option.value ~default:20000 in
-      let plugin_mode = get_string_or "plugin_mode" "selection" args in
-      let file_key = get_string "file_key" args in
-      let node_id = get_string "node_id" args in
+      let (file_key, node_id) = resolve_file_key_node_id args in
+      let plugin_mode =
+        match get_string "plugin_mode" args with
+        | Some mode -> mode
+        | None -> if node_id <> None then "node" else "selection"
+      in
       let token = get_string "token" args in
       let depth = get_int "depth" args in
       let geometry = get_string "geometry" args in
 
       let warnings = ref [] in
       let add_warning msg = warnings := msg :: !warnings in
+      let () =
+        match preset_unknown with
+        | Some name -> add_warning ("Unknown preset: " ^ name)
+        | None -> ()
+      in
 
       let dsl =
         match (file_key, node_id, token) with
@@ -3462,6 +4561,142 @@ let handle_llm_task args : (Yojson.Safe.t, string) result Lwt.t =
             add_warning "Missing file_key/node_id/token for DSL context";
             `Null
       in
+      let dsl_json =
+        match dsl with
+        | `String s ->
+            (try Some (Yojson.Safe.from_string s)
+             with _ -> None)
+        | _ -> None
+      in
+      let compact_if_needed json =
+        if context_strategy = "raw" then
+          json
+        else
+          compact_json
+            ~depth:0
+            ~max_depth:context_max_depth
+            ~max_children:context_max_children
+            ~max_list_items:context_max_list_items
+            ~max_string:context_max_string
+            json
+      in
+      let* (dsl_context, chunk_selection) =
+        match context_strategy with
+        | "compact" ->
+            (match dsl_json with
+             | Some json -> Lwt.return (compact_if_needed json, `Null)
+             | None -> Lwt.return (dsl, `Null))
+        | "chunked" ->
+            (match dsl_json with
+             | Some json ->
+                 let compacted = compact_if_needed json in
+                 if chunk_select_mode = "none" then
+                   let chunked =
+                     chunkify_children ~chunk_size:context_chunk_size compacted
+                   in
+                   Lwt.return (chunked, `Null)
+                 else
+                   let (chunked_json, entries) =
+                     build_chunk_entries
+                       ~chunk_size:context_chunk_size
+                       ~sample_size:chunk_select_sample_size
+                       compacted
+                   in
+                   let chunk_total = List.length entries in
+                   let effective_limit = min chunk_select_limit chunk_total in
+                   let selection_fallback () =
+                     if effective_limit <= 0 then []
+                     else select_chunks_heuristic entries effective_limit
+                   in
+                   let index_json = `List (List.map chunk_entry_to_json entries) in
+                   let* selected =
+                     if effective_limit <= 0 then
+                       Lwt.return []
+                     else if chunk_select_mode = "heuristic" then
+                       Lwt.return (select_chunks_heuristic entries effective_limit)
+                     else if chunk_select_mode = "llm" then
+                       let prompt_task =
+                         match chunk_select_task with
+                         | Some t -> t
+                         | None -> "Select the most relevant chunks for high-fidelity output."
+                       in
+                       let prompt =
+                         Printf.sprintf
+                           "Task: %s\n\nChunk index (JSON):\n%s\n\nReturn JSON array of chunk_index values (max %d)."
+                           prompt_task
+                           (Yojson.Safe.pretty_to_string (`Assoc [
+                              ("chunk_total", `Int chunk_total);
+                              ("chunk_size", `Int context_chunk_size);
+                              ("chunks", index_json);
+                            ]))
+                           effective_limit
+                       in
+                      let llm_args_fields =
+                        match chunk_select_llm_args with
+                        | None -> Ok []
+                        | Some (`Assoc fields) -> Ok fields
+                        | Some _ -> Error "chunk_select_llm_args must be an object"
+                      in
+                      match llm_args_fields with
+                      | Error msg ->
+                          add_warning msg;
+                          Lwt.return (selection_fallback ())
+                      | Ok fields ->
+                          let fields = set_field "prompt" (`String prompt) fields in
+                          let fields =
+                            if has_field "response_format" fields then fields
+                            else add_if_missing "response_format" (`String "compact") fields
+                          in
+                          let fields = add_if_missing "stream" (`Bool false) fields in
+                          match Llm_provider.resolve ?provider:chunk_select_provider () with
+                          | Error msg ->
+                              add_warning msg;
+                              Lwt.return (selection_fallback ())
+                          | Ok provider ->
+                              let llm_url =
+                                Option.value chunk_select_mcp_url ~default:provider.default_url
+                              in
+                              let* llm_result =
+                                provider.call_tool ~url:llm_url ~name:chunk_select_llm_tool ~arguments:(`Assoc fields)
+                              in
+                              match llm_result with
+                              | Error err ->
+                                  add_warning err;
+                                  Lwt.return (selection_fallback ())
+                              | Ok response ->
+                                  let indices =
+                                    parse_chunk_indices ~chunk_total response.text
+                                    |> take_n effective_limit
+                                  in
+                                  if indices = [] then
+                                    Lwt.return (selection_fallback ())
+                                  else
+                                    Lwt.return indices
+                     else
+                       Lwt.return (selection_fallback ())
+                   in
+                   let selected =
+                     selected |> List.filter (fun v -> v >= 1 && v <= chunk_total)
+                   in
+                   let selected =
+                     if selected = [] then selection_fallback () else selected
+                   in
+                   let selection_meta =
+                     `Assoc [
+                       ("mode", `String chunk_select_mode);
+                       ("selected", `List (List.map (fun v -> `Int v) selected));
+                       ("chunk_total", `Int chunk_total);
+                       ("chunk_size", `Int context_chunk_size);
+                     ]
+                   in
+                   let selected_json =
+                     if selected = [] then chunked_json
+                     else select_chunked_json ~selected chunked_json
+                   in
+                   Lwt.return (selected_json, selection_meta)
+             | None -> Lwt.return (dsl, `Null))
+        | _ -> Lwt.return (dsl, `Null)
+      in
 
       let variables, variables_source =
         if include_variables then
@@ -3502,6 +4737,8 @@ let handle_llm_task args : (Yojson.Safe.t, string) result Lwt.t =
         else
           `Null
       in
+      let variables = compact_if_needed variables in
+      let image_fills = compact_if_needed image_fills in
 
       let plugin_snapshot =
         if include_plugin then
@@ -3564,40 +4801,64 @@ let handle_llm_task args : (Yojson.Safe.t, string) result Lwt.t =
         else
           `Null
       in
+      let plugin_snapshot = compact_if_needed plugin_snapshot in
+      let plugin_summary =
+        if include_plugin && (plugin_context_mode = "summary" || plugin_context_mode = "both") then
+          let payload =
+            match plugin_snapshot with
+            | `Assoc fields ->
+                (match List.assoc_opt "payload" fields with
+                 | Some v -> v
+                 | None -> `Null)
+            | _ -> `Null
+          in
+          summarize_plugin_payload ~sample_size:plugin_summary_sample_size payload
+        else
+          `Null
+      in
+      let plugin_snapshot =
+        if plugin_context_mode = "summary" then `Null else plugin_snapshot
+      in
 
       let context_fields = [
         ("task", `String task);
         ("quality", `String quality);
         ("file_key", (match file_key with Some v -> `String v | None -> `Null));
         ("node_id", (match node_id with Some v -> `String v | None -> `Null));
-        ("dsl", dsl);
+        ("dsl", dsl_context);
+        ("chunk_selection", chunk_selection);
         ("variables", variables);
         ("variables_source", variables_source);
         ("image_fills", image_fills);
         ("plugin_snapshot", plugin_snapshot);
+        ("plugin_summary", plugin_summary);
       ] in
       let context_fields =
         if !warnings = [] then context_fields
         else ("warnings", `List (List.map (fun s -> `String s) (List.rev !warnings))) :: context_fields
       in
       let context_json = `Assoc context_fields in
-      let context_str = Yojson.Safe.pretty_to_string context_json in
-      let max_context_chars = if max_context_chars > 0 then max_context_chars else 120000 in
-      let (context_str, truncated) =
-        if String.length context_str > max_context_chars then
-          let head = String.sub context_str 0 max_context_chars in
-          (head ^ "\n...TRUNCATED...", true)
-        else
-          (context_str, false)
-      in
-      let prompt =
+      let context_str_full = Yojson.Safe.pretty_to_string context_json in
+      let normalize_max_context_chars v = if v > 0 then v else 120000 in
+      let make_prompt max_chars =
+        let max_chars = normalize_max_context_chars max_chars in
+        let (context_str, truncated) =
+          if String.length context_str_full > max_chars then
+            let head = String.sub context_str_full 0 max_chars in
+            (head ^ "\n...TRUNCATED...", true)
+          else
+            (context_str_full, false)
+        in
         let base =
           Printf.sprintf "Task:\n%s\n\nContext (JSON):\n%s" task context_str
         in
-        if truncated then
-          base ^ Printf.sprintf "\n\nNote: context truncated to %d chars." max_context_chars
-        else
-          base
+        let prompt =
+          if truncated then
+            base ^ Printf.sprintf "\n\nNote: context truncated to %d chars." max_chars
+          else
+            base
+        in
+        (prompt, truncated, max_chars)
       in
 
       let llm_args_fields =
@@ -3609,18 +4870,18 @@ let handle_llm_task args : (Yojson.Safe.t, string) result Lwt.t =
       (match llm_args_fields with
        | Error msg -> Lwt.return (Error msg)
        | Ok fields ->
-           let fields = set_field "prompt" (`String prompt) fields in
-           let fields =
-             if quality = "fast" then add_if_missing "budget_mode" (`Bool true) fields
-             else fields
+           let base_fields =
+             let fields =
+               if quality = "fast" then add_if_missing "budget_mode" (`Bool true) fields
+               else fields
+             in
+             let fields =
+               if has_field "response_format" fields then fields
+               else if quality = "fast" then add_if_missing "response_format" (`String "compact") fields
+               else add_if_missing "response_format" (`String "verbose") fields
+             in
+             add_if_missing "stream" (`Bool false) fields
            in
-           let fields =
-             if has_field "response_format" fields then fields
-             else if quality = "fast" then add_if_missing "response_format" (`String "compact") fields
-             else add_if_missing "response_format" (`String "verbose") fields
-           in
-           let fields = add_if_missing "stream" (`Bool false) fields in
-           let arguments = `Assoc fields in
            (match Llm_provider.resolve ?provider:provider_name () with
             | Error msg -> Lwt.return (Error msg)
             | Ok provider ->
@@ -3628,10 +4889,30 @@ let handle_llm_task args : (Yojson.Safe.t, string) result Lwt.t =
                   get_string_any ["mcp_url"; "llm_url"] args
                   |> Option.value ~default:provider.default_url
                 in
-                let* llm_result = provider.call_tool ~url:llm_url ~name:llm_tool ~arguments in
+                let rec call_llm attempt max_chars =
+                  let (prompt, truncated, max_chars) = make_prompt max_chars in
+                  let fields = set_field "prompt" (`String prompt) base_fields in
+                  let arguments = `Assoc fields in
+                  let* llm_result = provider.call_tool ~url:llm_url ~name:llm_tool ~arguments in
+                  match llm_result with
+                  | Error err -> Lwt.return (Error err)
+                  | Ok response ->
+                      if response.is_error && retry_on_llm_error && attempt < max_retries then
+                        let scaled =
+                          int_of_float (float_of_int max_chars *. retry_context_scale)
+                        in
+                        let next_max = max min_context_chars scaled in
+                        if next_max < max_chars then
+                          call_llm (attempt + 1) next_max
+                        else
+                          Lwt.return (Ok (response, truncated, attempt + 1, max_chars))
+                      else
+                        Lwt.return (Ok (response, truncated, attempt + 1, max_chars))
+                in
+                let* llm_result = call_llm 0 max_context_chars in
                 (match llm_result with
                  | Error err -> Lwt.return (Error err)
-                 | Ok response ->
+                 | Ok (response, truncated, attempts, final_max) ->
                      if return_metadata then
                        let payload = `Assoc [
                          ("provider", `String provider.id);
@@ -3639,6 +4920,10 @@ let handle_llm_task args : (Yojson.Safe.t, string) result Lwt.t =
                          ("llm_url", `String llm_url);
                          ("quality", `String quality);
                          ("context_truncated", `Bool truncated);
+                         ("context_max_chars", `Int final_max);
+                         ("attempts", `Int attempts);
+                         ("retry_on_llm_error", `Bool retry_on_llm_error);
+                         ("max_retries", `Int max_retries);
                          ("is_error", `Bool response.is_error);
                          ("response_text", `String response.text);
                          ("raw", response.raw);
@@ -4238,6 +5523,8 @@ let all_handlers : (string * tool_handler) list = [
   ("figma_get_node_bundle", wrap_sync handle_get_node_bundle);
   ("figma_get_node_summary", wrap_sync handle_get_node_summary);
   ("figma_get_node_chunk", wrap_sync handle_get_node_chunk);
+  ("figma_chunk_index", handle_chunk_index);
+  ("figma_chunk_get", wrap_sync handle_chunk_get);
   ("figma_fidelity_loop", wrap_sync handle_fidelity_loop);
   ("figma_image_similarity", wrap_sync handle_image_similarity);
   ("figma_verify_visual", wrap_sync handle_verify_visual);

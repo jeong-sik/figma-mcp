@@ -146,6 +146,40 @@ Response extras:
 - `summary`: priority/tokens overview
 - `requirements_json`: node type counts + auto-layout/image fills + top-level names
 
+### 3.3) Chunk Index + Selection (heuristic/LLM)
+
+청킹된 인덱스를 먼저 받고, 필요한 청크만 선별합니다.
+
+1) Chunk index (heuristic).
+```
+figma_chunk_index
+  url: "https://www.figma.com/design/...?...node-id=123-456"
+  token: "$FIGMA_TOKEN"
+  chunk_size: 60
+  selection_mode: "heuristic"
+  selection_limit: 4
+```
+
+2) Chunk index (LLM selection, local 포함).
+```
+figma_chunk_index
+  url: "https://www.figma.com/design/...?...node-id=123-456"
+  token: "$FIGMA_TOKEN"
+  chunk_size: 60
+  selection_mode: "llm"
+  selection_task: "Generate HTML/CSS matching the main layout."
+  selection_llm_tool: "ollama"
+  selection_llm_args:
+    model: "qwen3-coder:30b"
+```
+
+3) Fetch a specific chunk.
+```
+figma_chunk_get
+  file_path: "/tmp/figma-mcp/chunk_index_123_456_1700000000_1234.json"
+  chunk_index: 2
+```
+
 ## 4) Visual Verification Loop
 
 1) Generate HTML and verify against Figma render.
@@ -248,9 +282,107 @@ figma_llm_task
     model: "gpt-5.2"
 ```
 
+3) Preset quick start (overridden by explicit options).
+```
+figma_llm_task
+  task: "Generate HTML/CSS matching the design. Output only code."
+  file_key: "KEY"
+  node_id: "123:456"
+  token: "$FIGMA_TOKEN"
+  include_plugin: true
+  plugin_channel_id: "ch-..."
+  preset: "balanced"  # draft|balanced|fidelity|text|icon
+```
+
+4) Large context fallback (chunked + retry).
+```
+figma_llm_task
+  task: "Generate HTML/CSS matching the design. Output only code."
+  file_key: "KEY"
+  node_id: "123:456"
+  token: "$FIGMA_TOKEN"
+  include_plugin: true
+  plugin_channel_id: "ch-..."
+  context_strategy: "chunked"
+  max_context_chars: 1000000
+  retry_on_llm_error: true
+  max_retries: 1
+  min_context_chars: 600000
+  retry_context_scale: 0.5
+```
+
+5) Chunk selection (heuristic/LLM).
+```
+figma_llm_task
+  task: "Generate HTML/CSS matching the design. Output only code."
+  file_key: "KEY"
+  node_id: "123:456"
+  token: "$FIGMA_TOKEN"
+  include_plugin: true
+  plugin_channel_id: "ch-..."
+  context_strategy: "chunked"
+  chunk_select_mode: "llm"
+  chunk_select_limit: 4
+  chunk_select_llm_tool: "ollama"
+  chunk_select_llm_args:
+    model: "qwen3-coder:30b"
+```
+
+6) Plugin summary only (context save).
+```
+figma_llm_task
+  task: "Generate HTML/CSS matching the design. Output only code."
+  file_key: "KEY"
+  node_id: "123:456"
+  token: "$FIGMA_TOKEN"
+  include_plugin: true
+  plugin_channel_id: "ch-..."
+  plugin_context_mode: "summary"
+  plugin_summary_sample_size: 5
+```
+
 Notes:
 - `quality: fast` sets `budget_mode` and uses compact responses.
 - If plugin isn't available, set `include_plugin: false` and rely on DSL/variables.
+
+## 9) Real-World Flow (URL → Split → LLM)
+
+Goal: make large files manageable and still hit high fidelity.
+
+1) Parse URL → `file_key`/`node_id`.
+```
+figma_parse_url
+  url: "https://www.figma.com/design/...?...node-id=123-456"
+```
+
+2) Use gRPC recursive stream for full subtree (recommended for huge nodes).
+```
+grpcurl -plaintext -import-path proto -proto figma.proto \
+  -d '{"file_key":"KEY","node_id":"123:456","token":"'$FIGMA_TOKEN'","recursive":true}' \
+  localhost:50052 figma.FigmaService/GetNodeStream
+```
+
+3) Build chunk index for selective LLM context.
+```
+figma_chunk_index
+  file_key: "KEY"
+  node_id: "123:456"
+  token: "$FIGMA_TOKEN"
+  chunk_size: 50
+  sample_size: 6
+```
+
+4) Run LLM task with preset + plugin summary (fast iteration).
+```
+figma_llm_task
+  task: "Generate HTML/CSS matching the design. Output only code."
+  file_key: "KEY"
+  node_id: "123:456"
+  token: "$FIGMA_TOKEN"
+  include_plugin: true
+  plugin_channel_id: "ch-..."
+  preset: "fidelity"
+```
 
 ## Troubleshooting
 
@@ -260,5 +392,9 @@ Notes:
 - `/plugin/poll` accepts `wait_ms` (long-poll) if you build a custom UI.
 - For large nodes, use `plugin_depth: 0` and rely on `figma_plugin_read_selection`
   for the specific text ranges you need.
+- `net::ERR_CONNECTION_REFUSED` usually means the HTTP server is not running or the
+  plugin URL/port mismatch. Confirm `curl http://localhost:8940/health`.
+- If Figma reports `Invalid value for devAllowedDomains`, use `localhost` only.
+  IPs like `127.0.0.1` can be rejected; switch back to `plugin/manifest.json`.
 - If LLM tools fail, check `MCP_SLOT_URL` and verify the MCP endpoint supports `tools/call`.
 - If `grpcurl` reports missing reflection, pass `-import-path proto -proto figma.proto`.

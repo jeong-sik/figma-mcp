@@ -47,7 +47,7 @@ echo '{"jsonrpc":"2.0","id":5,"method":"prompts/get","params":{"name":"figma_fid
 
 - `docs/RECIPES.md` - end-to-end usage patterns (quickstart, high fidelity, large nodes)
 
-## 도구 목록 (47개)
+## 도구 목록 (51개)
 
 ### Phase 1: Core
 | Tool | 설명 | 테스트 |
@@ -59,6 +59,10 @@ echo '{"jsonrpc":"2.0","id":5,"method":"prompts/get","params":{"name":"figma_fid
 | `figma_get_node` | 특정 노드 ID만 가져와 DSL 변환 | ✅ |
 | `figma_get_node_with_image` | 노드 DSL + 이미지 URL 동시 반환 | ✅ |
 | `figma_get_node_bundle` | 정확도 극대화 번들(DSL+렌더+메타+변수+fills) | ✅ |
+| `figma_get_node_summary` | 경량 구조 요약 | ✅ |
+| `figma_get_node_chunk` | 깊이 범위별 노드 청크 로드 | ✅ |
+| `figma_chunk_index` | DSL 청킹 인덱스/요약/선택 | ✅ |
+| `figma_chunk_get` | 청크 인덱스 기반 데이터 조회 | ✅ |
 | `figma_fidelity_loop` | fidelity 점수 미달 시 depth/geometry 자동 상향 | ✅ |
 | `figma_image_similarity` | 렌더 이미지 SSIM/PSNR 비교 | ✅ |
 | `figma_export_image` | 노드를 PNG/JPG/SVG/PDF URL로 내보내기 | ✅ |
@@ -297,6 +301,15 @@ REST API만으로 부족한 레이아웃/스타일 정보를 보강하려면 플
 - 플러그인 UI에서 Server URL 확인/수정 → Connect
 - 표시된 Channel ID를 복사
 
+연결 문제 해결:
+- `POST /plugin/connect` 또는 `/plugin/poll`이 `net::ERR_CONNECTION_REFUSED`면 서버가 꺼져 있거나 포트가 다릅니다.
+  `curl http://localhost:8940/health`로 먼저 확인하세요.
+- `devAllowedDomains` 에 `127.0.0.1`를 넣으면 Figma가 거부할 수 있습니다.
+  기본 `plugin/manifest.json`은 `localhost`만 허용합니다.
+- 로컬 IP가 꼭 필요하면 `plugin/manifest.loopback.json`을 따로 import하세요.
+  (Figma가 IP를 거부하면 `localhost`로 되돌리세요.)
+- Channel ID가 안 뜨면 플러그인 창을 닫지 말고, 서버 로그/`/plugin/status`를 확인하세요.
+
 4) MCP 도구로 채널 설정
 ```
 figma_plugin_use_channel
@@ -315,6 +328,16 @@ figma_get_node_bundle
   include_plugin_variables: true
   include_plugin_image: true
 ```
+
+URL만으로 호출 (선택 없이 node_id 사용):
+```
+figma_get_node_bundle
+  url: "https://www.figma.com/design/...?...node-id=123-456"
+  token: "$FIGMA_TOKEN"
+  auto_plugin: true
+  plugin_channel_id: "ch-..."
+```
+주의: 플러그인 스냅샷은 해당 파일이 Figma에서 열려 있어야 합니다.
 
 플러그인 도구 직접 호출:
 ```
@@ -362,6 +385,66 @@ figma_llm_task
   llm_tool: "codex"
   llm_args:
     model: "gpt-5.2"
+```
+
+URL로 자동 추출 + 노드 모드:
+```
+figma_llm_task
+  task: "Generate HTML/CSS that matches the Figma layout. Output only code."
+  url: "https://www.figma.com/design/...?...node-id=123-456"
+  token: "$FIGMA_TOKEN"
+  auto_plugin: true
+  plugin_channel_id: "ch-..."
+  llm_tool: "codex"
+```
+
+프리셋 빠른 시작 (옵션이 있으면 프리셋보다 우선):
+- `draft`: 최소 컨텍스트, 플러그인/변수/이미지 fill 제외
+- `balanced`: chunked + heuristic 선택 + 플러그인 요약
+- `fidelity`: chunked + LLM 선택 + 플러그인 full+summary
+- `text`: 텍스트 중심 청크 선택
+- `icon`: 벡터/아이콘 중심 청크 선택 (+ geometry)
+
+```
+figma_llm_task
+  task: "Generate HTML/CSS that matches the Figma layout. Output only code."
+  url: "https://www.figma.com/design/...?...node-id=123-456"
+  token: "$FIGMA_TOKEN"
+  auto_plugin: true
+  plugin_channel_id: "ch-..."
+  preset: "balanced"
+```
+
+대용량 컨텍스트 (청킹 + 재시도):
+```
+figma_llm_task
+  task: "Generate HTML/CSS that matches the Figma layout. Output only code."
+  url: "https://www.figma.com/design/...?...node-id=123-456"
+  token: "$FIGMA_TOKEN"
+  auto_plugin: true
+  plugin_channel_id: "ch-..."
+  llm_tool: "codex"
+  context_strategy: "chunked"
+  chunk_select_mode: "heuristic"  # or llm
+  chunk_select_limit: 4
+  max_context_chars: 1000000
+  retry_on_llm_error: true
+  max_retries: 1
+  min_context_chars: 600000
+  retry_context_scale: 0.5
+```
+
+플러그인 컨텍스트 요약:
+```
+figma_llm_task
+  task: "Generate HTML/CSS that matches the Figma layout. Output only code."
+  url: "https://www.figma.com/design/...?...node-id=123-456"
+  token: "$FIGMA_TOKEN"
+  auto_plugin: true
+  plugin_channel_id: "ch-..."
+  plugin_context_mode: "summary"  # full|summary|both
+  plugin_summary_sample_size: 5
+  llm_tool: "codex"
 ```
 
 고급 사용 (직접 프롬프트 전달):
