@@ -167,7 +167,6 @@ type sse_client = {
 }
 let sse_clients : (int, sse_client) Hashtbl.t = Hashtbl.create 16
 let sse_client_counter = ref 0
-let last_sse_client_id : int option ref = ref None
 
 let format_sse_data data =
   if data = "" then
@@ -183,7 +182,6 @@ let register_sse_client body =
   let id = !sse_client_counter in
   let client = { body; connected = true } in
   Hashtbl.add sse_clients id client;
-  last_sse_client_id := Some id;
   id
 
 let unregister_sse_client id =
@@ -211,27 +209,13 @@ let broadcast_sse_shutdown reason =
       with _ -> ()
   ) sse_clients
 
-let find_sse_client ?client_id () =
-  let get_client id =
-    match Hashtbl.find_opt sse_clients id with
-    | Some client when client.connected -> Some (id, client)
-    | _ -> None
-  in
+let find_sse_client client_id =
   match client_id with
-  | Some id -> get_client id
-  | None ->
-      (match !last_sse_client_id with
-       | Some id ->
-           (match get_client id with
-            | Some client -> Some client
-            | None -> None)
-       | None ->
-           let found = ref None in
-           Hashtbl.iter (fun id client ->
-             if !found = None && client.connected then
-               found := Some (id, client)
-           ) sse_clients;
-           !found)
+  | None -> None
+  | Some id ->
+      (match Hashtbl.find_opt sse_clients id with
+       | Some client when client.connected -> Some (id, client)
+       | _ -> None)
 
 (** ============== HTTP Handlers ============== *)
 
@@ -303,21 +287,16 @@ let mcp_post_handler ~domain_mgr server request reqd =
         Response.accepted reqd
     | `Request | `Unknown ->
         let response_str = run_mcp_request ~domain_mgr server body_str in
-        let streamed =
-          match find_sse_client ?client_id () with
-          | Some (id, client) ->
-              (try
-                 send_sse_event client.body ~event:"message" ~data:response_str;
-                 true
-               with _ ->
-                 unregister_sse_client id;
-                 false)
-          | None -> false
-        in
-        if streamed then
-          Response.accepted reqd
-        else
-          Response.json response_str reqd
+        (match find_sse_client client_id with
+         | Some (id, client) ->
+             (try
+                send_sse_event client.body ~event:"message" ~data:response_str;
+                Response.accepted reqd
+              with _ ->
+                unregister_sse_client id;
+                Response.json response_str reqd)
+         | None ->
+             Response.json response_str reqd)
   )
 
 (** MCP SSE handler for streamable-http protocol (GET /mcp) *)
@@ -327,7 +306,8 @@ let mcp_sse_handler ~clock _request reqd =
     let client_id = register_sse_client body in
 
     (* Send initial endpoint event (MCP protocol requirement) *)
-    send_sse_event body ~event:"endpoint" ~data:"/mcp";
+    let endpoint = sprintf "/mcp?client_id=%d" client_id in
+    send_sse_event body ~event:"endpoint" ~data:endpoint;
 
     (* Keep connection alive with periodic pings *)
     let rec ping_loop () =
