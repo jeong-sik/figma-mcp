@@ -160,7 +160,7 @@ data: {"type": "complete", "total_chunks": 15}
 - [ ] Benchmark compression ratios
 
 ### Phase 4 (Long-term)
-- [ ] SSE streaming for HTTP mode
+- [x] SSE streaming for HTTP mode
 - [ ] WebSocket support consideration
 - [ ] Client-side progressive rendering
 

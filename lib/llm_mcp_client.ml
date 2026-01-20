@@ -18,6 +18,14 @@ let llm_breaker = Mcp_resilience.create_circuit_breaker ~name:"llm_mcp" ~failure
 
 let with_retry_lwt ~(policy : Mcp_resilience.retry_policy) ~circuit_breaker ~op_name:_ op =
   let open Lwt.Syntax in
+  let is_retryable_error msg =
+    let retryable_prefix = "Retryable" in
+    let has_prefix =
+      String.length msg >= String.length retryable_prefix
+      && String.sub msg 0 (String.length retryable_prefix) = retryable_prefix
+    in
+    has_prefix || msg = "Timeout"
+  in
   let rec attempt n last_error =
     let cb_allows = match circuit_breaker with
       | None -> true
@@ -42,7 +50,10 @@ let with_retry_lwt ~(policy : Mcp_resilience.retry_policy) ~circuit_breaker ~op_
           Lwt.return (Mcp_resilience.Ok v)
       | Error err ->
           (match circuit_breaker with Some cb -> Mcp_resilience.circuit_record_failure cb | None -> ());
-          attempt (n + 1) (Some err)
+          if is_retryable_error err then
+            attempt (n + 1) (Some err)
+          else
+            Lwt.return (Mcp_resilience.Error err)
   in
   attempt 1 None
 
