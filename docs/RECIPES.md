@@ -384,6 +384,24 @@ figma_llm_task
   preset: "fidelity"
 ```
 
+## 10) Real-World Use Cases (Quick List)
+
+1) **Full-page export with minimal loss**
+- gRPC `GetNodeStream` (`recursive=true`) → chunk index → `figma_llm_task` preset `fidelity`
+- Use plugin summary for fast iterations; switch to `plugin_context_mode: "both"` on final pass.
+
+2) **Typography precision (line breaks, text bounds)**
+- Render from DSL → pick suspect frames → `figma_plugin_read_selection`
+- Merge text segment bounds into renderer; verify with `figma_verify_visual`.
+
+3) **Design tokens & theme sync**
+- `figma_get_variables` or `figma_export_tokens` → generate CSS/Tailwind map
+- Keep token updates in CI and re-run `figma_verify_visual` for regressions.
+
+4) **Icon/vector fidelity**
+- `figma_plugin_get_node` with `include_geometry: true`
+- Use `preset: "icon"` to bias chunk selection for vector-heavy areas.
+
 ## Troubleshooting
 
 - `status: large_result` means the payload was saved to a file. Use the file path
