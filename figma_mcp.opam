@@ -12,7 +12,6 @@ bug-reports: "https://github.com/jeong-sik/figma-mcp/issues"
 depends: [
   "ocaml" {>= "5.1"}
   "dune" {>= "3.13" & >= "3.13"}
-  "mcp_protocol" {>= "0.1.0"}
   "grpc-direct" {>= "0.1.0"}
   "yojson" {>= "2.0"}
   "cohttp-lwt-unix" {>= "5.0"}

@@ -2,6 +2,80 @@
 
 open Lwt.Syntax
 
+module Resilience = struct
+  type retry_policy = {
+    max_attempts: int;
+    initial_delay_ms: int;
+    max_delay_ms: int;
+    backoff_multiplier: float;
+  }
+
+  type circuit_state =
+    | Closed
+    | Open
+    | HalfOpen
+
+  type circuit_breaker = {
+    name: string;
+    failure_threshold: int;
+    timeout_ms: int;
+    mutable state: circuit_state;
+    mutable failure_count: int;
+    mutable last_failure_time: float;
+  }
+
+  type 'a retry_result =
+    | Ok of 'a
+    | Error of string
+    | CircuitOpen
+    | TimedOut
+
+  let default_policy = {
+    max_attempts = 3;
+    initial_delay_ms = 100;
+    max_delay_ms = 10_000;
+    backoff_multiplier = 2.0;
+  }
+
+  let calculate_delay policy attempt =
+    let base_delay = float_of_int policy.initial_delay_ms in
+    let multiplied = base_delay *. (policy.backoff_multiplier ** float_of_int (attempt - 1)) in
+    min multiplied (float_of_int policy.max_delay_ms)
+
+  let create_circuit_breaker ?(failure_threshold=5) ?(timeout_ms=30_000) ~name () =
+    {
+      name;
+      failure_threshold;
+      timeout_ms;
+      state = Closed;
+      failure_count = 0;
+      last_failure_time = 0.0;
+    }
+
+  let circuit_allows cb =
+    match cb.state with
+    | Closed -> true
+    | HalfOpen -> true
+    | Open ->
+        let now = Unix.gettimeofday () in
+        let elapsed_ms = (now -. cb.last_failure_time) *. 1000.0 in
+        if elapsed_ms >= float_of_int cb.timeout_ms then begin
+          cb.state <- HalfOpen;
+          true
+        end else
+          false
+
+  let circuit_record_success cb =
+    cb.failure_count <- 0;
+    cb.state <- Closed
+
+  let circuit_record_failure cb =
+    cb.last_failure_time <- Unix.gettimeofday ();
+    cb.failure_count <- cb.failure_count + 1;
+    if cb.failure_count >= cb.failure_threshold then
+      cb.state <- Open
+end
+
 let default_url = "http://127.0.0.1:8932/mcp"
 let default_timeout_ms = 120_000
 

@@ -1,8 +1,8 @@
-; Figma Agent Example - requires llm_mcp.agent_core
-; Install: opam pin add llm_mcp git+ssh://git@github.com/jeong-sik/llm-mcp.git#main
+; Figma Agent Example - requires llm_mcp.agent_core_eio
+; Install: opam pin add llm_mcp /Users/dancer/me/workspace/yousleepwhen/llm-mcp
 
 (executable
  (name figma_agent_example)
- (libraries figma_mcp llm_mcp.agent_core lwt lwt.unix yojson)
+ (libraries figma_mcp llm_mcp.agent_core_eio eio eio_main lwt lwt.unix yojson)
  (preprocess (pps lwt_ppx))
  (optional))  ; Won't fail if llm_mcp.agent_core is not installed
