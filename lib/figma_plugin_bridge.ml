@@ -139,25 +139,28 @@ let take_result ~channel_id ~command_id =
             Hashtbl.remove session.results command_id;
             Some result)
 
-exception PluginPending
-
 let wait_for_result ~channel_id ~command_id ~timeout_ms =
-  (* Use Resilience module for structured polling/retry *)
-  let poll_policy = {
-    Resilience.default_policy with
-    max_attempts = max 1 (timeout_ms / 200); (* 200ms poll interval *)
-    initial_delay_ms = 200;
-    max_delay_ms = 200;
-    jitter = false;
-  } in
-  let op () =
+  let start_time = now () in
+  let timeout_sec = float_of_int timeout_ms /. 1000.0 in
+  
+  let rec poll attempt =
     match take_result ~channel_id ~command_id with
-    | Some r -> r
-    | None -> raise PluginPending
+    | Some result -> Some result
+    | None ->
+        let elapsed = now () -. start_time in
+        if elapsed >= timeout_sec then None
+        else
+          (* Exponential backoff with cap: 50ms, 100ms, 200ms... capped at 500ms *)
+          let backoff = min 0.5 (0.05 *. (2.0 ** float_of_int attempt)) in
+          let remaining = timeout_sec -. elapsed in
+          let sleep_time = min backoff remaining in
+          if sleep_time <= 0.0 then None
+          else begin
+            Unix.sleepf sleep_time;
+            poll (attempt + 1)
+          end
   in
-  match Resilience.with_retry_sync ~policy:poll_policy ~op_name:"plugin_poll" op with
-  | Success r -> Some r
-  | Exhausted _ | CircuitOpen | TimedOut _ -> None
+  poll 0
 
 let cleanup_inactive ~ttl_seconds =
   with_lock (fun () ->
