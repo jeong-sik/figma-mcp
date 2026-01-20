@@ -4921,7 +4921,6 @@ let handle_llm_task args : (Yojson.Safe.t, string) result Lwt.t =
         let context_str =
           if truncated then context_head ^ "\n...TRUNCATED..." else context_head
         in
-        in
         let base =
           Printf.sprintf "Task:\n%s\n\nContext (JSON):\n%s" task context_str
         in
