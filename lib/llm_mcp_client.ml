@@ -8,13 +8,43 @@ let default_timeout_ms = 120_000
 let () = Random.self_init ()
 
 let retry_policy = {
-  Resilience.default_policy with
+  Mcp_resilience.default_policy with
   max_attempts = 3;
   initial_delay_ms = 1000;
   max_delay_ms = 5000;
 }
 
-let llm_breaker = Resilience.create_circuit_breaker ~name:"llm_mcp" ~failure_threshold:3 ()
+let llm_breaker = Mcp_resilience.create_circuit_breaker ~name:"llm_mcp" ~failure_threshold:3 ()
+
+let with_retry_lwt ~(policy : Mcp_resilience.retry_policy) ~circuit_breaker ~op_name:_ op =
+  let open Lwt.Syntax in
+  let rec attempt n last_error =
+    let cb_allows = match circuit_breaker with
+      | None -> true
+      | Some cb -> Mcp_resilience.circuit_allows cb
+    in
+    if not cb_allows then
+      Lwt.return Mcp_resilience.CircuitOpen
+    else if n > policy.max_attempts then
+      Lwt.return (Mcp_resilience.Error (Option.value last_error ~default:"Max attempts reached"))
+    else
+      let* () =
+        if n > 1 then
+          let delay_ms = Mcp_resilience.calculate_delay policy (n - 1) in
+          Lwt_unix.sleep (delay_ms /. 1000.0)
+        else
+          Lwt.return_unit
+      in
+      let* result = op () in
+      match result with
+      | Ok v ->
+          (match circuit_breaker with Some cb -> Mcp_resilience.circuit_record_success cb | None -> ());
+          Lwt.return (Mcp_resilience.Ok v)
+      | Error err ->
+          (match circuit_breaker with Some cb -> Mcp_resilience.circuit_record_failure cb | None -> ());
+          attempt (n + 1) (Some err)
+  in
+  attempt 1 None
 
 let getenv_opt name =
   try Some (Sys.getenv name)
@@ -77,7 +107,7 @@ let post_json ~url payload : (Yojson.Safe.t, string) result Lwt.t =
         let body_str = snd result in
 
         if code = 429 || (code >= 500 && code < 600) then
-          Lwt.fail (LlmRetryableError (Printf.sprintf "HTTP %d: %s" code body_str))
+          Lwt.return (Result.Error (Printf.sprintf "Retryable HTTP %d: %s" code body_str))
         else if code < 200 || code >= 300 then
           Lwt.return (Result.Error (Printf.sprintf "LLM MCP HTTP %d: %s" code body_str))
         else
@@ -135,23 +165,22 @@ let post_json ~url payload : (Yojson.Safe.t, string) result Lwt.t =
             | Some json -> Lwt.return (Result.Ok json)
             | None -> Lwt.return (Result.Error "LLM MCP JSON parse error: invalid JSON"))
       (function
-        | Lwt_unix.Timeout -> Lwt.fail (LlmRetryableError "Timeout")
-        | LlmRetryableError msg -> Lwt.fail (LlmRetryableError msg)
+        | Lwt_unix.Timeout -> Lwt.return (Result.Error "Timeout")
+        | LlmRetryableError msg -> Lwt.return (Result.Error msg)
         | exn -> Lwt.return (Result.Error (Printexc.to_string exn)))
   in
 
-  let* result = Resilience.with_retry_lwt 
-    ~policy:retry_policy 
-    ~circuit_breaker:(Some llm_breaker) 
+  let* result = with_retry_lwt
+    ~policy:retry_policy
+    ~circuit_breaker:(Some llm_breaker)
     ~op_name:"llm_mcp_post"
     op
   in
   match result with 
-  | Resilience.Success (Ok json) -> Lwt.return (Ok json)
-  | Resilience.Success (Error err) -> Lwt.return (Error err)
-  | Resilience.Exhausted { last_error; _ } -> Lwt.return (Error ("LLM MCP exhausted: " ^ last_error))
-  | Resilience.CircuitOpen -> Lwt.return (Error "LLM MCP circuit breaker open")
-  | Resilience.TimedOut _ -> Lwt.return (Error "LLM MCP timed out")
+  | Mcp_resilience.Ok json -> Lwt.return (Ok json)
+  | Mcp_resilience.Error err -> Lwt.return (Error err)
+  | Mcp_resilience.CircuitOpen -> Lwt.return (Error "LLM MCP circuit breaker open")
+  | Mcp_resilience.TimedOut -> Lwt.return (Error "LLM MCP timed out")
 
 let extract_text_from_content content =
   let extract_item = function

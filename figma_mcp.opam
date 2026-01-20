@@ -11,11 +11,12 @@ homepage: "https://github.com/jeong-sik/figma-mcp"
 bug-reports: "https://github.com/jeong-sik/figma-mcp/issues"
 depends: [
   "ocaml" {>= "5.1"}
-  "dune" {>= "3.13" & >= "3.13"}
+  "dune" {>= "3.15" & >= "3.13"}
   "mcp_protocol" {>= "0.1.0"}
   "grpc-direct" {>= "0.1.0"}
   "yojson" {>= "2.0"}
   "cohttp-lwt-unix" {>= "5.0"}
+  "conduit-lwt-unix" {>= "5.0"}
   "lwt" {>= "5.6"}
   "uri" {>= "4.2"}
   "cmdliner" {>= "1.1"}
