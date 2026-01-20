@@ -295,6 +295,8 @@ REST API만으로 부족한 레이아웃/스타일 정보를 보강하려면 플
 - `allowedDomains` 에 `http://localhost:...` 넣으면 오류가 날 수 있으니,
   로컬은 `devAllowedDomains`에만 넣고 `allowedDomains`는 https 도메인만 유지
 - Figma는 `devAllowedDomains`에서 IP(예: `127.0.0.1`)를 거부할 수 있으니 `localhost`만 사용
+- `plugin/manifest.loopback.json`은 placeholder id이므로 import 실패 시
+  새 플러그인을 만들고 생성된 `id`로 교체하세요
 - Dev Mode 패널에서 실행하려면 `capabilities: ["inspect", "codegen"]` + `codegenLanguages`가 필요
 
 3) 플러그인 실행 후 채널 연결
@@ -351,6 +353,8 @@ figma_plugin_get_variables
 - `plugin_depth`: 큰 섹션은 `0`으로, 필요한 경우 `1~2`로 점진 증가
 - `plugin_include_geometry`: 아이콘/벡터가 필요할 때만 `true`
 - `figma_plugin_get_node`는 `include_geometry`로 벡터 포함 여부 제어
+- `plugin_context_mode: summary` + `plugin_depth: 0`은 빠르지만 정밀도가 낮습니다.
+  최종 패스는 `plugin_context_mode: both` + `plugin_depth: 1` 권장
 주의: 플러그인 이미지 응답은 base64이므로 출력이 커집니다. (download 옵션은 REST 이미지에만 적용)
 
 HTTP 엔드포인트:
