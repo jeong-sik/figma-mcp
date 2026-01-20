@@ -888,18 +888,34 @@ module Handlers = struct
                | _ -> json
              in
              let total_nodes = Streamer.count_nodes node_json in
-             let per_node =
-               (if req.include_styles then 1 else 0)
-               + (if req.include_layouts then 1 else 0)
-               + (if req.include_contents then 1 else 0)
-             in
-             let total_chunks = max 1 (total_nodes * per_node) in
-             let stream = Grpc_eio.Stream.create total_chunks in
-             Splitter.stream_split node_json stream
-               ~include_styles:req.include_styles
-               ~include_layouts:req.include_layouts
-               ~include_contents:req.include_contents;
-             close_stream stream
+            let per_node =
+              (if req.include_styles then 1 else 0)
+              + (if req.include_layouts then 1 else 0)
+              + (if req.include_contents then 1 else 0)
+            in
+            if per_node = 0 then
+              let stream = Grpc_eio.Stream.create 1 in
+              let payload =
+                Proto.encode_split_chunk ~sequence:0 ~total_chunks:1 ~node_id
+                  ~chunk:(Proto.Content Proto.{
+                    id = "error-content";
+                    node_id;
+                    node_type = "ERROR";
+                    name = "error";
+                    text_content = Some "SplitStream requires at least one include flag";
+                    image_ref = None;
+                  })
+              in
+              Grpc_eio.Stream.add stream payload;
+              close_stream stream
+            else
+              let total_chunks = max 1 (total_nodes * per_node) in
+              let stream = Grpc_eio.Stream.create total_chunks in
+              Splitter.stream_split node_json stream
+                ~include_styles:req.include_styles
+                ~include_layouts:req.include_layouts
+                ~include_contents:req.include_contents;
+              close_stream stream
          | Error err ->
              let error_msg = Figma_api.error_to_string err in
              let stream = Grpc_eio.Stream.create 1 in

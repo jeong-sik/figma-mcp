@@ -167,12 +167,23 @@ type sse_client = {
 }
 let sse_clients : (int, sse_client) Hashtbl.t = Hashtbl.create 16
 let sse_client_counter = ref 0
+let last_sse_client_id : int option ref = ref None
+
+let format_sse_data data =
+  if data = "" then
+    "data: "
+  else
+    data
+    |> String.split_on_char '\n'
+    |> List.map (fun line -> "data: " ^ line)
+    |> String.concat "\n"
 
 let register_sse_client body =
   incr sse_client_counter;
   let id = !sse_client_counter in
   let client = { body; connected = true } in
   Hashtbl.add sse_clients id client;
+  last_sse_client_id := Some id;
   id
 
 let unregister_sse_client id =
@@ -181,25 +192,46 @@ let unregister_sse_client id =
    | None -> ());
   Hashtbl.remove sse_clients id
 
+(** Send SSE event and flush immediately *)
+let send_sse_event body ~event ~data =
+  let data_lines = format_sse_data data in
+  let msg = sprintf "event: %s\n%s\n\n" event data_lines in
+  Httpun.Body.Writer.write_string body msg;
+  Httpun.Body.Writer.flush body ignore
+
 let broadcast_sse_shutdown reason =
   let data = sprintf
     {|{"jsonrpc":"2.0","method":"notifications/shutdown","params":{"reason":"%s","message":"Server is shutting down, please reconnect"}}|}
     reason
   in
-  let msg = sprintf "event: notification\ndata: %s\n\n" data in
   Hashtbl.iter (fun _ client ->
     if client.connected then
       try
-        Httpun.Body.Writer.write_string client.body msg;
-        Httpun.Body.Writer.flush client.body ignore
+        send_sse_event client.body ~event:"notification" ~data
       with _ -> ()
   ) sse_clients
 
-(** Send SSE event and flush immediately *)
-let send_sse_event body ~event ~data =
-  let msg = sprintf "event: %s\ndata: %s\n\n" event data in
-  Httpun.Body.Writer.write_string body msg;
-  Httpun.Body.Writer.flush body ignore
+let find_sse_client ?client_id () =
+  let get_client id =
+    match Hashtbl.find_opt sse_clients id with
+    | Some client when client.connected -> Some (id, client)
+    | _ -> None
+  in
+  match client_id with
+  | Some id -> get_client id
+  | None ->
+      (match !last_sse_client_id with
+       | Some id ->
+           (match get_client id with
+            | Some client -> Some client
+            | None -> None)
+       | None ->
+           let found = ref None in
+           Hashtbl.iter (fun id client ->
+             if !found = None && client.connected then
+               found := Some (id, client)
+           ) sse_clients;
+           !found)
 
 (** ============== HTTP Handlers ============== *)
 
@@ -217,7 +249,51 @@ let run_mcp_request ~domain_mgr server body_str =
   | Some mgr -> Eio.Domain_manager.run mgr (fun () -> process_mcp_request_sync server body_str)
   | None -> process_mcp_request_sync server body_str
 
-let mcp_post_handler ~domain_mgr server _request reqd =
+let mcp_post_handler ~domain_mgr server request reqd =
+  let { Httpun.Request.headers; target = request_target; _ } = request in
+  let header_first keys =
+    let rec loop = function
+      | [] -> None
+      | key :: rest ->
+          (match Httpun.Headers.get headers key with
+           | Some value -> Some value
+           | None -> loop rest)
+    in
+    loop keys
+  in
+  let query_first keys =
+    let uri = Uri.of_string request_target in
+    let rec loop = function
+      | [] -> None
+      | key :: rest ->
+          (match Uri.get_query_param uri key with
+           | Some value -> Some value
+           | None -> loop rest)
+    in
+    loop keys
+  in
+  let client_id =
+    let raw =
+      match header_first [
+        "mcp-client-id";
+        "x-mcp-client-id";
+        "mcp-session";
+        "mcp-session-id";
+      ] with
+      | Some value -> Some value
+      | None ->
+          query_first [
+            "client_id";
+            "clientId";
+            "session";
+            "session_id";
+            "mcp_session";
+          ]
+    in
+    match raw with
+    | Some value -> int_of_string_opt value
+    | None -> None
+  in
   Request.read_body_async reqd (fun body_str ->
     match classify_message body_str with
     | `Notification ->
@@ -227,7 +303,21 @@ let mcp_post_handler ~domain_mgr server _request reqd =
         Response.accepted reqd
     | `Request | `Unknown ->
         let response_str = run_mcp_request ~domain_mgr server body_str in
-        Response.json response_str reqd
+        let streamed =
+          match find_sse_client ?client_id () with
+          | Some (id, client) ->
+              (try
+                 send_sse_event client.body ~event:"message" ~data:response_str;
+                 true
+               with _ ->
+                 unregister_sse_client id;
+                 false)
+          | None -> false
+        in
+        if streamed then
+          Response.accepted reqd
+        else
+          Response.json response_str reqd
   )
 
 (** MCP SSE handler for streamable-http protocol (GET /mcp) *)
