@@ -94,7 +94,7 @@ let make_headers ?host token =
   let headers = [
     ("X-Figma-Token", token);
     ("Accept", "application/json");
-    ("User-Agent", "figma-mcp/0.3.1");
+    ("User-Agent", "figma-mcp/0.3.2");
   ] in
   let headers =
     match host with
@@ -391,7 +391,7 @@ let download_url ~url ~path : (string, string) result Lwt.t =
     (fun () ->
        let headers = [
          ("Accept", "*/*");
-         ("User-Agent", "figma-mcp/0.3.1");
+         ("User-Agent", "figma-mcp/0.3.2");
        ] in
        let* (code, _headers, body_str) =
          raw_request ~meth:"GET" ~url ~headers ~body:None

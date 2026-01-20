@@ -3444,6 +3444,26 @@ let truncate_string ~max_len value =
   else
     value
 
+let is_utf8_continuation byte =
+  byte land 0b1100_0000 = 0b1000_0000
+
+let truncate_utf8 ~max_bytes value =
+  if max_bytes <= 0 then (value, false)
+  else
+    let len = String.length value in
+    if len <= max_bytes then (value, false)
+    else
+      let pos = min max_bytes len in
+      let rec back i =
+        if i <= 0 then 0
+        else
+          let byte = Char.code value.[i - 1] in
+          if is_utf8_continuation byte then back (i - 1) else i
+      in
+      let cut = back pos in
+      let cut = if cut = 0 then pos else cut in
+      (String.sub value 0 cut, true)
+
 let take_n n items =
   let rec loop acc remaining = function
     | [] -> List.rev acc
@@ -3564,6 +3584,33 @@ let chunkify_children ~chunk_size json =
           `Assoc (("chunks", `List chunks) :: ("chunk_total", `Int total) :: fields)
       | _ -> json)
   | _ -> json
+
+let chunkify_text ~chunk_size text =
+  let size = if chunk_size <= 0 then 1 else chunk_size in
+  let len = String.length text in
+  let rec loop idx acc =
+    if idx >= len then List.rev acc
+    else
+      let remaining = len - idx in
+      let chunk_len = min size remaining in
+      let chunk = String.sub text idx chunk_len in
+      loop (idx + chunk_len) (chunk :: acc)
+  in
+  let chunks = loop 0 [] in
+  let total = List.length chunks in
+  let chunks =
+    List.mapi (fun idx chunk ->
+      `Assoc [
+        ("chunk_index", `Int (idx + 1));
+        ("chunk_total", `Int total);
+        ("content", `String chunk);
+      ]) chunks
+  in
+  `Assoc [
+    ("chunked_text", `Bool true);
+    ("chunk_total", `Int total);
+    ("chunks", `List chunks);
+  ]
 
 let select_chunked_json ~selected json =
   match json with
@@ -4694,7 +4741,29 @@ let handle_llm_task args : (Yojson.Safe.t, string) result Lwt.t =
                      else select_chunked_json ~selected chunked_json
                    in
                    Lwt.return (selected_json, selection_meta)
-             | None -> Lwt.return (dsl, `Null))
+             | None ->
+                 (match dsl with
+                  | `String s ->
+                      let chunked =
+                        chunkify_text ~chunk_size:context_chunk_size s
+                      in
+                      let chunk_total =
+                        match chunked with
+                        | `Assoc fields ->
+                            (match List.assoc_opt "chunk_total" fields with
+                             | Some (`Int n) -> n
+                             | _ -> 0)
+                        | _ -> 0
+                      in
+                      let selection_meta =
+                        `Assoc [
+                          ("mode", `String "fallback_text");
+                          ("chunk_total", `Int chunk_total);
+                          ("chunk_size", `Int context_chunk_size);
+                        ]
+                      in
+                      Lwt.return (chunked, selection_meta)
+                  | _ -> Lwt.return (dsl, `Null)))
         | _ -> Lwt.return (dsl, `Null)
       in
 
@@ -4842,12 +4911,12 @@ let handle_llm_task args : (Yojson.Safe.t, string) result Lwt.t =
       let normalize_max_context_chars v = if v > 0 then v else 120000 in
       let make_prompt max_chars =
         let max_chars = normalize_max_context_chars max_chars in
-        let (context_str, truncated) =
-          if String.length context_str_full > max_chars then
-            let head = String.sub context_str_full 0 max_chars in
-            (head ^ "\n...TRUNCATED...", true)
-          else
-            (context_str_full, false)
+        let (context_head, truncated) =
+          truncate_utf8 ~max_bytes:max_chars context_str_full
+        in
+        let context_str =
+          if truncated then context_head ^ "\n...TRUNCATED..." else context_head
+        in
         in
         let base =
           Printf.sprintf "Task:\n%s\n\nContext (JSON):\n%s" task context_str

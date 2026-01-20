@@ -410,6 +410,8 @@ figma_llm_task
 - `/plugin/poll` accepts `wait_ms` (long-poll) if you build a custom UI.
 - For large nodes, use `plugin_depth: 0` and rely on `figma_plugin_read_selection`
   for the specific text ranges you need.
+- `plugin_context_mode: summary` + `plugin_depth: 0` is a fast pass; use
+  `plugin_context_mode: both` + `plugin_depth: 1` for final accuracy.
 - `net::ERR_CONNECTION_REFUSED` usually means the HTTP server is not running or the
   plugin URL/port mismatch. Confirm `curl http://localhost:8940/health`.
 - If Figma reports `Invalid value for devAllowedDomains`, use `localhost` only.
