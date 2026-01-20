@@ -1,4 +1,4 @@
-(lang dune 3.13)
+(lang dune 3.15)
 (name figma_mcp)
 (version 0.3.2)
 

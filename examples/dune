@@ -5,4 +5,4 @@
  (name figma_agent_example)
  (libraries figma_mcp llm_mcp.agent_core_eio eio eio_main lwt lwt.unix yojson)
  (preprocess (pps lwt_ppx))
- (optional))  ; Won't fail if llm_mcp.agent_core is not installed
+(enabled_if (= %{env:LLM_MCP_AGENT_CORE=0} "1")))  ; Opt-in build only
