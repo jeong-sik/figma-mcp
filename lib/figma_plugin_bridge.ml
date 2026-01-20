@@ -140,19 +140,27 @@ let take_result ~channel_id ~command_id =
             Some result)
 
 let wait_for_result ~channel_id ~command_id ~timeout_ms =
-  let deadline = now () +. (float_of_int timeout_ms /. 1000.0) in
-  let rec loop () =
+  let start_time = now () in
+  let timeout_sec = float_of_int timeout_ms /. 1000.0 in
+  
+  let rec poll attempt =
     match take_result ~channel_id ~command_id with
     | Some result -> Some result
     | None ->
-        if now () >= deadline then
-          None
-        else begin
-          Unix.sleepf 0.1;
-          loop ()
-        end
+        let elapsed = now () -. start_time in
+        if elapsed >= timeout_sec then None
+        else
+          (* Exponential backoff with cap: 50ms, 100ms, 200ms... capped at 500ms *)
+          let backoff = min 0.5 (0.05 *. (2.0 ** float_of_int attempt)) in
+          let remaining = timeout_sec -. elapsed in
+          let sleep_time = min backoff remaining in
+          if sleep_time <= 0.0 then None
+          else begin
+            Unix.sleepf sleep_time;
+            poll (attempt + 1)
+          end
   in
-  loop ()
+  poll 0
 
 let cleanup_inactive ~ttl_seconds =
   with_lock (fun () ->

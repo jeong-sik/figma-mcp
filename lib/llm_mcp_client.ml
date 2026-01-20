@@ -7,6 +7,15 @@ let default_timeout_ms = 120_000
 
 let () = Random.self_init ()
 
+let retry_policy = {
+  Resilience.default_policy with
+  max_attempts = 3;
+  initial_delay_ms = 1000;
+  max_delay_ms = 5000;
+}
+
+let llm_breaker = Resilience.create_circuit_breaker ~name:"llm_mcp" ~failure_threshold:3 ()
+
 let getenv_opt name =
   try Some (Sys.getenv name)
   with Not_found -> None
@@ -42,6 +51,8 @@ let get_bool key json =
   | Some (`Bool b) -> Some b
   | _ -> None
 
+exception LlmRetryableError of string
+
 let post_json ~url payload : (Yojson.Safe.t, string) result Lwt.t =
   let headers = Cohttp.Header.of_list [
     ("Content-Type", "application/json");
@@ -50,79 +61,97 @@ let post_json ~url payload : (Yojson.Safe.t, string) result Lwt.t =
   let body = Yojson.Safe.to_string payload |> Cohttp_lwt.Body.of_string in
   let uri = Uri.of_string url in
   let timeout_s = float_of_int (timeout_ms ()) /. 1000.0 in
-  Lwt.catch
-    (fun () ->
-      let* result =
-        Lwt_unix.with_timeout timeout_s (fun () ->
-          let* (resp, body) = Cohttp_lwt_unix.Client.post ~headers ~body uri in
-          let* body_str = Cohttp_lwt.Body.to_string body in
-          Lwt.return (resp, body_str))
-      in
-      let status = Cohttp.Response.status (fst result) in
-      let code = Cohttp.Code.code_of_status status in
-      let resp_headers = Cohttp.Response.headers (fst result) in
-      let body_str = snd result in
-      if code < 200 || code >= 300 then
-        Lwt.return (Error (Printf.sprintf "LLM MCP HTTP %d: %s" code body_str))
-      else
-        let content_type =
-          Cohttp.Header.get resp_headers "content-type"
-          |> Option.value ~default:""
-          |> String.lowercase_ascii
+
+  let op () =
+    Lwt.catch
+      (fun () ->
+        let* result = 
+          Lwt_unix.with_timeout timeout_s (fun () ->
+            let* (resp, body) = Cohttp_lwt_unix.Client.post ~headers ~body uri in
+            let* body_str = Cohttp_lwt.Body.to_string body in
+            Lwt.return (resp, body_str))
         in
-        let contains_substring s substring =
-          let len = String.length substring in
-          let rec loop i =
-            if i + len > String.length s then false
-            else if String.sub s i len = substring then true
-            else loop (i + 1)
+        let status = Cohttp.Response.status (fst result) in
+        let code = Cohttp.Code.code_of_status status in
+        let resp_headers = Cohttp.Response.headers (fst result) in
+        let body_str = snd result in
+
+        if code = 429 || (code >= 500 && code < 600) then
+          Lwt.fail (LlmRetryableError (Printf.sprintf "HTTP %d: %s" code body_str))
+        else if code < 200 || code >= 300 then
+          Lwt.return (Result.Error (Printf.sprintf "LLM MCP HTTP %d: %s" code body_str))
+        else
+          let content_type =
+            Cohttp.Header.get resp_headers "content-type"
+            |> Option.value ~default:""
+            |> String.lowercase_ascii
           in
-          if len = 0 then true else loop 0
-        in
-        let parse_json payload =
-          try Some (Yojson.Safe.from_string payload)
-          with Yojson.Json_error _ -> None
-        in
-        if contains_substring content_type "text/event-stream" then
-          let lines = String.split_on_char '\n' body_str in
-          let rec loop data_lines last_json = function
-            | [] ->
-                let last_json =
-                  match data_lines with
-                  | [] -> last_json
-                  | _ ->
-                      let data = String.concat "\n" (List.rev data_lines) in
-                      (match parse_json data with Some j -> Some j | None -> last_json)
-                in
-                last_json
-            | line :: rest ->
-                if String.trim line = "" then
-                  let last_json =
+          let contains_substring s substring =
+            let len = String.length substring in
+            let rec loop i =
+              if i + len > String.length s then false
+              else if String.sub s i len = substring then true
+              else loop (i + 1)
+            in
+            if len = 0 then true else loop 0
+          in
+          let parse_json payload =
+            try Some (Yojson.Safe.from_string payload)
+            with Yojson.Json_error _ -> None
+          in
+          if contains_substring content_type "text/event-stream" then
+            let lines = String.split_on_char '\n' body_str in
+            let rec loop data_lines last_json = function
+              | [] ->
+                  let last_json = 
                     match data_lines with
                     | [] -> last_json
                     | _ ->
                         let data = String.concat "\n" (List.rev data_lines) in
                         (match parse_json data with Some j -> Some j | None -> last_json)
                   in
-                  loop [] last_json rest
-                else if String.length line >= 5 && String.sub line 0 5 = "data:" then
-                  let data = String.sub line 5 (String.length line - 5) |> String.trim in
-                  loop (data :: data_lines) last_json rest
-                else
-                  loop data_lines last_json rest
-          in
-          (match loop [] None lines with
-           | Some json -> Lwt.return (Ok json)
-           | None -> Lwt.return (Error "LLM MCP SSE parse error: no JSON data"))
-        else
-          match parse_json body_str with
-          | Some json -> Lwt.return (Ok json)
-          | None -> Lwt.return (Error "LLM MCP JSON parse error: invalid JSON"))
-    (function
-      | Lwt_unix.Timeout ->
-          Lwt.return (Error "LLM MCP timeout")
-      | exn ->
-          Lwt.return (Error ("LLM MCP error: " ^ Printexc.to_string exn)))
+                  last_json
+              | line :: rest ->
+                  if String.trim line = "" then
+                    let last_json = 
+                      match data_lines with 
+                      | [] -> last_json
+                      | _ ->
+                          let data = String.concat "\n" (List.rev data_lines) in
+                          (match parse_json data with Some j -> Some j | None -> last_json)
+                    in 
+                    loop [] last_json rest
+                  else if String.length line >= 5 && String.sub line 0 5 = "data:" then
+                    let data = String.sub line 5 (String.length line - 5) |> String.trim in
+                    loop (data :: data_lines) last_json rest
+                  else
+                    loop data_lines last_json rest
+            in 
+            (match loop [] None lines with 
+             | Some json -> Lwt.return (Result.Ok json)
+             | None -> Lwt.return (Result.Error "LLM MCP SSE parse error: no JSON data"))
+          else 
+            match parse_json body_str with 
+            | Some json -> Lwt.return (Result.Ok json)
+            | None -> Lwt.return (Result.Error "LLM MCP JSON parse error: invalid JSON"))
+      (function
+        | Lwt_unix.Timeout -> Lwt.fail (LlmRetryableError "Timeout")
+        | LlmRetryableError msg -> Lwt.fail (LlmRetryableError msg)
+        | exn -> Lwt.return (Result.Error (Printexc.to_string exn)))
+  in
+
+  let* result = Resilience.with_retry_lwt 
+    ~policy:retry_policy 
+    ~circuit_breaker:(Some llm_breaker) 
+    ~op_name:"llm_mcp_post"
+    op
+  in
+  match result with 
+  | Resilience.Success (Ok json) -> Lwt.return (Ok json)
+  | Resilience.Success (Error err) -> Lwt.return (Error err)
+  | Resilience.Exhausted { last_error; _ } -> Lwt.return (Error ("LLM MCP exhausted: " ^ last_error))
+  | Resilience.CircuitOpen -> Lwt.return (Error "LLM MCP circuit breaker open")
+  | Resilience.TimedOut _ -> Lwt.return (Error "LLM MCP timed out")
 
 let extract_text_from_content content =
   let extract_item = function
