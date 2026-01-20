@@ -16,6 +16,16 @@
 module Figma_Tools = struct
   open Agent_core_eio.Types
 
+  let domain_mgr = ref None
+
+  let set_domain_mgr (mgr : _ Eio.Domain_manager.t) =
+    domain_mgr := Some mgr
+
+  let run_lwt promise =
+    match !domain_mgr with
+    | None -> Lwt_main.run promise
+    | Some mgr -> Eio.Domain_manager.run mgr (fun () -> Lwt_main.run promise)
+
   (** Execute Figma-related tools *)
   let execute (tc : tool_call) : (tool_result, string) result =
     let open Yojson.Safe.Util in
@@ -26,7 +36,7 @@ module Figma_Tools = struct
       if token = "" || file_key = "" then
         Result.Ok (ToolError "Missing token or file_key")
       else begin
-        let result = Lwt_main.run (Figma_api.get_file ~token ~file_key ()) in
+        let result = run_lwt (Figma_api.get_file ~token ~file_key ()) in
         match result with
         | Error e -> Result.Ok (ToolError (Figma_api.error_to_string e))
         | Ok json ->
@@ -44,7 +54,7 @@ module Figma_Tools = struct
       if token = "" || file_key = "" || node_id = "" then
         Result.Ok (ToolError "Missing token, file_key, or node_id")
       else begin
-        let result = Lwt_main.run (Figma_api.get_file_nodes ~token ~file_key ~node_ids:[node_id] ()) in
+        let result = run_lwt (Figma_api.get_file_nodes ~token ~file_key ~node_ids:[node_id] ()) in
         match result with
         | Error e -> Result.Ok (ToolError (Figma_api.error_to_string e))
         | Ok json ->
@@ -149,6 +159,7 @@ let () =
   Printf.printf "Prompt: %s\n\n" prompt;
 
   Eio_main.run @@ fun env ->
+  Figma_Tools.set_domain_mgr (Eio.Stdenv.domain_mgr env);
   let clock = Eio.Stdenv.clock env in
   let net = Eio.Stdenv.net env in
   let result =

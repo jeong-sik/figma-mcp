@@ -115,10 +115,17 @@ let with_retry_lwt ~policy ~circuit_breaker ~op_name:_ op =
       Lwt.catch
         (fun () ->
           let* result = op () in
-          (match circuit_breaker with
-           | Some cb -> Resilience.circuit_record_success cb
-           | None -> ());
-          Lwt.return (Resilience.Ok result))
+          (match result with
+           | Ok _ ->
+               (match circuit_breaker with
+                | Some cb -> Resilience.circuit_record_success cb
+                | None -> ());
+               Lwt.return (Resilience.Ok result)
+           | Error msg ->
+               (match circuit_breaker with
+                | Some cb -> Resilience.circuit_record_failure cb
+                | None -> ());
+               Lwt.return (Resilience.Ok (Error msg))))
         (function
           | LlmRetryableError msg ->
               (match circuit_breaker with

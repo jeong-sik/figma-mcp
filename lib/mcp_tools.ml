@@ -219,7 +219,7 @@ let tool_figma_select_nodes : tool_def = {
     ("node_id", string_prop "노드 ID (예: 123:456)");
     ("url", string_prop "Figma URL (file_key/node_id 자동 추출)");
     ("token", string_prop "Figma Personal Access Token");
-    ("summary_depth", number_prop "분석 depth (기본값: 1)");
+    ("summary_depth", number_prop "분석 depth (기본값: 1, 최대: 6)");
     ("preview", bool_prop "프리뷰 이미지 포함 여부 (기본값: true)");
     ("preview_format", enum_prop ["png"; "jpg"; "svg"; "pdf"] "프리뷰 이미지 포맷 (기본값: png)");
     ("preview_scale", number_prop "프리뷰 이미지 스케일 (1-4, 기본값: 1)");
@@ -2245,10 +2245,19 @@ let handle_get_node_summary args : (Yojson.Safe.t, string) result =
 let handle_select_nodes args : (Yojson.Safe.t, string) result =
   let (file_key, node_id) = resolve_file_key_node_id args in
   let token = get_string "token" args in
-  let summary_depth = match get_int "summary_depth" args with Some d when d >= 0 -> d | _ -> 1 in
+  let max_summary_depth = 6 in
+  let raw_summary_depth = match get_int "summary_depth" args with Some d -> d | _ -> 1 in
+  let summary_depth =
+    if raw_summary_depth < 0 then 1 else min raw_summary_depth max_summary_depth
+  in
   let preview = get_bool_or "preview" true args in
   let preview_format = get_string_or "preview_format" "png" args in
-  let preview_scale = match get_int "preview_scale" args with Some s when s > 0 -> s | _ -> 1 in
+  let raw_preview_scale = match get_int "preview_scale" args with Some s -> s | _ -> 1 in
+  let preview_scale =
+    if raw_preview_scale < 1 then 1
+    else if raw_preview_scale > 4 then 4
+    else raw_preview_scale
+  in
   let layout_only = get_bool_or "layout_only" false args in
   let auto_layout_only = get_bool_or "auto_layout_only" false args in
   let raw_text_mode = get_string_or "text_mode" "include" args in
@@ -2292,6 +2301,10 @@ let handle_select_nodes args : (Yojson.Safe.t, string) result =
       let warnings = ref [] in
       if raw_text_mode <> text_mode then
         warnings := "Invalid text_mode, fallback to include" :: !warnings;
+      if raw_summary_depth <> summary_depth then
+        warnings := Printf.sprintf "summary_depth clamped to %d" summary_depth :: !warnings;
+      if raw_preview_scale <> preview_scale then
+        warnings := "preview_scale clamped to 1-4" :: !warnings;
 
       let preview_json =
         if not preview then `Null

@@ -344,6 +344,10 @@ module Handlers = struct
     | Some raw -> (match int_of_string_opt raw with Some v -> v | None -> default)
     | None -> default
 
+  let close_stream stream =
+    Grpc_eio.Stream.close stream;
+    stream
+
   let extract_node_document node_id json =
     match json with
     | `Assoc fields ->
@@ -624,12 +628,12 @@ module Handlers = struct
                        ~node_id:current_id ~node_name:"" ~depth ~parent_id
                        ~child_count:0 ~dsl:("{\"error\":\"" ^ error_msg ^ "\"}")
                        ~node_index:!node_index ~total_nodes
-                   in
-                   Grpc_eio.Stream.add stream payload;
-                   incr node_index)
+                  in
+                  Grpc_eio.Stream.add stream payload;
+                  incr node_index)
             end
           done;
-          stream
+          close_stream stream
         end else begin
           eprintf "[gRPC] GetNodeStream file_key=%s node_id=%s token_len=%d\n%!"
             file_key node_id (String.length token);
@@ -654,7 +658,7 @@ module Handlers = struct
                    ~node_index:0 ~total_nodes:1
                in
                Grpc_eio.Stream.add stream payload);
-          stream
+          close_stream stream
         end
     | _ ->
         let payload =
@@ -664,7 +668,7 @@ module Handlers = struct
             ~node_index:0 ~total_nodes:1
         in
         Grpc_eio.Stream.add stream payload;
-        stream
+        close_stream stream
 
   (** GetFileMeta: Unary call for file metadata *)
   let get_file_meta request_bytes =
@@ -788,7 +792,7 @@ module Handlers = struct
           in
           Grpc_eio.Stream.add stream progress
         end;
-        stream
+        close_stream stream
     | _ ->
         let progress =
           Proto.encode_fidelity_progress {
@@ -803,10 +807,10 @@ module Handlers = struct
             node_count = None;
             raw_size = None;
             compressed_size = None;
-          }
+        }
         in
         Grpc_eio.Stream.add stream progress;
-        stream
+        close_stream stream
 
   (** GetSplitStream: Stream nodes split into Style/Layout/Content chunks *)
   let get_split_stream request_bytes =
@@ -895,7 +899,7 @@ module Handlers = struct
                ~include_styles:req.include_styles
                ~include_layouts:req.include_layouts
                ~include_contents:req.include_contents;
-             stream
+             close_stream stream
          | Error err ->
              let error_msg = Figma_api.error_to_string err in
              let stream = Grpc_eio.Stream.create 1 in
@@ -911,7 +915,7 @@ module Handlers = struct
                  })
              in
              Grpc_eio.Stream.add stream payload;
-             stream)
+             close_stream stream)
     | _ ->
         let stream = Grpc_eio.Stream.create 1 in
         let payload =
@@ -926,7 +930,7 @@ module Handlers = struct
             })
         in
         Grpc_eio.Stream.add stream payload;
-        stream
+        close_stream stream
 
   (** PlanTasks: Generate ROI-based implementation tasks from Figma node
 
