@@ -116,16 +116,22 @@ end
 (** ============== MCP Request Processing ============== *)
 
 (** Process MCP request synchronously.
-    Uses Lwt_main.run for Figma API calls (safe in httpun callback). *)
+    Run effects via Lwt_eio in Eio runtime. *)
 let process_mcp_request_sync (server : Mcp_protocol.mcp_server) body_str =
   (* HTTP 모드 설정 - wrap_sync에서 nested Lwt_main.run 방지 *)
   Mcp_tools.is_http_mode := true;
   match Mcp_protocol.parse_request body_str with
   | Ok req ->
-      (* HTTP 모드: wrap_sync가 Effect 없이 직접 실행하므로
-         여기서 한 번만 Lwt_main.run 호출 *)
-      let response_json = Figma_effects.run_with_real_api (fun () ->
-        Lwt_main.run (Mcp_protocol.process_request server req)
+      (* HTTP 모드: Eio 컨텍스트에서 Lwt Promise를 즉시 해석 *)
+      let resolve_immediate promise =
+        match Lwt.state promise with
+        | Lwt.Return value -> value
+        | Lwt.Fail exn -> raise exn
+        | Lwt.Sleep ->
+            failwith "Unexpected async Lwt promise in HTTP MCP handler"
+      in
+      let response_json = Figma_effects.run_with_eio_api (fun () ->
+        resolve_immediate (Mcp_protocol.process_request server req)
       ) in
       Yojson.Safe.to_string response_json
   | Error msg ->

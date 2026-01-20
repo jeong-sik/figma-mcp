@@ -628,8 +628,14 @@ let tool_figma_llm_task : tool_def = {
     ("quality", enum_prop ["best"; "balanced"; "fast"] "컨텍스트/속도 프리셋 (기본값: best)");
     ("provider", enum_prop ["mcp-http"; "stub"] "LLM provider (기본값: mcp-http)");
     ("llm_provider", string_prop "provider alias (하위 호환)");
-    ("llm_tool", enum_prop ["codex"; "claude-cli"; "gemini"; "ollama"] "MCP tool 이름 (기본값: codex)");
+    ("llm_tool", enum_prop ["auto"; "codex"; "claude-cli"; "gemini"; "ollama"] "MCP tool 이름 (기본값: codex)");
     ("tool_name", string_prop "MCP tool 이름 override (llm_tool alias)");
+    ("llm_tool_selector_mode", enum_prop ["heuristic"; "llm"] "LLM 도구 선택 전략 (기본값: heuristic)");
+    ("llm_tool_selector_tool", enum_prop ["codex"; "claude-cli"; "gemini"; "ollama"] "LLM 도구 선택용 LLM 도구 (기본값: gemini)");
+    ("llm_tool_selector_provider", enum_prop ["mcp-http"; "stub"] "LLM 도구 선택 provider (기본값: mcp-http)");
+    ("llm_tool_selector_args", object_prop "LLM 도구 선택용 LLM 인자");
+    ("llm_tool_selector_task", string_prop "LLM 도구 선택 기준 설명 (옵션)");
+    ("llm_tool_selector_mcp_url", string_prop "LLM 도구 선택 MCP endpoint URL override");
     ("llm_args", object_prop "MCP tool arguments (model/timeout/...)");
     ("mcp_url", string_prop "MCP endpoint URL override");
     ("llm_url", string_prop "MCP endpoint alias (하위 호환)");
@@ -664,11 +670,26 @@ let tool_figma_llm_task : tool_def = {
     ("chunk_select_provider", enum_prop ["mcp-http"; "stub"] "청크 선택 LLM provider (기본값: mcp-http)");
     ("chunk_select_mcp_url", string_prop "청크 선택 MCP endpoint URL override");
     ("chunk_select_sample_size", number_prop "청크 인덱스 샘플 수 (기본값: 6)");
+    ("llm_call_policy", enum_prop ["auto"; "require_ready"; "skip"; "force"] "LLM 호출 정책 (기본값: auto)");
+    ("llm_dry_run", bool_prop "LLM 호출 없이 readiness 반환 (기본값: false)");
+    ("preflight_max_truncation", number_prop "프리플라이트 트렁케이션 허용 비율 (0-1, 기본값: 0.2)");
+    ("preflight_require_plugin", bool_prop "플러그인 스냅샷 필수 여부 (기본값: preset/quality에 따라 자동)");
+    ("auto_fix_enabled", bool_prop "프리플라이트 실패 시 자동 보정 (기본값: true)");
+    ("auto_fix_max_attempts", number_prop "자동 보정 재시도 횟수 (기본값: 2)");
     ("max_context_chars", number_prop "LLM 프롬프트 컨텍스트 최대 길이 (기본값: 120000)");
     ("retry_on_llm_error", bool_prop "LLM 에러 시 컨텍스트 축소 후 재시도 (기본값: false)");
     ("max_retries", number_prop "LLM 에러 재시도 횟수 (기본값: 1)");
     ("min_context_chars", number_prop "재시도 시 컨텍스트 최소 길이 (기본값: 120000)");
     ("retry_context_scale", number_prop "재시도 시 컨텍스트 축소 비율 (0-1, 기본값: 0.5)");
+    ("critic_enabled", bool_prop "LLM 출력 품질 critic 사용 여부 (기본값: false)");
+    ("critic_tool", enum_prop ["codex"; "claude-cli"; "gemini"; "ollama"] "critic LLM 도구 (기본값: gemini)");
+    ("critic_provider", enum_prop ["mcp-http"; "stub"] "critic provider (기본값: mcp-http)");
+    ("critic_args", object_prop "critic LLM 인자 (model/timeout/...)");
+    ("critic_task", string_prop "critic 평가 기준 설명 (옵션)");
+    ("critic_mcp_url", string_prop "critic MCP endpoint URL override");
+    ("critic_min_score", number_prop "critic 수용 최소 점수 (0-1, 기본값: 0.7)");
+    ("critic_max_retries", number_prop "critic 재시도 횟수 (기본값: 0)");
+    ("critic_retry_context_scale", number_prop "critic 재시도 시 context 축소 비율 (0-1, 기본값: 0.7)");
     ("return_metadata", bool_prop "raw JSON 및 메타데이터 반환 여부 (기본값: false)");
   ] ["task"];
 }
@@ -992,6 +1013,12 @@ let is_http_mode = ref false
 let run_with_effects f =
   if !is_http_mode then f ()
   else Figma_effects.run_with_real_api f
+
+let call_llm_tool ~(provider : Llm_provider.provider) ~url ~name ~arguments =
+  if !is_http_mode then
+    Lwt.return (Lwt_main.run (provider.call_tool ~url ~name ~arguments))
+  else
+    provider.call_tool ~url ~name ~arguments
 
 let resolve_channel_id args =
   match get_string "channel_id" args with
@@ -3967,6 +3994,56 @@ let parse_chunk_indices ~chunk_total text =
   |> List.filter (fun v -> v >= 1 && v <= chunk_total)
   |> dedup_sorted
 
+let parse_chunk_selection_info selection_json =
+  let selected_count =
+    match selection_json with
+    | `Assoc fields -> (
+        match List.assoc_opt "selected" fields with
+        | Some (`List items) -> List.length items
+        | _ -> 0)
+    | _ -> 0
+  in
+  let chunk_total =
+    match selection_json with
+    | `Assoc fields -> (
+        match List.assoc_opt "chunk_total" fields with
+        | Some (`Int n) -> n
+        | Some (`Float f) -> int_of_float f
+        | _ -> 0)
+    | _ -> 0
+  in
+  (selected_count, chunk_total)
+
+let parse_tool_choice text =
+  let normalized = String.lowercase_ascii text in
+  let contains_substring s substring =
+    let len = String.length substring in
+    let rec loop i =
+      if i + len > String.length s then false
+      else if String.sub s i len = substring then true
+      else loop (i + 1)
+    in
+    if len = 0 then true else loop 0
+  in
+  let parse_json_tool () =
+    try
+      match Yojson.Safe.from_string text with
+      | `Assoc fields -> (
+          match List.assoc_opt "tool" fields with
+          | Some (`String s) -> Some (String.lowercase_ascii s)
+          | _ ->
+              (match List.assoc_opt "name" fields with
+               | Some (`String s) -> Some (String.lowercase_ascii s)
+               | _ -> None))
+      | _ -> None
+    with _ -> None
+  in
+  match parse_json_tool () with
+  | Some tool -> Some tool
+  | None ->
+      let tools = ["codex"; "claude-cli"; "gemini"; "ollama"] in
+      List.find_opt (fun tool -> contains_substring normalized tool) tools
+
 type llm_task_preset = {
   quality: string option;
   context_strategy: string option;
@@ -3987,6 +4064,107 @@ type llm_task_preset = {
   min_context_chars: int option;
   retry_context_scale: float option;
 }
+
+type llm_task_context = {
+  dsl_context: Yojson.Safe.t;
+  chunk_selection: Yojson.Safe.t;
+  variables: Yojson.Safe.t;
+  variables_source: Yojson.Safe.t;
+  image_fills: Yojson.Safe.t;
+  plugin_snapshot_raw: Yojson.Safe.t;
+  plugin_snapshot: Yojson.Safe.t;
+  plugin_summary: Yojson.Safe.t;
+  warnings: string list;
+  context_json: Yojson.Safe.t;
+  context_str_full: string;
+}
+
+type llm_tool_selection = {
+  tool: string;
+  mode: string;
+  reason: string option;
+}
+
+type llm_task_config = {
+  quality: string;
+  provider_name: string option;
+  llm_tool_raw: string;
+  llm_tool_selector_mode: string;
+  llm_tool_selector_tool: string;
+  llm_tool_selector_provider: string option;
+  llm_tool_selector_args: Yojson.Safe.t option;
+  llm_tool_selector_task: string option;
+  llm_tool_selector_mcp_url: string option;
+  llm_call_policy: string;
+  llm_dry_run: bool;
+  preflight_max_truncation: float;
+  preflight_require_plugin: bool;
+  auto_fix_enabled: bool;
+  auto_fix_max_attempts: int;
+  critic_enabled: bool;
+  critic_tool: string;
+  critic_provider: string option;
+  critic_args: Yojson.Safe.t option;
+  critic_task: string option;
+  critic_mcp_url: string option;
+  critic_min_score: float;
+  critic_max_retries: int;
+  critic_retry_context_scale: float;
+  file_key: string option;
+  node_id: string option;
+  token: string option;
+  depth: int option;
+  geometry: string option;
+  include_variables: bool;
+  include_image_fills: bool;
+  include_plugin: bool;
+  auto_plugin: bool;
+  plugin_context_mode: string;
+  plugin_summary_sample_size: int;
+  plugin_depth: int;
+  plugin_include_geometry: bool;
+  plugin_timeout_ms: int;
+  plugin_mode: string;
+  plugin_channel_id: string option;
+  context_strategy: string;
+  context_max_depth: int;
+  context_max_children: int;
+  context_max_list_items: int;
+  context_max_string: int;
+  context_chunk_size: int;
+  chunk_select_mode: string;
+  chunk_select_limit: int;
+  chunk_select_sample_size: int;
+  chunk_select_task: string option;
+  chunk_select_provider: string option;
+  chunk_select_llm_tool: string;
+  chunk_select_llm_args: Yojson.Safe.t option;
+  chunk_select_mcp_url: string option;
+  max_context_chars: int;
+  retry_on_llm_error: bool;
+  max_retries: int;
+  min_context_chars: int;
+  retry_context_scale: float;
+  return_metadata: bool;
+}
+
+type preflight_issue = {
+  code: string;
+  message: string;
+  suggestion: string option;
+}
+
+let make_issue ?suggestion code message =
+  { code; message; suggestion }
+
+let issue_to_json issue =
+  let base = [
+    ("code", `String issue.code);
+    ("message", `String issue.message);
+  ] in
+  match issue.suggestion with
+  | Some s -> `Assoc (("suggestion", `String s) :: base)
+  | None -> `Assoc base
 
 let empty_preset = {
   quality = None;
@@ -4254,7 +4432,7 @@ let handle_chunk_index args : (Yojson.Safe.t, string) result Lwt.t =
                                 Option.value selection_mcp_url ~default:provider.default_url
                               in
                               let* llm_result =
-                                provider.call_tool ~url:llm_url ~name:selection_llm_tool ~arguments:(`Assoc fields)
+                                call_llm_tool ~provider ~url:llm_url ~name:selection_llm_tool ~arguments:(`Assoc fields)
                               in
                               match llm_result with
                               | Error err ->
@@ -4368,7 +4546,7 @@ let handle_llm_call args : (Yojson.Safe.t, string) result Lwt.t =
              get_string_any ["mcp_url"; "llm_url"] args
              |> Option.value ~default:provider.default_url
            in
-           let* result = provider.call_tool ~url:llm_url ~name:llm_tool ~arguments in
+           let* result = call_llm_tool ~provider ~url:llm_url ~name:llm_tool ~arguments in
            (match result with
             | Error err -> Lwt.return (Error err)
             | Ok response ->
@@ -4396,7 +4574,7 @@ let handle_llm_task args : (Yojson.Safe.t, string) result Lwt.t =
   | None -> Lwt.return (Error "Missing required parameter: task")
   | Some task ->
       let provider_name = get_string_any ["provider"; "llm_provider"] args in
-      let llm_tool = get_string_any ["tool_name"; "llm_tool"] args |> Option.value ~default:"codex" in
+      let llm_tool_raw = get_string_any ["tool_name"; "llm_tool"] args |> Option.value ~default:"codex" in
       let preset_name = get_string "preset" args in
       let preset_cfg = Option.bind preset_name resolve_llm_task_preset in
       let preset_unknown =
@@ -4463,6 +4641,59 @@ let handle_llm_task args : (Yojson.Safe.t, string) result Lwt.t =
       in
       let include_image_fills =
         get_bool_or "include_image_fills" include_image_fills_default args
+      in
+      let llm_tool_selector_mode =
+        get_string_or "llm_tool_selector_mode" "heuristic" args
+      in
+      let llm_tool_selector_tool =
+        get_string_or "llm_tool_selector_tool" "gemini" args
+      in
+      let llm_tool_selector_provider = get_string "llm_tool_selector_provider" args in
+      let llm_tool_selector_args = get_json "llm_tool_selector_args" args in
+      let llm_tool_selector_task = get_string "llm_tool_selector_task" args in
+      let llm_tool_selector_mcp_url = get_string "llm_tool_selector_mcp_url" args in
+      let llm_call_policy_default =
+        if quality = "best" then "require_ready" else "auto"
+      in
+      let llm_call_policy =
+        get_string_or "llm_call_policy" llm_call_policy_default args
+      in
+      let llm_dry_run = get_bool_or "llm_dry_run" false args in
+      let preflight_max_truncation_default =
+        if quality = "best" then 0.2 else if quality = "balanced" then 0.3 else 0.4
+      in
+      let preflight_max_truncation =
+        get_float_or "preflight_max_truncation" preflight_max_truncation_default args
+      in
+      let preflight_require_plugin_default =
+        match preset_name with
+        | Some "fidelity"
+        | Some "pixel" -> true
+        | _ -> (quality = "best" && include_plugin)
+      in
+      let preflight_require_plugin =
+        get_bool_or "preflight_require_plugin" preflight_require_plugin_default args
+      in
+      let auto_fix_enabled_default = quality <> "fast" in
+      let auto_fix_enabled =
+        get_bool_or "auto_fix_enabled" auto_fix_enabled_default args
+      in
+      let auto_fix_max_attempts =
+        get_int "auto_fix_max_attempts" args |> Option.value ~default:2 |> max 0
+      in
+      let critic_enabled = get_bool_or "critic_enabled" false args in
+      let critic_tool = get_string_or "critic_tool" "gemini" args in
+      let critic_provider = get_string "critic_provider" args in
+      let critic_args = get_json "critic_args" args in
+      let critic_task = get_string "critic_task" args in
+      let critic_mcp_url = get_string "critic_mcp_url" args in
+      let critic_min_score = get_float_or "critic_min_score" 0.7 args in
+      let critic_max_retries =
+        get_int "critic_max_retries" args |> Option.value ~default:0 |> max 0
+      in
+      let critic_retry_context_scale =
+        let scale = get_float_or "critic_retry_context_scale" 0.7 args in
+        if scale > 0.0 && scale < 1.0 then scale else 0.7
       in
       let plugin_context_mode_default =
         preset_or "full" (fun p -> p.plugin_context_mode)
@@ -4532,7 +4763,8 @@ let handle_llm_task args : (Yojson.Safe.t, string) result Lwt.t =
       let chunk_select_llm_tool =
         match get_string "chunk_select_llm_tool" args with
         | Some v -> v
-        | None -> llm_tool
+        | None ->
+            if llm_tool_raw = "auto" then "codex" else llm_tool_raw
       in
       let chunk_select_llm_args = get_json "chunk_select_llm_args" args in
       let chunk_select_mcp_url = get_string "chunk_select_mcp_url" args in
@@ -4557,381 +4789,586 @@ let handle_llm_task args : (Yojson.Safe.t, string) result Lwt.t =
       let depth = get_int "depth" args in
       let geometry = get_string "geometry" args in
 
-      let warnings = ref [] in
-      let add_warning msg = warnings := msg :: !warnings in
+      let base_warnings = ref [] in
       let () =
         match preset_unknown with
-        | Some name -> add_warning ("Unknown preset: " ^ name)
+        | Some name -> base_warnings := ("Unknown preset: " ^ name) :: !base_warnings
         | None -> ()
       in
 
-      let dsl =
-        match (file_key, node_id, token) with
-        | (Some file_key, Some node_id, Some token) ->
-            let cache_options =
-              List.filter_map Fun.id [
-                Option.map (Printf.sprintf "depth:%d") depth;
-                Option.map (Printf.sprintf "geometry:%s") geometry;
-              ]
-            in
-            let json_result =
-              run_with_effects (fun () ->
-                match Figma_cache.get ~file_key ~node_id ~options:cache_options () with
-                | Some json -> Ok json
-                | None ->
-                    match Figma_effects.Perform.get_nodes ~token ~file_key ~node_ids:[node_id] ?depth ?geometry () with
-                    | Ok json ->
-                        Figma_cache.set ~file_key ~node_id ~options:cache_options json;
-                        Ok json
-                    | Error err -> Error err)
-            in
-            (match json_result with
-             | Error err ->
-                 add_warning ("DSL fetch error: " ^ err);
-                 `Null
-             | Ok json ->
-                 let node_data = match member "nodes" json with
-                   | Some (`Assoc nodes_map) ->
-                       (match List.assoc_opt node_id nodes_map with
-                        | Some n -> member "document" n
-                        | None -> None)
-                   | _ -> None
-                 in
-                 (match node_data with
-                  | None ->
-                      add_warning ("Node not found: " ^ node_id);
-                      `Null
-                  | Some node ->
-                      let node_str = Yojson.Safe.to_string node in
-                      let dsl_str = match process_json_string ~format:"fidelity" node_str with
-                        | Ok s -> s
-                        | Error msg -> msg
-                      in
-                      `String dsl_str))
-        | _ ->
-            add_warning "Missing file_key/node_id/token for DSL context";
-            `Null
-      in
-      let dsl_json =
-        match dsl with
-        | `String s ->
-            (try Some (Yojson.Safe.from_string s)
-             with _ -> None)
-        | _ -> None
-      in
-      let compact_if_needed json =
-        if context_strategy = "raw" then
-          json
-        else
-          compact_json
-            ~depth:0
-            ~max_depth:context_max_depth
-            ~max_children:context_max_children
-            ~max_list_items:context_max_list_items
-            ~max_string:context_max_string
-            json
-      in
-      let* (dsl_context, chunk_selection) =
-        match context_strategy with
-        | "compact" ->
-            (match dsl_json with
-             | Some json -> Lwt.return (compact_if_needed json, `Null)
-             | None -> Lwt.return (dsl, `Null))
-        | "chunked" ->
-            (match dsl_json with
-             | Some json ->
-                 let compacted = compact_if_needed json in
-                 if chunk_select_mode = "none" then
-                   let chunked =
-                     chunkify_children ~chunk_size:context_chunk_size compacted
-                   in
-                   Lwt.return (chunked, `Null)
-                 else
-                   let (chunked_json, entries) =
-                     build_chunk_entries
-                       ~chunk_size:context_chunk_size
-                       ~sample_size:chunk_select_sample_size
-                       compacted
-                   in
-                   let chunk_total = List.length entries in
-                   let effective_limit = min chunk_select_limit chunk_total in
-                   let selection_fallback () =
-                     if effective_limit <= 0 then []
-                     else select_chunks_heuristic entries effective_limit
-                   in
-                   let index_json = `List (List.map chunk_entry_to_json entries) in
-                   let* selected =
-                     if effective_limit <= 0 then
-                       Lwt.return []
-                     else if chunk_select_mode = "heuristic" then
-                       Lwt.return (select_chunks_heuristic entries effective_limit)
-                     else if chunk_select_mode = "llm" then
-                       let prompt_task =
-                         match chunk_select_task with
-                         | Some t -> t
-                         | None -> "Select the most relevant chunks for high-fidelity output."
-                       in
-                       let prompt =
-                         Printf.sprintf
-                           "Task: %s\n\nChunk index (JSON):\n%s\n\nReturn JSON array of chunk_index values (max %d)."
-                           prompt_task
-                           (Yojson.Safe.pretty_to_string (`Assoc [
-                              ("chunk_total", `Int chunk_total);
-                              ("chunk_size", `Int context_chunk_size);
-                              ("chunks", index_json);
-                            ]))
-                           effective_limit
-                       in
-                      let llm_args_fields =
-                        match chunk_select_llm_args with
-                        | None -> Ok []
-                        | Some (`Assoc fields) -> Ok fields
-                        | Some _ -> Error "chunk_select_llm_args must be an object"
-                      in
-                      match llm_args_fields with
-                      | Error msg ->
-                          add_warning msg;
-                          Lwt.return (selection_fallback ())
-                      | Ok fields ->
-                          let fields = set_field "prompt" (`String prompt) fields in
-                          let fields =
-                            if has_field "response_format" fields then fields
-                            else add_if_missing "response_format" (`String "compact") fields
-                          in
-                          let fields = add_if_missing "stream" (`Bool false) fields in
-                          match Llm_provider.resolve ?provider:chunk_select_provider () with
-                          | Error msg ->
-                              add_warning msg;
-                              Lwt.return (selection_fallback ())
-                          | Ok provider ->
-                              let llm_url =
-                                Option.value chunk_select_mcp_url ~default:provider.default_url
-                              in
-                              let* llm_result =
-                                provider.call_tool ~url:llm_url ~name:chunk_select_llm_tool ~arguments:(`Assoc fields)
-                              in
-                              match llm_result with
-                              | Error err ->
-                                  add_warning err;
-                                  Lwt.return (selection_fallback ())
-                              | Ok response ->
-                                  let indices =
-                                    parse_chunk_indices ~chunk_total response.text
-                                    |> take_n effective_limit
-                                  in
-                                  if indices = [] then
-                                    Lwt.return (selection_fallback ())
-                                  else
-                                    Lwt.return indices
-                     else
-                       Lwt.return (selection_fallback ())
-                   in
-                   let selected =
-                     selected |> List.filter (fun v -> v >= 1 && v <= chunk_total)
-                   in
-                   let selected =
-                     if selected = [] then selection_fallback () else selected
-                   in
-                   let selection_meta =
-                     `Assoc [
-                       ("mode", `String chunk_select_mode);
-                       ("selected", `List (List.map (fun v -> `Int v) selected));
-                       ("chunk_total", `Int chunk_total);
-                       ("chunk_size", `Int context_chunk_size);
-                     ]
-                   in
-                   let selected_json =
-                     if selected = [] then chunked_json
-                     else select_chunked_json ~selected chunked_json
-                   in
-                   Lwt.return (selected_json, selection_meta)
-             | None ->
-                 (match dsl with
-                  | `String s ->
-                      let chunked =
-                        chunkify_text ~chunk_size:context_chunk_size s
-                      in
-                      let chunk_total =
-                        match chunked with
-                        | `Assoc fields ->
-                            (match List.assoc_opt "chunk_total" fields with
-                             | Some (`Int n) -> n
-                             | _ -> 0)
-                        | _ -> 0
-                      in
-                      let selection_meta =
-                        `Assoc [
-                          ("mode", `String "fallback_text");
-                          ("chunk_total", `Int chunk_total);
-                          ("chunk_size", `Int context_chunk_size);
-                        ]
-                      in
-                      Lwt.return (chunked, selection_meta)
-                  | _ -> Lwt.return (dsl, `Null)))
-        | _ -> Lwt.return (dsl, `Null)
-      in
-
-      let variables, variables_source =
-        if include_variables then
-          match (file_key, token) with
-          | (Some file_key, Some token) ->
-              let vars =
-                run_with_effects (fun () -> fetch_variables_cached ~file_key ~token)
+      let build_context cfg : llm_task_context Lwt.t =
+        let warnings = ref !base_warnings in
+        let add_warning msg = warnings := msg :: !warnings in
+        let dsl =
+          match (cfg.file_key, cfg.node_id, cfg.token) with
+          | (Some file_key, Some node_id, Some token) ->
+              let cache_options =
+                List.filter_map Fun.id [
+                  Option.map (Printf.sprintf "depth:%d") cfg.depth;
+                  Option.map (Printf.sprintf "geometry:%s") cfg.geometry;
+                ]
               in
-              (match vars with
-               | Ok (vars_json, source) -> (resolve_variables vars_json, source)
-               | Error err ->
-                   add_warning ("Variables error: " ^ err);
-                   (`Null, `String "error"))
-          | _ ->
-              add_warning "Missing file_key/token for variables context";
-              (`Null, `Null)
-        else
-          (`Null, `Null)
-      in
-
-      let image_fills =
-        if include_image_fills then
-          match (file_key, token) with
-          | (Some file_key, Some token) ->
-              let images =
+              let json_result =
                 run_with_effects (fun () ->
-                  match Figma_effects.Perform.get_file_images ~token ~file_key () with
-                  | Ok img_json ->
-                      (match member "images" img_json with
-                       | Some (`Assoc _ as m) -> m
-                       | _ -> `Null)
-                  | Error err -> `Assoc [("error", `String err)])
+                  match Figma_cache.get ~file_key ~node_id ~options:cache_options () with
+                  | Some json -> Ok json
+                  | None ->
+                      match Figma_effects.Perform.get_nodes ~token ~file_key ~node_ids:[node_id] ?depth:cfg.depth ?geometry:cfg.geometry () with
+                      | Ok json ->
+                          Figma_cache.set ~file_key ~node_id ~options:cache_options json;
+                          Ok json
+                      | Error err -> Error err)
               in
-              images
+              (match json_result with
+               | Error err ->
+                   add_warning ("DSL fetch error: " ^ err);
+                   `Null
+               | Ok json ->
+                   let node_data = match member "nodes" json with
+                     | Some (`Assoc nodes_map) ->
+                         (match List.assoc_opt node_id nodes_map with
+                          | Some n -> member "document" n
+                          | None -> None)
+                     | _ -> None
+                   in
+                   (match node_data with
+                    | None ->
+                        add_warning ("Node not found: " ^ node_id);
+                        `Null
+                    | Some node ->
+                        let node_str = Yojson.Safe.to_string node in
+                        let dsl_str = match process_json_string ~format:"fidelity" node_str with
+                          | Ok s -> s
+                          | Error msg -> msg
+                        in
+                        `String dsl_str))
           | _ ->
-              add_warning "Missing file_key/token for image fills context";
+              add_warning "Missing file_key/node_id/token for DSL context";
               `Null
-        else
-          `Null
-      in
-      let variables = compact_if_needed variables in
-      let image_fills = compact_if_needed image_fills in
-
-      let plugin_snapshot =
-        if include_plugin then
-          let resolve_plugin_channel () =
-            match get_string "plugin_channel_id" args with
-            | Some id -> Ok id
-            | None -> resolve_channel_id args
-          in
-          (match resolve_plugin_channel () with
-           | Error msg ->
-               add_warning ("Plugin channel error: " ^ msg);
-               `Assoc [("error", `String msg)]
-           | Ok channel_id ->
-               let use_selection =
-                 plugin_mode = "selection" || node_id = None
-               in
-               if use_selection then
-                 let payload = `Assoc [("depth", `Int plugin_depth)] in
-                 let command_id =
-                   Figma_plugin_bridge.enqueue_command ~channel_id ~name:"read_selection" ~payload
-                 in
-                 (match plugin_wait ~channel_id ~command_id ~timeout_ms:plugin_timeout_ms with
-                  | Error err ->
-                      add_warning ("Plugin selection error: " ^ err);
-                      `Assoc [("error", `String err)]
-                  | Ok result ->
-                      `Assoc [
-                        ("mode", `String "selection");
-                        ("channel_id", `String channel_id);
-                        ("command_id", `String command_id);
-                        ("ok", `Bool result.ok);
-                        ("payload", result.payload);
-                      ])
-               else
-                 match node_id with
-                 | None ->
-                     `Assoc [("error", `String "node_id required for plugin_mode=node")]
-                 | Some node_id ->
-                     let payload = `Assoc [
-                       ("node_id", `String node_id);
-                       ("depth", `Int plugin_depth);
-                       ("include_geometry", `Bool plugin_include_geometry);
-                     ] in
-                     let command_id =
-                       Figma_plugin_bridge.enqueue_command ~channel_id ~name:"get_node" ~payload
-                     in
-                     (match plugin_wait ~channel_id ~command_id ~timeout_ms:plugin_timeout_ms with
-                      | Error err ->
-                          add_warning ("Plugin node error: " ^ err);
-                          `Assoc [("error", `String err)]
-                      | Ok result ->
-                          `Assoc [
-                            ("mode", `String "node");
-                            ("channel_id", `String channel_id);
-                            ("command_id", `String command_id);
-                            ("ok", `Bool result.ok);
-                            ("payload", result.payload);
-                            ("plugin_depth", `Int plugin_depth);
-                          ]))
-        else
-          `Null
-      in
-      let plugin_snapshot = compact_if_needed plugin_snapshot in
-      let plugin_summary =
-        if include_plugin && (plugin_context_mode = "summary" || plugin_context_mode = "both") then
-          let payload =
-            match plugin_snapshot with
-            | `Assoc fields ->
-                (match List.assoc_opt "payload" fields with
-                 | Some v -> v
-                 | None -> `Null)
-            | _ -> `Null
-          in
-          summarize_plugin_payload ~sample_size:plugin_summary_sample_size payload
-        else
-          `Null
-      in
-      let plugin_snapshot =
-        if plugin_context_mode = "summary" then `Null else plugin_snapshot
-      in
-
-      let context_fields = [
-        ("task", `String task);
-        ("quality", `String quality);
-        ("file_key", (match file_key with Some v -> `String v | None -> `Null));
-        ("node_id", (match node_id with Some v -> `String v | None -> `Null));
-        ("dsl", dsl_context);
-        ("chunk_selection", chunk_selection);
-        ("variables", variables);
-        ("variables_source", variables_source);
-        ("image_fills", image_fills);
-        ("plugin_snapshot", plugin_snapshot);
-        ("plugin_summary", plugin_summary);
-      ] in
-      let context_fields =
-        if !warnings = [] then context_fields
-        else ("warnings", `List (List.map (fun s -> `String s) (List.rev !warnings))) :: context_fields
-      in
-      let context_json = `Assoc context_fields in
-      let context_str_full = Yojson.Safe.pretty_to_string context_json in
-      let normalize_max_context_chars v = if v > 0 then v else 120000 in
-      let make_prompt max_chars =
-        let max_chars = normalize_max_context_chars max_chars in
-        let (context_head, truncated) =
-          truncate_utf8 ~max_bytes:max_chars context_str_full
         in
-        let context_str =
-          if truncated then context_head ^ "\n...TRUNCATED..." else context_head
+        let dsl_json =
+          match dsl with
+          | `String s ->
+              (try Some (Yojson.Safe.from_string s)
+               with _ -> None)
+          | _ -> None
         in
-        in
-        let base =
-          Printf.sprintf "Task:\n%s\n\nContext (JSON):\n%s" task context_str
-        in
-        let prompt =
-          if truncated then
-            base ^ Printf.sprintf "\n\nNote: context truncated to %d chars." max_chars
+        let compact_if_needed json =
+          if cfg.context_strategy = "raw" then
+            json
           else
-            base
+            compact_json
+              ~depth:0
+              ~max_depth:cfg.context_max_depth
+              ~max_children:cfg.context_max_children
+              ~max_list_items:cfg.context_max_list_items
+              ~max_string:cfg.context_max_string
+              json
         in
-        (prompt, truncated, max_chars)
+        let* (dsl_context, chunk_selection) =
+          match cfg.context_strategy with
+          | "compact" ->
+              (match dsl_json with
+               | Some json -> Lwt.return (compact_if_needed json, `Null)
+               | None -> Lwt.return (dsl, `Null))
+          | "chunked" ->
+              (match dsl_json with
+               | Some json ->
+                   let compacted = compact_if_needed json in
+                   if cfg.chunk_select_mode = "none" then
+                     let chunked =
+                       chunkify_children ~chunk_size:cfg.context_chunk_size compacted
+                     in
+                     Lwt.return (chunked, `Null)
+                   else
+                     let (chunked_json, entries) =
+                       build_chunk_entries
+                         ~chunk_size:cfg.context_chunk_size
+                         ~sample_size:cfg.chunk_select_sample_size
+                         compacted
+                     in
+                     let chunk_total = List.length entries in
+                     let effective_limit = min cfg.chunk_select_limit chunk_total in
+                     let selection_fallback () =
+                       if effective_limit <= 0 then []
+                       else select_chunks_heuristic entries effective_limit
+                     in
+                     let index_json = `List (List.map chunk_entry_to_json entries) in
+                     let* selected =
+                       if effective_limit <= 0 then
+                         Lwt.return []
+                       else if cfg.chunk_select_mode = "heuristic" then
+                         Lwt.return (select_chunks_heuristic entries effective_limit)
+                       else if cfg.chunk_select_mode = "llm" then
+                         let prompt_task =
+                           match cfg.chunk_select_task with
+                           | Some t -> t
+                           | None -> "Select the most relevant chunks for high-fidelity output."
+                         in
+                         let prompt =
+                           Printf.sprintf
+                             "Task: %s\n\nChunk index (JSON):\n%s\n\nReturn JSON array of chunk_index values (max %d)."
+                             prompt_task
+                             (Yojson.Safe.pretty_to_string (`Assoc [
+                                ("chunk_total", `Int chunk_total);
+                                ("chunk_size", `Int cfg.context_chunk_size);
+                                ("chunks", index_json);
+                              ]))
+                             effective_limit
+                         in
+                        let llm_args_fields =
+                          match cfg.chunk_select_llm_args with
+                          | None -> Ok []
+                          | Some (`Assoc fields) -> Ok fields
+                          | Some _ -> Error "chunk_select_llm_args must be an object"
+                        in
+                        match llm_args_fields with
+                        | Error msg ->
+                            add_warning msg;
+                            Lwt.return (selection_fallback ())
+                        | Ok fields ->
+                            let fields = set_field "prompt" (`String prompt) fields in
+                            let fields =
+                              if has_field "response_format" fields then fields
+                              else add_if_missing "response_format" (`String "compact") fields
+                            in
+                            let fields = add_if_missing "stream" (`Bool false) fields in
+                            match Llm_provider.resolve ?provider:cfg.chunk_select_provider () with
+                            | Error msg ->
+                                add_warning msg;
+                                Lwt.return (selection_fallback ())
+                            | Ok provider ->
+                                let llm_url =
+                                  Option.value cfg.chunk_select_mcp_url ~default:provider.default_url
+                                in
+                                let* llm_result =
+                                  call_llm_tool ~provider ~url:llm_url ~name:cfg.chunk_select_llm_tool ~arguments:(`Assoc fields)
+                                in
+                                match llm_result with
+                                | Error err ->
+                                    add_warning err;
+                                    Lwt.return (selection_fallback ())
+                                | Ok response ->
+                                    let indices =
+                                      parse_chunk_indices ~chunk_total response.text
+                                      |> take_n effective_limit
+                                    in
+                                    if indices = [] then
+                                      Lwt.return (selection_fallback ())
+                                    else
+                                      Lwt.return indices
+                       else
+                         Lwt.return (selection_fallback ())
+                     in
+                     let selected =
+                       selected |> List.filter (fun v -> v >= 1 && v <= chunk_total)
+                     in
+                     let selected =
+                       if selected = [] then selection_fallback () else selected
+                     in
+                     let selection_meta =
+                       `Assoc [
+                         ("mode", `String cfg.chunk_select_mode);
+                         ("selected", `List (List.map (fun v -> `Int v) selected));
+                         ("chunk_total", `Int chunk_total);
+                         ("chunk_size", `Int cfg.context_chunk_size);
+                       ]
+                     in
+                     let selected_json =
+                       if selected = [] then chunked_json
+                       else select_chunked_json ~selected chunked_json
+                     in
+                     Lwt.return (selected_json, selection_meta)
+               | None ->
+                   (match dsl with
+                    | `String s ->
+                        let chunked =
+                          chunkify_text ~chunk_size:cfg.context_chunk_size s
+                        in
+                        let chunk_total =
+                          match chunked with
+                          | `Assoc fields ->
+                              (match List.assoc_opt "chunk_total" fields with
+                               | Some (`Int n) -> n
+                               | _ -> 0)
+                          | _ -> 0
+                        in
+                        let selection_meta =
+                          `Assoc [
+                            ("mode", `String "fallback_text");
+                            ("chunk_total", `Int chunk_total);
+                            ("chunk_size", `Int cfg.context_chunk_size);
+                          ]
+                        in
+                        Lwt.return (chunked, selection_meta)
+                    | _ -> Lwt.return (dsl, `Null)))
+          | _ -> Lwt.return (dsl, `Null)
+        in
+
+        let variables, variables_source =
+          if cfg.include_variables then
+            match (cfg.file_key, cfg.token) with
+            | (Some file_key, Some token) ->
+                let vars =
+                  run_with_effects (fun () -> fetch_variables_cached ~file_key ~token)
+                in
+                (match vars with
+                 | Ok (vars_json, source) -> (resolve_variables vars_json, source)
+                 | Error err ->
+                     add_warning ("Variables error: " ^ err);
+                     (`Null, `String "error"))
+            | _ ->
+                add_warning "Missing file_key/token for variables context";
+                (`Null, `Null)
+          else
+            (`Null, `Null)
+        in
+
+        let image_fills =
+          if cfg.include_image_fills then
+            match (cfg.file_key, cfg.token) with
+            | (Some file_key, Some token) ->
+                let images =
+                  run_with_effects (fun () ->
+                    match Figma_effects.Perform.get_file_images ~token ~file_key () with
+                    | Ok img_json ->
+                        (match member "images" img_json with
+                         | Some (`Assoc _ as m) -> m
+                         | _ -> `Null)
+                    | Error err -> `Assoc [("error", `String err)])
+                in
+                images
+            | _ ->
+                add_warning "Missing file_key/token for image fills context";
+                `Null
+          else
+            `Null
+        in
+        let variables = compact_if_needed variables in
+        let image_fills = compact_if_needed image_fills in
+
+        let plugin_snapshot_raw =
+          if cfg.include_plugin then
+            let resolve_plugin_channel () =
+              match cfg.plugin_channel_id with
+              | Some id -> Ok id
+              | None ->
+                  (match Figma_plugin_bridge.get_default_channel () with
+                   | Some id -> Ok id
+                   | None -> Error "Missing plugin_channel_id. Run figma_plugin_connect or figma_plugin_use_channel.")
+            in
+            (match resolve_plugin_channel () with
+             | Error msg ->
+                 add_warning ("Plugin channel error: " ^ msg);
+                 `Assoc [("error", `String msg)]
+             | Ok channel_id ->
+                 let use_selection =
+                   cfg.plugin_mode = "selection" || cfg.node_id = None
+                 in
+                 if use_selection then
+                   let payload = `Assoc [("depth", `Int cfg.plugin_depth)] in
+                   let command_id =
+                     Figma_plugin_bridge.enqueue_command ~channel_id ~name:"read_selection" ~payload
+                   in
+                   (match plugin_wait ~channel_id ~command_id ~timeout_ms:cfg.plugin_timeout_ms with
+                    | Error err ->
+                        add_warning ("Plugin selection error: " ^ err);
+                        `Assoc [("error", `String err)]
+                    | Ok result ->
+                        `Assoc [
+                          ("mode", `String "selection");
+                          ("channel_id", `String channel_id);
+                          ("command_id", `String command_id);
+                          ("ok", `Bool result.ok);
+                          ("payload", result.payload);
+                        ])
+                 else
+                   match cfg.node_id with
+                   | None ->
+                       `Assoc [("error", `String "node_id required for plugin_mode=node")]
+                   | Some node_id ->
+                       let payload = `Assoc [
+                         ("node_id", `String node_id);
+                         ("depth", `Int cfg.plugin_depth);
+                         ("include_geometry", `Bool cfg.plugin_include_geometry);
+                       ] in
+                       let command_id =
+                         Figma_plugin_bridge.enqueue_command ~channel_id ~name:"get_node" ~payload
+                       in
+                       (match plugin_wait ~channel_id ~command_id ~timeout_ms:cfg.plugin_timeout_ms with
+                        | Error err ->
+                            add_warning ("Plugin node error: " ^ err);
+                            `Assoc [("error", `String err)]
+                        | Ok result ->
+                            `Assoc [
+                              ("mode", `String "node");
+                              ("channel_id", `String channel_id);
+                              ("command_id", `String command_id);
+                              ("ok", `Bool result.ok);
+                              ("payload", result.payload);
+                              ("plugin_depth", `Int cfg.plugin_depth);
+                            ]))
+          else
+            `Null
+        in
+        let plugin_snapshot = compact_if_needed plugin_snapshot_raw in
+        let plugin_summary =
+          if cfg.include_plugin && (cfg.plugin_context_mode = "summary" || cfg.plugin_context_mode = "both") then
+            let payload =
+              match plugin_snapshot_raw with
+              | `Assoc fields ->
+                  (match List.assoc_opt "payload" fields with
+                   | Some v -> v
+                   | None -> `Null)
+              | _ -> `Null
+            in
+            summarize_plugin_payload ~sample_size:cfg.plugin_summary_sample_size payload
+          else
+            `Null
+        in
+        let plugin_snapshot =
+          if cfg.plugin_context_mode = "summary" then `Null else plugin_snapshot
+        in
+
+        let context_fields = [
+          ("task", `String task);
+          ("quality", `String quality);
+          ("file_key", (match cfg.file_key with Some v -> `String v | None -> `Null));
+          ("node_id", (match cfg.node_id with Some v -> `String v | None -> `Null));
+          ("dsl", dsl_context);
+          ("chunk_selection", chunk_selection);
+          ("variables", variables);
+          ("variables_source", variables_source);
+          ("image_fills", image_fills);
+          ("plugin_snapshot", plugin_snapshot);
+          ("plugin_summary", plugin_summary);
+        ] in
+        let context_fields =
+          if !warnings = [] then context_fields
+          else ("warnings", `List (List.map (fun s -> `String s) (List.rev !warnings))) :: context_fields
+        in
+        let context_json = `Assoc context_fields in
+        let context_str_full = Yojson.Safe.pretty_to_string context_json in
+        Lwt.return {
+          dsl_context;
+          chunk_selection;
+          variables;
+          variables_source;
+          image_fills;
+          plugin_snapshot_raw;
+          plugin_snapshot;
+          plugin_summary;
+          warnings = List.rev !warnings;
+          context_json;
+          context_str_full;
+        }
+      in
+
+      let evaluate_preflight cfg ctx =
+        let normalize_max_context_chars v = if v > 0 then v else 120000 in
+        let max_chars = normalize_max_context_chars cfg.max_context_chars in
+        let context_size_bytes = String.length ctx.context_str_full in
+        let truncation_ratio =
+          if context_size_bytes <= max_chars then 0.0
+          else 1.0 -. (float_of_int max_chars /. float_of_int context_size_bytes)
+        in
+        let dsl_present =
+          match ctx.dsl_context with
+          | `Null -> false
+          | `String s -> String.trim s <> ""
+          | _ -> true
+        in
+        let (chunk_selected_count, chunk_total) =
+          parse_chunk_selection_info ctx.chunk_selection
+        in
+        let chunk_ready =
+          if cfg.context_strategy <> "chunked" then true
+          else if cfg.chunk_select_mode = "none" then true
+          else chunk_selected_count > 0
+        in
+        let issues = ref [] in
+        let add_issue issue = issues := issue :: !issues in
+        let () =
+          if not dsl_present then
+            add_issue (make_issue "dsl_missing" "DSL 컨텍스트가 비어있습니다."
+              ~suggestion:"file_key/node_id/token 또는 url을 확인하세요.")
+        in
+        let () =
+          if not chunk_ready then
+            add_issue (make_issue "chunk_selection_empty" "청크 선택 결과가 없습니다."
+              ~suggestion:"chunk_select_mode=heuristic 또는 llm으로 재시도하세요.")
+        in
+        let () =
+          if cfg.preflight_require_plugin && not (plugin_ok ctx.plugin_snapshot_raw) then
+            add_issue (make_issue "plugin_missing" "플러그인 스냅샷이 준비되지 않았습니다."
+              ~suggestion:"plugin_channel_id/timeout/depth를 확인하세요.")
+        in
+        let () =
+          if truncation_ratio > cfg.preflight_max_truncation then
+            add_issue (make_issue "context_truncated" "컨텍스트가 과도하게 잘렸습니다."
+              ~suggestion:"chunked 전략/청크 선택을 사용하세요.")
+        in
+        let issues = List.rev !issues in
+        let ready = issues = [] in
+        let preflight_json =
+          `Assoc [
+            ("ready", `Bool ready);
+            ("context_size_bytes", `Int context_size_bytes);
+            ("max_context_chars", `Int max_chars);
+            ("truncation_ratio", `Float truncation_ratio);
+            ("dsl_present", `Bool dsl_present);
+            ("plugin_ok", `Bool (plugin_ok ctx.plugin_snapshot_raw));
+            ("chunk_selected_count", `Int chunk_selected_count);
+            ("chunk_total", `Int chunk_total);
+            ("issues", `List (List.map issue_to_json issues));
+            ("warnings", `List (List.map (fun s -> `String s) ctx.warnings));
+          ]
+        in
+        (ready, preflight_json, issues, truncation_ratio, context_size_bytes, chunk_selected_count, chunk_total, dsl_present, plugin_ok ctx.plugin_snapshot_raw)
+      in
+
+      let apply_auto_fix cfg issues =
+        let cfg_ref = ref cfg in
+        let actions = ref [] in
+        let changed = ref false in
+        let add_action msg = actions := msg :: !actions in
+        let update_config action f =
+          let next = f !cfg_ref in
+          if next <> !cfg_ref then begin
+            cfg_ref := next;
+            add_action action;
+            changed := true;
+          end
+        in
+        let has_issue code =
+          List.exists (fun issue -> issue.code = code) issues
+        in
+        if has_issue "context_truncated" then begin
+          update_config "auto_fix:chunked_context" (fun cfg ->
+            let cfg =
+              if cfg.context_strategy <> "chunked" then
+                { cfg with context_strategy = "chunked" }
+              else
+                cfg
+            in
+            let cfg =
+              if cfg.chunk_select_mode = "none" then
+                { cfg with chunk_select_mode = "heuristic" }
+              else
+                cfg
+            in
+            if cfg.chunk_select_limit <= 0 then
+              { cfg with chunk_select_limit = 4 }
+            else
+              cfg)
+        end;
+        if has_issue "chunk_selection_empty" then begin
+          update_config "auto_fix:chunk_selection" (fun cfg ->
+            let cfg =
+              if cfg.chunk_select_mode = "none" then
+                { cfg with chunk_select_mode = "heuristic" }
+              else
+                cfg
+            in
+            if cfg.chunk_select_limit <= 0 then
+              { cfg with chunk_select_limit = 4 }
+            else
+              cfg)
+        end;
+        if has_issue "plugin_missing" then begin
+          update_config "auto_fix:plugin_retry" (fun cfg ->
+            let cfg =
+              if not cfg.include_plugin then
+                { cfg with include_plugin = true }
+              else
+                cfg
+            in
+            let cfg =
+              if cfg.plugin_depth < 1 then
+                { cfg with plugin_depth = 1 }
+              else
+                cfg
+            in
+            if cfg.plugin_timeout_ms < 30000 then
+              { cfg with plugin_timeout_ms = 30000 }
+            else
+              cfg)
+        end;
+        (!cfg_ref, List.rev !actions, !changed)
+      in
+
+      let select_llm_tool cfg preflight_json =
+        let context_size_bytes =
+          match preflight_json with
+          | `Assoc fields -> (
+              match List.assoc_opt "context_size_bytes" fields with
+              | Some (`Int n) -> n
+              | _ -> 0)
+          | _ -> 0
+        in
+        let heuristic_tool, heuristic_reason =
+          if cfg.quality = "fast" then
+            ("gemini", "quality=fast")
+          else if cfg.include_plugin || cfg.include_image_fills || context_size_bytes > 400000 then
+            ("gemini", "large_context_or_plugin")
+          else
+            ("codex", "default")
+        in
+        if cfg.llm_tool_raw <> "auto" then
+          Lwt.return { tool = cfg.llm_tool_raw; mode = "fixed"; reason = None }
+        else if cfg.llm_tool_selector_mode = "llm" then
+          let selector_tool =
+            if cfg.llm_tool_selector_tool = "auto" then "gemini" else cfg.llm_tool_selector_tool
+          in
+          let prompt_task =
+            match cfg.llm_tool_selector_task with
+            | Some t -> t
+            | None -> "Select the best LLM tool for this task. Respond with JSON: {\"tool\":\"codex|claude-cli|gemini|ollama\",\"reason\":\"...\"}."
+          in
+          let prompt =
+            Printf.sprintf
+              "Task: %s\n\nPreflight (JSON):\n%s"
+              prompt_task
+              (Yojson.Safe.pretty_to_string preflight_json)
+          in
+          let selector_args_fields =
+            match cfg.llm_tool_selector_args with
+            | None -> Ok []
+            | Some (`Assoc fields) -> Ok fields
+            | Some _ -> Error "llm_tool_selector_args must be an object"
+          in
+          match selector_args_fields with
+          | Error _ ->
+              Lwt.return { tool = heuristic_tool; mode = "heuristic"; reason = Some heuristic_reason }
+          | Ok fields ->
+              let fields = set_field "prompt" (`String prompt) fields in
+              let fields =
+                if has_field "response_format" fields then fields
+                else add_if_missing "response_format" (`String "compact") fields
+              in
+              let fields = add_if_missing "stream" (`Bool false) fields in
+              match Llm_provider.resolve ?provider:cfg.llm_tool_selector_provider () with
+              | Error _ ->
+                  Lwt.return { tool = heuristic_tool; mode = "heuristic"; reason = Some heuristic_reason }
+              | Ok provider ->
+                  let llm_url =
+                    Option.value cfg.llm_tool_selector_mcp_url ~default:provider.default_url
+                  in
+                  let* llm_result =
+                    call_llm_tool ~provider ~url:llm_url ~name:selector_tool ~arguments:(`Assoc fields)
+                  in
+                  (match llm_result with
+                   | Error _ ->
+                       Lwt.return { tool = heuristic_tool; mode = "heuristic"; reason = Some heuristic_reason }
+                   | Ok response ->
+                       let choice = parse_tool_choice response.text in
+                       (match choice with
+                        | Some tool ->
+                            Lwt.return { tool; mode = "llm"; reason = Some (strip_llm_prefix response.text |> String.trim) }
+                        | None ->
+                            Lwt.return { tool = heuristic_tool; mode = "heuristic"; reason = Some heuristic_reason }))
+        else
+          Lwt.return { tool = heuristic_tool; mode = "heuristic"; reason = Some heuristic_reason }
       in
 
       let llm_args_fields =
@@ -4940,41 +5377,71 @@ let handle_llm_task args : (Yojson.Safe.t, string) result Lwt.t =
         | Some (`Assoc fields) -> Ok fields
         | Some _ -> Error "llm_args must be an object"
       in
-      (match llm_args_fields with
-       | Error msg -> Lwt.return (Error msg)
-       | Ok fields ->
-           let base_fields =
-             let fields =
-               if quality = "fast" then add_if_missing "budget_mode" (`Bool true) fields
-               else fields
-             in
-             let fields =
-               if has_field "response_format" fields then fields
-               else if quality = "fast" then add_if_missing "response_format" (`String "compact") fields
-               else add_if_missing "response_format" (`String "verbose") fields
-             in
-             add_if_missing "stream" (`Bool false) fields
-           in
-           (match Llm_provider.resolve ?provider:provider_name () with
+      let base_fields_of llm_args_fields =
+        let fields =
+          if quality = "fast" then add_if_missing "budget_mode" (`Bool true) llm_args_fields
+          else llm_args_fields
+        in
+        let fields =
+          if has_field "response_format" fields then fields
+          else if quality = "fast" then add_if_missing "response_format" (`String "compact") fields
+          else add_if_missing "response_format" (`String "verbose") fields
+        in
+        add_if_missing "stream" (`Bool false) fields
+      in
+
+      let run_llm_with_critic cfg ctx tool_selection preflight_json auto_fix_actions =
+        match llm_args_fields with
+        | Error msg -> Lwt.return (Error msg)
+        | Ok fields ->
+            let base_fields = base_fields_of fields in
+            match Llm_provider.resolve ?provider:cfg.provider_name () with
             | Error msg -> Lwt.return (Error msg)
             | Ok provider ->
                 let llm_url =
                   get_string_any ["mcp_url"; "llm_url"] args
                   |> Option.value ~default:provider.default_url
                 in
+                let normalize_max_context_chars v = if v > 0 then v else 120000 in
+                let make_prompt max_chars =
+                  let max_chars = normalize_max_context_chars max_chars in
+                  let (context_head, truncated) =
+                    truncate_utf8 ~max_bytes:max_chars ctx.context_str_full
+                  in
+                  let context_str =
+                    if truncated then context_head ^ "
+...TRUNCATED..." else context_head
+                  in
+                  let base =
+                    Printf.sprintf "Task:
+%s
+
+Context (JSON):
+%s" task context_str
+                  in
+                  let prompt =
+                    if truncated then
+                      base ^ Printf.sprintf "
+
+Note: context truncated to %d chars." max_chars
+                    else
+                      base
+                  in
+                  (prompt, truncated, max_chars)
+                in
                 let rec call_llm attempt max_chars =
                   let (prompt, truncated, max_chars) = make_prompt max_chars in
                   let fields = set_field "prompt" (`String prompt) base_fields in
                   let arguments = `Assoc fields in
-                  let* llm_result = provider.call_tool ~url:llm_url ~name:llm_tool ~arguments in
+                  let* llm_result = call_llm_tool ~provider ~url:llm_url ~name:tool_selection.tool ~arguments in
                   match llm_result with
                   | Error err -> Lwt.return (Error err)
                   | Ok response ->
-                      if response.is_error && retry_on_llm_error && attempt < max_retries then
+                      if response.is_error && cfg.retry_on_llm_error && attempt < cfg.max_retries then
                         let scaled =
-                          int_of_float (float_of_int max_chars *. retry_context_scale)
+                          int_of_float (float_of_int max_chars *. cfg.retry_context_scale)
                         in
-                        let next_max = max min_context_chars scaled in
+                        let next_max = max cfg.min_context_chars scaled in
                         if next_max < max_chars then
                           call_llm (attempt + 1) next_max
                         else
@@ -4982,32 +5449,243 @@ let handle_llm_task args : (Yojson.Safe.t, string) result Lwt.t =
                       else
                         Lwt.return (Ok (response, truncated, attempt + 1, max_chars))
                 in
-                let* llm_result = call_llm 0 max_context_chars in
-                (match llm_result with
-                 | Error err -> Lwt.return (Error err)
-                 | Ok (response, truncated, attempts, final_max) ->
-                     if return_metadata then
-                       let payload = `Assoc [
-                         ("provider", `String provider.id);
-                         ("llm_tool", `String llm_tool);
-                         ("llm_url", `String llm_url);
-                         ("quality", `String quality);
-                         ("context_truncated", `Bool truncated);
-                         ("context_max_chars", `Int final_max);
-                         ("attempts", `Int attempts);
-                         ("retry_on_llm_error", `Bool retry_on_llm_error);
-                         ("max_retries", `Int max_retries);
-                         ("is_error", `Bool response.is_error);
-                         ("response_text", `String response.text);
-                         ("raw", response.raw);
-                       ] in
-                       Lwt.return (Ok payload)
-                     else
-                       let prefix = Printf.sprintf "llm_task_%s" llm_tool in
-                       let output =
-                         if response.is_error then "LLM error:\n" ^ response.text else response.text
-                       in
-                       Lwt.return (Ok (Large_response.wrap_string_result ~prefix ~format:"text" output)))))
+                let rec run_with_critic attempt max_chars =
+                  let* llm_result = call_llm 0 max_chars in
+                  match llm_result with
+                  | Error err -> Lwt.return (Error err)
+                  | Ok (response, truncated, attempts, final_max) ->
+                      if not cfg.critic_enabled then
+                        Lwt.return (Ok (response, truncated, attempts, final_max, None))
+                      else
+                        let response_preview =
+                          let (head, _) = truncate_utf8 ~max_bytes:4000 response.text in
+                          head
+                        in
+                        let critic_prompt_task =
+                          match cfg.critic_task with
+                          | Some t -> t
+                          | None -> "Evaluate output fidelity to the provided Figma context. Return JSON: {\"score\":0-1,\"decision\":\"accept|retry\",\"notes\":\"...\"}."
+                        in
+                        let critic_prompt =
+                          Printf.sprintf
+                            "Task: %s
+
+Preflight (JSON):
+%s
+
+Output:
+%s"
+                            critic_prompt_task
+                            (Yojson.Safe.pretty_to_string preflight_json)
+                            response_preview
+                        in
+                        let critic_args_fields =
+                          match cfg.critic_args with
+                          | None -> Ok []
+                          | Some (`Assoc fields) -> Ok fields
+                          | Some _ -> Error "critic_args must be an object"
+                        in
+                        match critic_args_fields with
+                        | Error _ ->
+                            Lwt.return (Ok (response, truncated, attempts, final_max, None))
+                        | Ok fields ->
+                            let fields = set_field "prompt" (`String critic_prompt) fields in
+                            let fields =
+                              if has_field "response_format" fields then fields
+                              else add_if_missing "response_format" (`String "compact") fields
+                            in
+                            let fields = add_if_missing "stream" (`Bool false) fields in
+                            match Llm_provider.resolve ?provider:cfg.critic_provider () with
+                            | Error _ ->
+                                Lwt.return (Ok (response, truncated, attempts, final_max, None))
+                            | Ok critic_provider ->
+                                let critic_url =
+                                  Option.value cfg.critic_mcp_url ~default:critic_provider.default_url
+                                in
+                                let* critic_result =
+                                  call_llm_tool ~provider:critic_provider ~url:critic_url ~name:cfg.critic_tool ~arguments:(`Assoc fields)
+                                in
+                                (match critic_result with
+                                 | Error _ ->
+                                     Lwt.return (Ok (response, truncated, attempts, final_max, None))
+                                 | Ok critic_response ->
+                                     let critic_text = strip_llm_prefix critic_response.text |> String.trim in
+                                     let critic_json =
+                                       try Some (Yojson.Safe.from_string critic_text)
+                                       with _ -> None
+                                     in
+                                     let score, decision =
+                                       match critic_json with
+                                       | Some (`Assoc fields) ->
+                                           let score =
+                                             match List.assoc_opt "score" fields with
+                                             | Some (`Float f) -> f
+                                             | Some (`Int i) -> float_of_int i
+                                             | _ -> 1.0
+                                           in
+                                           let decision =
+                                             match List.assoc_opt "decision" fields with
+                                             | Some (`String s) -> String.lowercase_ascii s
+                                             | _ -> "accept"
+                                           in
+                                           (score, decision)
+                                       | _ -> (1.0, "accept")
+                                     in
+                                     if decision = "retry" && score < cfg.critic_min_score && attempt < cfg.critic_max_retries then
+                                       let scaled =
+                                         int_of_float (float_of_int final_max *. cfg.critic_retry_context_scale)
+                                       in
+                                       let next_max = max cfg.min_context_chars scaled in
+                                       if next_max < final_max then
+                                         run_with_critic (attempt + 1) next_max
+                                       else
+                                         Lwt.return (Ok (response, truncated, attempts, final_max, Some (critic_text, score, decision)))
+                                     else
+                                       Lwt.return (Ok (response, truncated, attempts, final_max, Some (critic_text, score, decision))))
+                in
+                let* llm_result = run_with_critic 0 cfg.max_context_chars in
+                match llm_result with
+                | Error err -> Lwt.return (Error err)
+                | Ok (response, truncated, attempts, final_max, critic_result) ->
+                    if cfg.return_metadata then
+                      let payload = `Assoc [
+                        ("provider", `String provider.id);
+                        ("llm_tool", `String tool_selection.tool);
+                        ("llm_url", `String llm_url);
+                        ("quality", `String cfg.quality);
+                        ("context_truncated", `Bool truncated);
+                        ("context_max_chars", `Int final_max);
+                        ("attempts", `Int attempts);
+                        ("retry_on_llm_error", `Bool cfg.retry_on_llm_error);
+                        ("max_retries", `Int cfg.max_retries);
+                        ("is_error", `Bool response.is_error);
+                        ("response_text", `String response.text);
+                        ("raw", response.raw);
+                        ("preflight", preflight_json);
+                        ("tool_selection", `Assoc [
+                            ("tool", `String tool_selection.tool);
+                            ("mode", `String tool_selection.mode);
+                            ("reason", (match tool_selection.reason with Some r -> `String r | None -> `Null));
+                          ]);
+                        ("auto_fix_actions", `List (List.map (fun s -> `String s) auto_fix_actions));
+                        ("critic", (match critic_result with
+                          | None -> `Null
+                          | Some (text, score, decision) ->
+                              `Assoc [
+                                ("score", `Float score);
+                                ("decision", `String decision);
+                                ("raw", `String text);
+                              ]));
+                      ] in
+                      Lwt.return (Ok payload)
+                    else
+                      let prefix = Printf.sprintf "llm_task_%s" tool_selection.tool in
+                      let output =
+                        if response.is_error then "LLM error:
+" ^ response.text else response.text
+                      in
+                      Lwt.return (Ok (Large_response.wrap_string_result ~prefix ~format:"text" output))
+      in
+
+      let cfg0 = {
+        quality;
+        provider_name;
+        llm_tool_raw;
+        llm_tool_selector_mode;
+        llm_tool_selector_tool;
+        llm_tool_selector_provider;
+        llm_tool_selector_args;
+        llm_tool_selector_task;
+        llm_tool_selector_mcp_url;
+        llm_call_policy;
+        llm_dry_run;
+        preflight_max_truncation;
+        preflight_require_plugin;
+        auto_fix_enabled;
+        auto_fix_max_attempts;
+        critic_enabled;
+        critic_tool;
+        critic_provider;
+        critic_args;
+        critic_task;
+        critic_mcp_url;
+        critic_min_score;
+        critic_max_retries;
+        critic_retry_context_scale;
+        file_key;
+        node_id;
+        token;
+        depth;
+        geometry;
+        include_variables;
+        include_image_fills;
+        include_plugin;
+        auto_plugin;
+        plugin_context_mode;
+        plugin_summary_sample_size;
+        plugin_depth;
+        plugin_include_geometry;
+        plugin_timeout_ms;
+        plugin_mode;
+        plugin_channel_id = get_string "plugin_channel_id" args;
+        context_strategy;
+        context_max_depth;
+        context_max_children;
+        context_max_list_items;
+        context_max_string;
+        context_chunk_size;
+        chunk_select_mode;
+        chunk_select_limit;
+        chunk_select_sample_size;
+        chunk_select_task;
+        chunk_select_provider;
+        chunk_select_llm_tool;
+        chunk_select_llm_args;
+        chunk_select_mcp_url;
+        max_context_chars;
+        retry_on_llm_error;
+        max_retries;
+        min_context_chars;
+        retry_context_scale;
+        return_metadata;
+      } in
+
+      let rec run_attempt attempt cfg =
+        let* ctx = build_context cfg in
+        let (ready, preflight_json, issues, _ratio, _size, _sel_count, _chunk_total, _dsl_present, _plugin_ok) =
+          evaluate_preflight cfg ctx
+        in
+        let make_preflight_payload actions =
+          `Assoc [
+            ("preflight", preflight_json);
+            ("llm_call_policy", `String cfg.llm_call_policy);
+            ("llm_dry_run", `Bool cfg.llm_dry_run);
+            ("auto_fix_attempt", `Int attempt);
+            ("auto_fix_actions", `List (List.map (fun s -> `String s) actions));
+          ]
+        in
+        if cfg.llm_dry_run || cfg.llm_call_policy = "skip" then
+          Lwt.return (Ok (Large_response.wrap_json_result ~prefix:"llm_task_preflight" ~format:"json" (make_preflight_payload [])))
+        else if not ready then
+          if cfg.auto_fix_enabled && attempt < cfg.auto_fix_max_attempts then
+            let (next_cfg, actions, changed) = apply_auto_fix cfg issues in
+            if changed then
+              run_attempt (attempt + 1) next_cfg
+            else if cfg.llm_call_policy = "force" then
+              let* tool_selection = select_llm_tool cfg preflight_json in
+              run_llm_with_critic cfg ctx tool_selection preflight_json actions
+            else
+              Lwt.return (Ok (Large_response.wrap_json_result ~prefix:"llm_task_preflight" ~format:"json" (make_preflight_payload actions)))
+          else if cfg.llm_call_policy = "force" then
+            let* tool_selection = select_llm_tool cfg preflight_json in
+            run_llm_with_critic cfg ctx tool_selection preflight_json []
+          else
+            Lwt.return (Ok (Large_response.wrap_json_result ~prefix:"llm_task_preflight" ~format:"json" (make_preflight_payload [])))
+        else
+          let* tool_selection = select_llm_tool cfg preflight_json in
+          run_llm_with_critic cfg ctx tool_selection preflight_json []
+      in
+      run_attempt 0 cfg0
 
 (** ============== Phase 1: 탐색 도구 핸들러 ============== *)
 
