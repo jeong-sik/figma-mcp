@@ -107,7 +107,7 @@ let post_json ~url payload : (Yojson.Safe.t, string) result Lwt.t =
         let body_str = snd result in
 
         if code = 429 || (code >= 500 && code < 600) then
-          Lwt.fail (LlmRetryableError (Printf.sprintf "HTTP %d: %s" code body_str))
+          Lwt.return (Result.Error (Printf.sprintf "Retryable HTTP %d: %s" code body_str))
         else if code < 200 || code >= 300 then
           Lwt.return (Result.Error (Printf.sprintf "LLM MCP HTTP %d: %s" code body_str))
         else
@@ -165,8 +165,8 @@ let post_json ~url payload : (Yojson.Safe.t, string) result Lwt.t =
             | Some json -> Lwt.return (Result.Ok json)
             | None -> Lwt.return (Result.Error "LLM MCP JSON parse error: invalid JSON"))
       (function
-        | Lwt_unix.Timeout -> Lwt.fail (LlmRetryableError "Timeout")
-        | LlmRetryableError msg -> Lwt.fail (LlmRetryableError msg)
+        | Lwt_unix.Timeout -> Lwt.return (Result.Error "Timeout")
+        | LlmRetryableError msg -> Lwt.return (Result.Error msg)
         | exn -> Lwt.return (Result.Error (Printexc.to_string exn)))
   in
 
