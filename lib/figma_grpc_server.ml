@@ -96,7 +96,7 @@ module Streamer = struct
         ~node_id ~node_name ~depth ~parent_id ~child_count ~dsl
         ~node_index:!index ~total_nodes:total
       in
-      Eio.Stream.add stream proto_bytes;
+      Grpc_eio.Stream.add stream proto_bytes;
       incr index;
 
       (* Add children to queue *)
@@ -255,7 +255,7 @@ module Splitter = struct
         ~sequence:!seq ~total_chunks:total ~node_id
         ~chunk:(Proto.Style style_chunk)
       in
-      Eio.Stream.add stream payload;
+      Grpc_eio.Stream.add stream payload;
       incr seq;
     end;
 
@@ -265,7 +265,7 @@ module Splitter = struct
         ~sequence:!seq ~total_chunks:total ~node_id
         ~chunk:(Proto.Layout layout_chunk)
       in
-      Eio.Stream.add stream payload;
+      Grpc_eio.Stream.add stream payload;
       incr seq;
     end;
 
@@ -275,7 +275,7 @@ module Splitter = struct
         ~sequence:!seq ~total_chunks:total ~node_id
         ~chunk:(Proto.Content content_chunk)
       in
-      Eio.Stream.add stream payload;
+      Grpc_eio.Stream.add stream payload;
       incr seq;
     end
 
@@ -343,6 +343,10 @@ module Handlers = struct
     match Sys.getenv_opt name with
     | Some raw -> (match int_of_string_opt raw with Some v -> v | None -> default)
     | None -> default
+
+  let close_stream stream =
+    Grpc_eio.Stream.close stream;
+    stream
 
   let extract_node_document node_id json =
     match json with
@@ -532,7 +536,7 @@ module Handlers = struct
 
   (** GetNodeStream: Stream nodes progressively *)
   let get_node_stream request_bytes =
-    let stream = Eio.Stream.create 64 in
+    let stream = Grpc_eio.Stream.create 64 in
 
     let req = parse_node_request request_bytes in
 
@@ -610,7 +614,7 @@ module Handlers = struct
                        ~child_count ~dsl
                        ~node_index:!node_index ~total_nodes
                    in
-                   Eio.Stream.add stream payload;
+                   Grpc_eio.Stream.add stream payload;
                    incr node_index;
                    if depth < max_depth then
                      List.iter (fun child_id ->
@@ -624,12 +628,12 @@ module Handlers = struct
                        ~node_id:current_id ~node_name:"" ~depth ~parent_id
                        ~child_count:0 ~dsl:("{\"error\":\"" ^ error_msg ^ "\"}")
                        ~node_index:!node_index ~total_nodes
-                   in
-                   Eio.Stream.add stream payload;
-                   incr node_index)
+                  in
+                  Grpc_eio.Stream.add stream payload;
+                  incr node_index)
             end
           done;
-          stream
+          close_stream stream
         end else begin
           eprintf "[gRPC] GetNodeStream file_key=%s node_id=%s token_len=%d\n%!"
             file_key node_id (String.length token);
@@ -653,8 +657,8 @@ module Handlers = struct
                    ~child_count:0 ~dsl:("{\"error\":\"" ^ error_msg ^ "\"}")
                    ~node_index:0 ~total_nodes:1
                in
-               Eio.Stream.add stream payload);
-          stream
+               Grpc_eio.Stream.add stream payload);
+          close_stream stream
         end
     | _ ->
         let payload =
@@ -663,8 +667,8 @@ module Handlers = struct
             ~child_count:0 ~dsl:"{\"error\":\"Missing required parameters\"}"
             ~node_index:0 ~total_nodes:1
         in
-        Eio.Stream.add stream payload;
-        stream
+        Grpc_eio.Stream.add stream payload;
+        close_stream stream
 
   (** GetFileMeta: Unary call for file metadata *)
   let get_file_meta request_bytes =
@@ -703,7 +707,7 @@ module Handlers = struct
 
   (** FidelityLoop: Stream progressive depth increases *)
   let fidelity_loop request_bytes =
-    let stream = Eio.Stream.create 16 in
+    let stream = Grpc_eio.Stream.create 16 in
     let req = Proto.decode_fidelity_loop_request request_bytes in
 
     match (req.file_key, req.node_id, req.token) with
@@ -745,7 +749,7 @@ module Handlers = struct
                    compressed_size = Some compressed_size;
                  }
                in
-               Eio.Stream.add stream progress;
+               Grpc_eio.Stream.add stream progress;
 
                if done_now then done_flag := true
                else current_depth := !current_depth + req.depth_step
@@ -766,7 +770,7 @@ module Handlers = struct
                    compressed_size = None;
                  }
                in
-               Eio.Stream.add stream progress;
+               Grpc_eio.Stream.add stream progress;
                done_flag := true)
         done;
 
@@ -786,9 +790,9 @@ module Handlers = struct
               compressed_size = None;
             }
           in
-          Eio.Stream.add stream progress
+          Grpc_eio.Stream.add stream progress
         end;
-        stream
+        close_stream stream
     | _ ->
         let progress =
           Proto.encode_fidelity_progress {
@@ -803,10 +807,10 @@ module Handlers = struct
             node_count = None;
             raw_size = None;
             compressed_size = None;
-          }
+        }
         in
-        Eio.Stream.add stream progress;
-        stream
+        Grpc_eio.Stream.add stream progress;
+        close_stream stream
 
   (** GetSplitStream: Stream nodes split into Style/Layout/Content chunks *)
   let get_split_stream request_bytes =
@@ -890,15 +894,15 @@ module Handlers = struct
                + (if req.include_contents then 1 else 0)
              in
              let total_chunks = max 1 (total_nodes * per_node) in
-             let stream = Eio.Stream.create total_chunks in
+             let stream = Grpc_eio.Stream.create total_chunks in
              Splitter.stream_split node_json stream
                ~include_styles:req.include_styles
                ~include_layouts:req.include_layouts
                ~include_contents:req.include_contents;
-             stream
+             close_stream stream
          | Error err ->
              let error_msg = Figma_api.error_to_string err in
-             let stream = Eio.Stream.create 1 in
+             let stream = Grpc_eio.Stream.create 1 in
              let payload =
                Proto.encode_split_chunk ~sequence:0 ~total_chunks:1 ~node_id
                  ~chunk:(Proto.Content Proto.{
@@ -910,10 +914,10 @@ module Handlers = struct
                    image_ref = None;
                  })
              in
-             Eio.Stream.add stream payload;
-             stream)
+             Grpc_eio.Stream.add stream payload;
+             close_stream stream)
     | _ ->
-        let stream = Eio.Stream.create 1 in
+        let stream = Grpc_eio.Stream.create 1 in
         let payload =
           Proto.encode_split_chunk ~sequence:0 ~total_chunks:1 ~node_id:""
             ~chunk:(Proto.Content Proto.{
@@ -925,8 +929,8 @@ module Handlers = struct
               image_ref = None;
             })
         in
-        Eio.Stream.add stream payload;
-        stream
+        Grpc_eio.Stream.add stream payload;
+        close_stream stream
 
   (** PlanTasks: Generate ROI-based implementation tasks from Figma node
 
