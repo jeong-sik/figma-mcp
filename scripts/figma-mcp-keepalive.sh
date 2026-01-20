@@ -42,8 +42,11 @@ while true; do
   fi
   "$START_SCRIPT" "${args[@]}" >> "$LOG_FILE" 2>&1 &
   child_pid=$!
-  wait "$child_pid"
-  exit_code=$?
+  if wait "$child_pid"; then
+    exit_code=0
+  else
+    exit_code=$?
+  fi
   echo "[$(date -u +"%Y-%m-%dT%H:%M:%SZ")] exited (code=$exit_code)" >> "$LOG_FILE"
   sleep "$RESTART_DELAY"
 done
