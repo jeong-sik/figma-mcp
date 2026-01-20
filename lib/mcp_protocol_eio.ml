@@ -233,7 +233,7 @@ let run_mcp_request ~domain_mgr server body_str =
   | Some mgr -> Eio.Domain_manager.run mgr (fun () -> process_mcp_request_sync server body_str)
   | None -> process_mcp_request_sync server body_str
 
-let mcp_post_handler ~domain_mgr server request reqd =
+let mcp_post_handler ~sw ~domain_mgr server request reqd =
   let { Httpun.Request.headers; target = request_target; _ } = request in
   let header_first keys =
     let rec loop = function
@@ -281,23 +281,27 @@ let mcp_post_handler ~domain_mgr server request reqd =
   Request.read_body_async reqd (fun body_str ->
     match classify_message body_str with
     | `Notification ->
-        ignore (run_mcp_request ~domain_mgr server body_str);
+        Eio.Fiber.fork ~sw (fun () ->
+          try
+            ignore (run_mcp_request ~domain_mgr server body_str)
+          with exn ->
+            eprintf "[MCP] notification failed: %s\n%!" (Printexc.to_string exn));
         Response.accepted reqd
     | `Response ->
         Response.accepted reqd
     | `Request | `Unknown ->
-        let response_str = run_mcp_request ~domain_mgr server body_str in
         (match find_sse_client client_id with
          | Some (id, client) ->
-             (try
-                send_sse_event client.body ~event:"message" ~data:response_str;
-                Response.accepted reqd
-              with _ ->
-                unregister_sse_client id;
-                Response.json response_str reqd)
+             Response.accepted reqd;
+             Eio.Fiber.fork ~sw (fun () ->
+               try
+                 let response_str = run_mcp_request ~domain_mgr server body_str in
+                 send_sse_event client.body ~event:"message" ~data:response_str
+               with _ ->
+                 unregister_sse_client id)
          | None ->
-             Response.json response_str reqd)
-  )
+             let response_str = run_mcp_request ~domain_mgr server body_str in
+             Response.json response_str reqd))
 
 (** MCP SSE handler for streamable-http protocol (GET /mcp) *)
 let mcp_sse_handler ~clock _request reqd =
@@ -510,7 +514,7 @@ let plugin_status_handler _request reqd =
 
 (** ============== Router ============== *)
 
-let route_request ~clock ~domain_mgr server request reqd =
+let route_request ~clock ~domain_mgr ~sw server request reqd =
   let path = Request.path request in
   let meth = Request.method_ request in
 
@@ -532,7 +536,7 @@ let route_request ~clock ~domain_mgr server request reqd =
       plugin_status_handler request reqd
 
   | `POST, "/" | `POST, "/mcp" ->
-      mcp_post_handler ~domain_mgr server request reqd
+      mcp_post_handler ~sw ~domain_mgr server request reqd
 
   | `POST, "/plugin/connect" ->
       plugin_connect_handler request reqd
@@ -548,11 +552,11 @@ let route_request ~clock ~domain_mgr server request reqd =
 
 (** ============== httpun-eio Server ============== *)
 
-let make_request_handler ~clock ~domain_mgr server =
+let make_request_handler ~clock ~domain_mgr ~sw server =
   fun _client_addr gluten_reqd ->
     let reqd = gluten_reqd.Gluten.Reqd.reqd in
     let request = Httpun.Reqd.request reqd in
-    route_request ~clock ~domain_mgr server request reqd
+    route_request ~clock ~domain_mgr ~sw server request reqd
 
 let error_handler _client_addr ?request:_ error start_response =
   let response_body = start_response Httpun.Headers.empty in
@@ -567,7 +571,7 @@ let error_handler _client_addr ?request:_ error start_response =
 
 (** Run HTTP server with Eio *)
 let run ~sw ~net ~clock ~domain_mgr config server =
-  let request_handler = make_request_handler ~clock ~domain_mgr server in
+  let request_handler = make_request_handler ~clock ~domain_mgr ~sw server in
   let resolve_listen_ips host =
     match String.lowercase_ascii host with
     | "localhost" ->
