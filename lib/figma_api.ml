@@ -7,20 +7,17 @@ open Printf
 
 let api_base = "https://api.figma.com/v1"
 
-(** 재시도 설정 (429 대응) *)
+(** Resilience 설정 *)
 let () = Random.self_init ()
 
-let max_retries =
-  try int_of_string (Sys.getenv "FIGMA_API_MAX_RETRIES")
-  with Not_found -> 3
+let figma_retry_policy = {
+  Resilience.default_policy with
+  max_attempts = (try int_of_string (Sys.getenv "FIGMA_API_MAX_RETRIES") with Not_found -> 3);
+  initial_delay_ms = (try int_of_string (Sys.getenv "FIGMA_API_BACKOFF_MS") with Not_found -> 500);
+  max_delay_ms = (try int_of_string (Sys.getenv "FIGMA_API_BACKOFF_MAX_MS") with Not_found -> 4000);
+}
 
-let base_backoff_ms =
-  try int_of_string (Sys.getenv "FIGMA_API_BACKOFF_MS")
-  with Not_found -> 500
-
-let max_backoff_ms =
-  try int_of_string (Sys.getenv "FIGMA_API_BACKOFF_MAX_MS")
-  with Not_found -> 4000
+let figma_breaker = Resilience.create_circuit_breaker ~name:"figma_api" ~failure_threshold:5 ()
 
 (** ============== Node ID 변환 ============== *)
 
@@ -94,7 +91,7 @@ let make_headers ?host token =
   let headers = [
     ("X-Figma-Token", token);
     ("Accept", "application/json");
-    ("User-Agent", "figma-mcp/0.3.2");
+    ("User-Agent", "figma-mcp/0.3.3");
   ] in
   let headers =
     match host with
@@ -278,73 +275,46 @@ let raw_request ~meth ~url ~headers ~body =
        let* () = close ic in
        close oc)
 
-let retry_after_seconds headers =
-  match Cohttp.Header.get headers "retry-after" with
-  | None -> None
-  | Some value ->
-      (match int_of_string_opt value with
-       | Some seconds when seconds >= 0 -> Some (float_of_int seconds)
-       | _ -> None)
-
-let backoff_seconds attempt headers =
-  match retry_after_seconds headers with
-  | Some seconds -> seconds
-  | None ->
-      let multiplier = 2. ** float_of_int attempt in
-      let raw = float_of_int base_backoff_ms *. multiplier in
-      let capped = min raw (float_of_int max_backoff_ms) in
-      let jitter = Random.float (capped *. 0.25) in
-      (capped +. jitter) /. 1000.0
+exception FigmaRetryableError of int * string
 
 let request_json ~url ~request : (Yojson.Safe.t, api_error) result Lwt.t =
-  let rec loop attempt =
+  let op () =
     let* (code, headers, body_str) = request () in
     if Sys.getenv_opt "FIGMA_API_DEBUG" = Some "1" then begin
-      let server =
-        Cohttp.Header.get headers "server" |> Option.value ~default:""
-      in
-      let snippet =
-        if String.length body_str > 120 then String.sub body_str 0 120 ^ "..."
-        else body_str
-      in
-      eprintf "[Figma API] status=%d server=%s body=%s\n%!" code server snippet
+      let server = Cohttp.Header.get headers "server" |> Option.value ~default:"" in
+      eprintf "[Figma API] status=%d server=%s\n%!" code server
     end;
     match code with
-    | 200 | 201 ->
-        (try
-           Lwt.return_ok (Yojson.Safe.from_string body_str)
-         with Yojson.Json_error msg ->
-           Lwt.return_error (ParseError msg))
-    | 401 | 403 ->
-        Lwt.return_error (AuthError "Invalid or expired token")
-    | 404 ->
-        Lwt.return_error (NotFound url)
-    | 429 ->
-        if attempt < max_retries then begin
-          let delay = backoff_seconds attempt headers in
-          let* () = Lwt_unix.sleep delay in
-          loop (attempt + 1)
-        end else
-          Lwt.return_error RateLimited
-    | _ ->
-        Lwt.return_error (UnknownError (code, body_str))
+    | 200 | 201 -> Lwt.return (Result.Ok (Yojson.Safe.from_string body_str))
+    | 429 -> Lwt.fail (FigmaRetryableError (code, "Rate limited"))
+    | 500 | 502 | 503 | 504 -> Lwt.fail (FigmaRetryableError (code, body_str))
+    | 401 | 403 -> Lwt.return (Result.Error (AuthError "Invalid or expired token"))
+    | 404 -> Lwt.return (Result.Error (NotFound url))
+    | _ -> Lwt.return (Result.Error (UnknownError (code, body_str)))
   in
-  loop 0
+  let* result = Resilience.with_retry_lwt
+    ~policy:figma_retry_policy
+    ~circuit_breaker:(Some figma_breaker)
+    ~op_name:"figma_api_call"
+    op
+  in
+  match result with
+  | Resilience.Success (Ok json) -> Lwt.return (Ok json)
+  | Resilience.Success (Error err) -> Lwt.return (Error err)
+  | Resilience.Exhausted { last_error; _ } ->
+      let is_rate_limit =
+        let s = String.lowercase_ascii last_error in
+        try ignore (Str.search_forward (Str.regexp "rate") s 0); true
+        with Not_found -> false
+      in
+      if is_rate_limit then Lwt.return (Error RateLimited)
+      else Lwt.return (Error (NetworkError last_error))
+  | Resilience.CircuitOpen -> Lwt.return (Error (NetworkError "Circuit breaker open"))
+  | Resilience.TimedOut _ -> Lwt.return (Error (NetworkError "Request timed out"))
 
 let get_json ~token url : (Yojson.Safe.t, api_error) result Lwt.t =
   let uri = Uri.of_string url in
-  let trimmed = String.trim token in
   let headers = make_headers ?host:(host_header uri) token in
-  if Sys.getenv_opt "FIGMA_API_DEBUG" = Some "1" then begin
-    let host = Cohttp.Header.get headers "Host" |> Option.value ~default:"<none>" in
-    let header_keys =
-      Cohttp.Header.to_list headers
-      |> List.map fst
-      |> String.concat ","
-    in
-    eprintf "[Figma API] GET %s token_len=%d host=%s headers=%s\n%!"
-      url (String.length trimmed) host header_keys
-  end;
   let raw_headers = Cohttp.Header.to_list headers in
   Lwt.catch
     (fun () ->
@@ -355,9 +325,6 @@ let get_json ~token url : (Yojson.Safe.t, api_error) result Lwt.t =
 
 let post_json ~token url body_json : (Yojson.Safe.t, api_error) result Lwt.t =
   let uri = Uri.of_string url in
-  let trimmed = String.trim token in
-  if Sys.getenv_opt "FIGMA_API_DEBUG" = Some "1" then
-    eprintf "[Figma API] POST %s token_len=%d\n%!" url (String.length trimmed);
   let headers =
     make_headers ?host:(host_header uri) token
     |> fun h -> Cohttp.Header.add h "Content-Type" "application/json"
@@ -391,7 +358,7 @@ let download_url ~url ~path : (string, string) result Lwt.t =
     (fun () ->
        let headers = [
          ("Accept", "*/*");
-         ("User-Agent", "figma-mcp/0.3.2");
+         ("User-Agent", "figma-mcp/0.3.3");
        ] in
        let* (code, _headers, body_str) =
          raw_request ~meth:"GET" ~url ~headers ~body:None
@@ -410,7 +377,7 @@ let download_url ~url ~path : (string, string) result Lwt.t =
 (** ============== Figma API 엔드포인트 ============== *)
 
 (** 파일 전체 가져오기 *)
-let get_file ?depth ?geometry ?plugin_data ?version ~token ~file_key ()
+let get_file ?depth ?geometry ?plugin_data ?version ~token ~file_key () 
   : (Yojson.Safe.t, api_error) result Lwt.t =
   let params =
     []
@@ -423,7 +390,7 @@ let get_file ?depth ?geometry ?plugin_data ?version ~token ~file_key ()
   get_json ~token url
 
 (** 파일 노드들만 가져오기 (특정 노드 ID들) *)
-let get_file_nodes ?depth ?geometry ?plugin_data ?version ~token ~file_key ~node_ids ()
+let get_file_nodes ?depth ?geometry ?plugin_data ?version ~token ~file_key ~node_ids () 
   : (Yojson.Safe.t, api_error) result Lwt.t =
   let node_ids = normalize_node_ids node_ids in
   let ids_param = String.concat "," node_ids in
@@ -438,7 +405,7 @@ let get_file_nodes ?depth ?geometry ?plugin_data ?version ~token ~file_key ~node
   get_json ~token url
 
 (** 이미지 내보내기 URL 가져오기 *)
-let get_images ?use_absolute_bounds ?version ~token ~file_key ~node_ids ~format ~scale ()
+let get_images ?use_absolute_bounds ?version ~token ~file_key ~node_ids ~format ~scale () 
   : (Yojson.Safe.t, api_error) result Lwt.t =
   let node_ids = normalize_node_ids node_ids in
   let ids_param = String.concat "," node_ids in
@@ -453,7 +420,7 @@ let get_images ?use_absolute_bounds ?version ~token ~file_key ~node_ids ~format 
   get_json ~token url
 
 (** 이미지 채움(image fills) 원본 URL 가져오기 *)
-let get_file_images ?version ~token ~file_key ()
+let get_file_images ?version ~token ~file_key () 
   : (Yojson.Safe.t, api_error) result Lwt.t =
   let params =
     []
@@ -463,7 +430,7 @@ let get_file_images ?version ~token ~file_key ()
   get_json ~token url
 
 (** 파일 메타데이터(components/styles/componentSets) 가져오기 *)
-let get_file_meta ?version ~token ~file_key ()
+let get_file_meta ?version ~token ~file_key () 
   : (Yojson.Safe.t, api_error) result Lwt.t =
   let params =
     []
