@@ -48,6 +48,31 @@ figma_get_node_with_image
 
 If you get `status: large_result`, use the progressive recipes below.
 
+## 1.5) Smart Selection (Layout-first)
+
+Score and select meaningful parent nodes before pulling heavy DSL or plugin data.
+```
+figma_select_nodes
+  url: "https://www.figma.com/file/KEY/NAME?node-id=123-456"
+  token: "$FIGMA_TOKEN"
+  summary_depth: 1
+  layout_only: true
+  text_mode: "exclude"
+  score_threshold: 2.0
+  max_parents: 8
+```
+
+Optional filters:
+```
+figma_select_nodes
+  file_key: "KEY"
+  node_id: "123:456"
+  token: "$FIGMA_TOKEN"
+  exclude_patterns: ["guide", "spec", "annotation", "순서도", "주석"]
+  note_patterns: ["note", "memo", "설명", "참고"]
+  notes_limit: 50
+```
+
 ## 2) High-Fidelity Bundle (Recommended)
 
 Use when you need layout + variables + image fills in one shot.

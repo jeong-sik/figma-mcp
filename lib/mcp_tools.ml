@@ -210,6 +210,32 @@ let tool_figma_get_node_summary : tool_def = {
   ] ["token"];
 }
 
+(** 노드 자동 선택 - 점수 기반 후보 선별 *)
+let tool_figma_select_nodes : tool_def = {
+  name = "figma_select_nodes";
+  description = "URL/노드 기준으로 후보 노드를 점수화해 선택 목록과 노트 텍스트를 반환합니다.";
+  input_schema = object_schema [
+    ("file_key", string_prop "Figma 파일 키");
+    ("node_id", string_prop "노드 ID (예: 123:456)");
+    ("url", string_prop "Figma URL (file_key/node_id 자동 추출)");
+    ("token", string_prop "Figma Personal Access Token");
+    ("summary_depth", number_prop "분석 depth (기본값: 1)");
+    ("preview", bool_prop "프리뷰 이미지 포함 여부 (기본값: true)");
+    ("preview_format", enum_prop ["png"; "jpg"; "svg"; "pdf"] "프리뷰 이미지 포맷 (기본값: png)");
+    ("preview_scale", number_prop "프리뷰 이미지 스케일 (1-4, 기본값: 1)");
+    ("layout_only", bool_prop "컨테이너 위주 선택 (기본값: false)");
+    ("auto_layout_only", bool_prop "Auto-layout 노드만 선택 (기본값: false)");
+    ("text_mode", enum_prop ["include"; "exclude"; "only"] "텍스트 노드 선택 모드 (기본값: include)");
+    ("score_threshold", number_prop "선택 점수 임계값 (기본값: 2.0)");
+    ("max_parents", number_prop "선택할 부모 노드 최대 개수 (기본값: 8)");
+    ("exclude_patterns", array_prop "제외할 이름 패턴 (기본값: guide/spec/annotation 등)");
+    ("note_patterns", array_prop "노트로 분리할 텍스트 패턴 (기본값: note/memo/설명 등)");
+    ("notes_limit", number_prop "노트 텍스트 최대 개수 (기본값: 50)");
+    ("excluded_limit", number_prop "제외 목록 최대 개수 (기본값: 50)");
+    ("version", string_prop "특정 파일 버전 ID");
+  ] ["token"];
+}
+
 (** 깊이 범위별 청크 로드 - 대형 노드를 점진적으로 로드 *)
 let tool_figma_get_node_chunk : tool_def = {
   name = "figma_get_node_chunk";
@@ -868,6 +894,7 @@ let all_tools = [
   tool_figma_get_node_with_image;
   tool_figma_get_node_bundle;
   tool_figma_get_node_summary;
+  tool_figma_select_nodes;
   tool_figma_get_node_chunk;
   tool_figma_chunk_index;
   tool_figma_chunk_get;
@@ -943,6 +970,26 @@ let get_string key json =
   | Some (`String s) -> Some (normalize_node_id_key key s)
   | _ -> None
 
+let get_string_list key json =
+  let trim = String.trim in
+  match member key json with
+  | Some (`List items) ->
+      let values =
+        items
+        |> List.filter_map (function `String s -> Some (trim s) | _ -> None)
+        |> List.filter (fun s -> s <> "")
+      in
+      if values = [] then None else Some values
+  | Some (`String s) ->
+      let values =
+        s
+        |> String.split_on_char ','
+        |> List.map trim
+        |> List.filter (fun v -> v <> "")
+      in
+      if values = [] then None else Some values
+  | _ -> None
+
 let prefer_some primary fallback =
   match primary with
   | Some _ -> primary
@@ -1005,6 +1052,117 @@ let get_bool_or key default json =
   match get_bool key json with
   | Some b -> b
   | None -> default
+
+(** ============== Node selection helpers ============== *)
+
+type selection_config = {
+  layout_only: bool;
+  auto_layout_only: bool;
+  text_mode: string;
+  score_threshold: float;
+  max_parents: int;
+  summary_depth: int;
+  exclude_patterns: string list;
+  note_patterns: string list;
+  notes_limit: int;
+  excluded_limit: int;
+}
+
+let default_exclude_patterns = [
+  "guide"; "spec"; "measure"; "annotation"; "grid"; "flow"; "diagram"; "wip";
+  "archive"; "note"; "memo"; "draft"; "unused"; "redline";
+  "가이드"; "스펙"; "측정"; "주석"; "그리드"; "순서도"; "플로우"; "다이어그램";
+  "메모"; "참고"; "설명"; "임시"; "미사용"; "가이드라인";
+]
+
+let default_note_patterns = [
+  "note"; "memo"; "annotation"; "guide"; "spec"; "measure"; "as-is"; "as is";
+  "to-be"; "to be";
+  "주석"; "메모"; "참고"; "설명"; "가이드"; "스펙"; "측정"; "as-is"; "to-be";
+]
+
+let normalize_patterns patterns =
+  patterns
+  |> List.map String.trim
+  |> List.filter (fun p -> p <> "")
+
+let string_contains ~needle ~haystack =
+  let needle = String.lowercase_ascii (String.trim needle) in
+  if needle = "" then false
+  else
+    let haystack = String.lowercase_ascii haystack in
+    try
+      ignore (Str.search_forward (Str.regexp_string needle) haystack 0);
+      true
+    with Not_found -> false
+
+let matches_any patterns text =
+  List.exists (fun p -> string_contains ~needle:p ~haystack:text) patterns
+
+let find_matching_pattern patterns text =
+  List.find_opt (fun p -> string_contains ~needle:p ~haystack:text) patterns
+
+let node_text_blob node =
+  match node.Figma_types.characters with
+  | Some txt -> String.concat " " [node.Figma_types.name; txt]
+  | None -> node.Figma_types.name
+
+let node_is_text node =
+  match node.Figma_types.node_type with
+  | Figma_types.Text -> true
+  | _ -> false
+
+let node_is_container node =
+  match node.Figma_types.node_type with
+  | Figma_types.Document
+  | Figma_types.Canvas
+  | Figma_types.Frame
+  | Figma_types.Group
+  | Figma_types.Section
+  | Figma_types.Component
+  | Figma_types.ComponentSet
+  | Figma_types.Instance -> true
+  | _ -> false
+
+let node_is_component node =
+  match node.Figma_types.node_type with
+  | Figma_types.Component
+  | Figma_types.ComponentSet
+  | Figma_types.Instance -> true
+  | _ -> false
+
+let node_has_image_fill node =
+  List.exists
+    (fun (paint : Figma_types.paint) ->
+       paint.visible && paint.opacity > 0.01 && paint.paint_type = Figma_types.Image)
+    node.Figma_types.fills
+
+let node_area node =
+  match node.Figma_types.bbox with
+  | Some b -> max 0. (b.width *. b.height)
+  | None -> 0.
+
+let node_area_score area =
+  Float.log10 (area +. 1.)
+
+let node_has_auto_layout node =
+  match node.Figma_types.layout_mode with
+  | Figma_types.None' -> false
+  | _ -> true
+
+let node_has_mask_hint node =
+  let text = node_text_blob node in
+  matches_any ["mask"; "clip"] text
+
+let node_duplicate_key node =
+  let type_str = Figma_query.node_type_to_string node.Figma_types.node_type in
+  let name = String.lowercase_ascii (String.trim node.Figma_types.name) in
+  let size =
+    match node.Figma_types.bbox with
+    | Some b -> Printf.sprintf "%.0fx%.0f" b.width b.height
+    | None -> "?"
+  in
+  String.concat "|" [type_str; name; size]
 
 (** 실행 모드 설정 - HTTP 서버에서 변경됨 *)
 let is_http_mode = ref false
@@ -2081,6 +2239,323 @@ let handle_get_node_summary args : (Yojson.Safe.t, string) result =
              ("truncated", `Bool (children_count > max_children));
              ("hint", `String "Use figma_get_node_chunk for progressive loading of specific depth ranges");
            ]))))
+  | _ -> Error "Missing required parameters: file_key/node_id or url, token"
+
+(** figma_select_nodes 핸들러 - 점수 기반 후보 선별 *)
+let handle_select_nodes args : (Yojson.Safe.t, string) result =
+  let (file_key, node_id) = resolve_file_key_node_id args in
+  let token = get_string "token" args in
+  let summary_depth = match get_int "summary_depth" args with Some d when d >= 0 -> d | _ -> 1 in
+  let preview = get_bool_or "preview" true args in
+  let preview_format = get_string_or "preview_format" "png" args in
+  let preview_scale = match get_int "preview_scale" args with Some s when s > 0 -> s | _ -> 1 in
+  let layout_only = get_bool_or "layout_only" false args in
+  let auto_layout_only = get_bool_or "auto_layout_only" false args in
+  let raw_text_mode = get_string_or "text_mode" "include" args in
+  let text_mode =
+    match raw_text_mode with
+    | "include" | "exclude" | "only" -> raw_text_mode
+    | _ -> "include"
+  in
+  let score_threshold = get_float_or "score_threshold" 2.0 args in
+  let max_parents = match get_int "max_parents" args with Some n when n > 0 -> n | _ -> 8 in
+  let notes_limit = match get_int "notes_limit" args with Some n when n > 0 -> n | _ -> 50 in
+  let excluded_limit = match get_int "excluded_limit" args with Some n when n > 0 -> n | _ -> 50 in
+  let version = get_string "version" args in
+  let exclude_patterns =
+    get_string_list "exclude_patterns" args
+    |> Option.value ~default:default_exclude_patterns
+    |> normalize_patterns
+  in
+  let note_patterns =
+    get_string_list "note_patterns" args
+    |> Option.value ~default:default_note_patterns
+    |> normalize_patterns
+  in
+
+  match (file_key, node_id, token) with
+  | (Some file_key, Some node_id, Some token) ->
+      let node_id = Figma_api.normalize_node_id node_id in
+      let config = {
+        layout_only;
+        auto_layout_only;
+        text_mode;
+        score_threshold;
+        max_parents;
+        summary_depth;
+        exclude_patterns;
+        note_patterns;
+        notes_limit;
+        excluded_limit;
+      } in
+
+      let warnings = ref [] in
+      if raw_text_mode <> text_mode then
+        warnings := "Invalid text_mode, fallback to include" :: !warnings;
+
+      let preview_json =
+        if not preview then `Null
+        else
+          match Figma_effects.Perform.get_images
+                  ~token ~file_key ~node_ids:[node_id]
+                  ~format:preview_format ~scale:preview_scale ?version () with
+          | Error err ->
+              `Assoc [
+                ("status", `String "error");
+                ("error", `String err);
+              ]
+          | Ok json ->
+              let open Yojson.Safe.Util in
+              let images = json |> member "images" in
+              let url =
+                match images with
+                | `Assoc map ->
+                    (match List.assoc_opt node_id map with
+                     | Some (`String url) -> Some url
+                     | _ -> None)
+                | _ -> None
+              in
+              (match url with
+               | Some url ->
+                   `Assoc [
+                     ("status", `String "ok");
+                     ("url", `String url);
+                     ("format", `String preview_format);
+                     ("scale", `Int preview_scale);
+                   ]
+               | None ->
+                   `Assoc [
+                     ("status", `String "missing");
+                     ("format", `String preview_format);
+                     ("scale", `Int preview_scale);
+                   ])
+      in
+
+      (match Figma_effects.Perform.get_nodes ~token ~file_key ~node_ids:[node_id] ~depth:summary_depth ?version () with
+       | Error err -> Error (Printf.sprintf "Figma API error: %s" err)
+       | Ok nodes_json ->
+           let open Yojson.Safe.Util in
+           let nodes = nodes_json |> member "nodes" in
+           let node_entry = nodes |> member node_id in
+           (match node_entry with
+            | `Null -> Error (Printf.sprintf "Node %s not found in file %s" node_id file_key)
+            | _ ->
+                let node_data = node_entry |> member "document" in
+                (match node_data with
+                 | `Null -> Error (Printf.sprintf "Document not found for node %s" node_id)
+                 | _ ->
+                     (match Figma_parser.parse_node ~max_depth:summary_depth node_data with
+                      | None -> Error "Failed to parse node JSON"
+                      | Some root ->
+                          let all_nodes = Figma_query.collect_nodes ~max_depth:(Some summary_depth) root in
+                          let notes =
+                            all_nodes
+                            |> List.filter node_is_text
+                            |> List.filter (fun node ->
+                                matches_any config.note_patterns (node_text_blob node))
+                            |> (fun nodes ->
+                                let rec take acc count = function
+                                  | [] -> List.rev acc
+                                  | _ when count >= config.notes_limit -> List.rev acc
+                                  | n :: rest -> take (n :: acc) (count + 1) rest
+                                in
+                                take [] 0 nodes)
+                            |> List.map (fun node ->
+                                let text = Option.value ~default:"" node.Figma_types.characters in
+                                let pattern =
+                                  find_matching_pattern config.note_patterns (node_text_blob node)
+                                  |> Option.value ~default:""
+                                in
+                                `Assoc [
+                                  ("id", `String node.Figma_types.id);
+                                  ("name", `String node.Figma_types.name);
+                                  ("type", `String (Figma_query.node_type_to_string node.Figma_types.node_type));
+                                  ("text", `String text);
+                                  ("pattern", `String pattern);
+                                ])
+                          in
+
+                          let candidates =
+                            if root.Figma_types.children = [] then [root] else root.Figma_types.children
+                          in
+                          let duplicates = Hashtbl.create 32 in
+                          let next_duplicate_index node =
+                            let key = node_duplicate_key node in
+                            let count = Option.value ~default:0 (Hashtbl.find_opt duplicates key) in
+                            Hashtbl.replace duplicates key (count + 1);
+                            count
+                          in
+
+                          let scored = ref [] in
+                          let excluded = ref [] in
+                          List.iter (fun node ->
+                              let name_blob = node_text_blob node in
+                              let duplicate_index = next_duplicate_index node in
+                              let exclusion_reason =
+                                if (not node.Figma_types.visible) || node.Figma_types.opacity <= 0.01 then
+                                  Some "invisible"
+                                else if config.auto_layout_only && not (node_has_auto_layout node) then
+                                  Some "auto_layout_only"
+                                else if config.layout_only && not (node_is_container node) then
+                                  Some "layout_only"
+                                else if config.text_mode = "exclude" && node_is_text node then
+                                  Some "text_mode_exclude"
+                                else if config.text_mode = "only" && not (node_is_text node) then
+                                  Some "text_mode_only"
+                                else if matches_any config.exclude_patterns name_blob then
+                                  Some "excluded_pattern"
+                                else if node_is_text node && matches_any config.note_patterns name_blob then
+                                  Some "note_text"
+                                else
+                                  None
+                              in
+                              match exclusion_reason with
+                              | Some reason ->
+                                  let pattern =
+                                    if reason = "excluded_pattern" then
+                                      find_matching_pattern config.exclude_patterns name_blob
+                                    else if reason = "note_text" then
+                                      find_matching_pattern config.note_patterns name_blob
+                                    else
+                                      None
+                                  in
+                                  let reason =
+                                    match pattern with
+                                    | Some p -> Printf.sprintf "%s:%s" reason p
+                                    | None -> reason
+                                  in
+                                  excluded := (node, reason) :: !excluded
+                              | None ->
+                                  let score = ref 0.0 in
+                                  let reasons = ref [] in
+                                  let add amount label =
+                                    if amount <> 0.0 then begin
+                                      score := !score +. amount;
+                                      reasons := label :: !reasons
+                                    end
+                                  in
+                                  if node_is_text node then add 2.0 "text:+2";
+                                  if node_has_image_fill node then add 2.0 "image_fill:+2";
+                                  if node_has_auto_layout node then add 1.5 "auto_layout:+1.5";
+                                  if node_is_component node then add 1.0 "component:+1";
+                                  if node_has_mask_hint node then add 1.0 "mask_or_clip:+1";
+                                  let area = node_area node in
+                                  let area_score = node_area_score area in
+                                  if area_score > 0.0 then
+                                    add area_score (Printf.sprintf "area:+%.2f" area_score);
+                                  let small_penalty =
+                                    if area < 64.0 then 2.0
+                                    else if area < 256.0 then 1.0
+                                    else 0.0
+                                  in
+                                  if small_penalty > 0.0 then
+                                    add (-. small_penalty)
+                                      (Printf.sprintf "small_area:-%.1f" small_penalty);
+                                  if duplicate_index > 0 then
+                                    add (-. 1.0) "duplicate:-1";
+                                  if matches_any ["as-is"; "as is"; "asis"] name_blob then
+                                    add (-. 0.5) "as_is:-0.5";
+                                  scored := (node, !score, List.rev !reasons, area) :: !scored
+                            ) candidates;
+
+                          let scored_sorted =
+                            List.sort (fun (_, a, _, _) (_, b, _, _) -> Float.compare b a) !scored
+                          in
+                          let scored_selected =
+                            scored_sorted
+                            |> List.filter (fun (_, score, _, _) -> score >= config.score_threshold)
+                            |> (fun nodes ->
+                                let rec take acc count = function
+                                  | [] -> List.rev acc
+                                  | _ when count >= config.max_parents -> List.rev acc
+                                  | n :: rest -> take (n :: acc) (count + 1) rest
+                                in
+                                take [] 0 nodes)
+                          in
+                          let selected, selection_mode =
+                            if scored_selected = [] && scored_sorted <> [] then
+                              let rec take acc count = function
+                                | [] -> List.rev acc
+                                | _ when count >= config.max_parents -> List.rev acc
+                                | n :: rest -> take (n :: acc) (count + 1) rest
+                              in
+                              (take [] 0 scored_sorted, "fallback_top_scores")
+                            else
+                              (scored_selected, "threshold")
+                          in
+
+                          let selected_json =
+                            selected
+                            |> List.map (fun (node, score, reasons, area) ->
+                                let (width, height) =
+                                  match node.Figma_types.bbox with
+                                  | Some b -> (b.width, b.height)
+                                  | None -> (0., 0.)
+                                in
+                                `Assoc [
+                                  ("id", `String node.Figma_types.id);
+                                  ("name", `String node.Figma_types.name);
+                                  ("type", `String (Figma_query.node_type_to_string node.Figma_types.node_type));
+                                  ("score", `Float score);
+                                  ("area", `Float area);
+                                  ("width", `Float width);
+                                  ("height", `Float height);
+                                  ("reasons", `List (List.map (fun r -> `String r) reasons));
+                                ])
+                          in
+
+                          let excluded_json =
+                            !excluded
+                            |> (fun nodes ->
+                                let rec take acc count = function
+                                  | [] -> List.rev acc
+                                  | _ when count >= config.excluded_limit -> List.rev acc
+                                  | n :: rest -> take (n :: acc) (count + 1) rest
+                                in
+                                take [] 0 nodes)
+                            |> List.map (fun (node, reason) ->
+                                `Assoc [
+                                  ("id", `String node.Figma_types.id);
+                                  ("name", `String node.Figma_types.name);
+                                  ("type", `String (Figma_query.node_type_to_string node.Figma_types.node_type));
+                                  ("reason", `String reason);
+                                ])
+                          in
+
+                          let root_summary =
+                            `Assoc [
+                              ("id", `String root.Figma_types.id);
+                              ("name", `String root.Figma_types.name);
+                              ("type", `String (Figma_query.node_type_to_string root.Figma_types.node_type));
+                              ("children_count", `Int (List.length root.Figma_types.children));
+                            ]
+                          in
+
+                          let result =
+                            `Assoc [
+                              ("file_key", `String file_key);
+                              ("node_id", `String node_id);
+                              ("summary_depth", `Int summary_depth);
+                              ("preview", preview_json);
+                              ("root", root_summary);
+                              ("selection_mode", `String selection_mode);
+                              ("score_threshold", `Float config.score_threshold);
+                              ("max_parents", `Int config.max_parents);
+                              ("layout_only", `Bool config.layout_only);
+                              ("auto_layout_only", `Bool config.auto_layout_only);
+                              ("text_mode", `String config.text_mode);
+                              ("selected", `List selected_json);
+                              ("selected_count", `Int (List.length selected_json));
+                              ("excluded", `List excluded_json);
+                              ("excluded_count", `Int (List.length !excluded));
+                              ("notes", `List notes);
+                              ("notes_count", `Int (List.length notes));
+                              ("warnings", `List (List.map (fun w -> `String w) (List.rev !warnings)));
+                            ]
+                          in
+                          Ok (make_text_content (Yojson.Safe.pretty_to_string result))
+                     )))
+           )
   | _ -> Error "Missing required parameters: file_key/node_id or url, token"
 
 (** figma_get_node_chunk 핸들러 - 깊이 범위별 청크 로드 *)
@@ -6273,6 +6748,7 @@ let all_handlers : (string * tool_handler) list = [
   ("figma_get_node_with_image", wrap_sync handle_get_node_with_image);
   ("figma_get_node_bundle", wrap_sync handle_get_node_bundle);
   ("figma_get_node_summary", wrap_sync handle_get_node_summary);
+  ("figma_select_nodes", wrap_sync handle_select_nodes);
   ("figma_get_node_chunk", wrap_sync handle_get_node_chunk);
   ("figma_chunk_index", handle_chunk_index);
   ("figma_chunk_get", wrap_sync handle_chunk_get);

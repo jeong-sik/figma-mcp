@@ -16,6 +16,55 @@ let retry_policy = {
 
 let llm_breaker = Resilience.create_circuit_breaker ~name:"llm_mcp" ~failure_threshold:3 ()
 
+exception LlmRetryableError of string
+
+let with_retry_lwt ~policy ~circuit_breaker ~op_name:_ op =
+  let rec attempt n last_error =
+    let cb_allows =
+      match circuit_breaker with
+      | None -> true
+      | Some cb -> Resilience.circuit_allows cb
+    in
+    if not cb_allows then
+      Lwt.return Resilience.CircuitOpen
+    else if n > policy.Resilience.max_attempts then
+      let message = Option.value ~default:"Max attempts reached" last_error in
+      Lwt.return (Resilience.Error message)
+    else
+      let* () =
+        if n > 1 then
+          let delay_ms = Resilience.calculate_delay policy (n - 1) in
+          Lwt_unix.sleep (delay_ms /. 1000.0)
+        else
+          Lwt.return_unit
+      in
+      Lwt.catch
+        (fun () ->
+          let* result = op () in
+          (match circuit_breaker with
+           | Some cb -> Resilience.circuit_record_success cb
+           | None -> ());
+          Lwt.return (Resilience.Ok result))
+        (function
+          | LlmRetryableError msg ->
+              (match circuit_breaker with
+               | Some cb -> Resilience.circuit_record_failure cb
+               | None -> ());
+              attempt (n + 1) (Some msg)
+          | Lwt_unix.Timeout ->
+              (match circuit_breaker with
+               | Some cb -> Resilience.circuit_record_failure cb
+               | None -> ());
+              attempt (n + 1) (Some "Timeout")
+          | exn ->
+              let message = Printexc.to_string exn in
+              (match circuit_breaker with
+               | Some cb -> Resilience.circuit_record_failure cb
+               | None -> ());
+              Lwt.return (Resilience.Error message))
+  in
+  attempt 1 None
+
 let getenv_opt name =
   try Some (Sys.getenv name)
   with Not_found -> None
@@ -50,8 +99,6 @@ let get_bool key json =
   match member key json with
   | Some (`Bool b) -> Some b
   | _ -> None
-
-exception LlmRetryableError of string
 
 let post_json ~url payload : (Yojson.Safe.t, string) result Lwt.t =
   let headers = Cohttp.Header.of_list [
@@ -140,18 +187,18 @@ let post_json ~url payload : (Yojson.Safe.t, string) result Lwt.t =
         | exn -> Lwt.return (Result.Error (Printexc.to_string exn)))
   in
 
-  let* result = Resilience.with_retry_lwt 
-    ~policy:retry_policy 
-    ~circuit_breaker:(Some llm_breaker) 
+  let* result = with_retry_lwt
+    ~policy:retry_policy
+    ~circuit_breaker:(Some llm_breaker)
     ~op_name:"llm_mcp_post"
     op
   in
-  match result with 
-  | Resilience.Success (Ok json) -> Lwt.return (Ok json)
-  | Resilience.Success (Error err) -> Lwt.return (Error err)
-  | Resilience.Exhausted { last_error; _ } -> Lwt.return (Error ("LLM MCP exhausted: " ^ last_error))
+  match result with
+  | Resilience.Ok (Ok json) -> Lwt.return (Ok json)
+  | Resilience.Ok (Error err) -> Lwt.return (Error err)
+  | Resilience.Error err -> Lwt.return (Error ("LLM MCP exhausted: " ^ err))
   | Resilience.CircuitOpen -> Lwt.return (Error "LLM MCP circuit breaker open")
-  | Resilience.TimedOut _ -> Lwt.return (Error "LLM MCP timed out")
+  | Resilience.TimedOut -> Lwt.return (Error "LLM MCP timed out")
 
 let extract_text_from_content content =
   let extract_item = function

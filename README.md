@@ -47,7 +47,7 @@ echo '{"jsonrpc":"2.0","id":5,"method":"prompts/get","params":{"name":"figma_fid
 
 - `docs/RECIPES.md` - end-to-end usage patterns (quickstart, high fidelity, large nodes)
 
-## 도구 목록 (51개)
+## 도구 목록 (52개)
 
 ### Phase 1: Core
 | Tool | 설명 | 테스트 |
@@ -60,6 +60,7 @@ echo '{"jsonrpc":"2.0","id":5,"method":"prompts/get","params":{"name":"figma_fid
 | `figma_get_node_with_image` | 노드 DSL + 이미지 URL 동시 반환 | ✅ |
 | `figma_get_node_bundle` | 정확도 극대화 번들(DSL+렌더+메타+변수+fills) | ✅ |
 | `figma_get_node_summary` | 경량 구조 요약 | ✅ |
+| `figma_select_nodes` | 후보 노드 점수화/선별 + 노트 텍스트 분리 | ✅ |
 | `figma_get_node_chunk` | 깊이 범위별 노드 청크 로드 | ✅ |
 | `figma_chunk_index` | DSL 청킹 인덱스/요약/선택 | ✅ |
 | `figma_chunk_get` | 청크 인덱스 기반 데이터 조회 | ✅ |
