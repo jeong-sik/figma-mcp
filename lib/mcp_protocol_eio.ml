@@ -163,6 +163,7 @@ let classify_message body_str =
 (** SSE client registry for shutdown notification *)
 type sse_client = {
   body: Httpun.Body.Writer.t;
+  mutex: Eio.Mutex.t;
   mutable connected: bool;
 }
 let sse_clients : (int, sse_client) Hashtbl.t = Hashtbl.create 16
@@ -180,9 +181,9 @@ let format_sse_data data =
 let register_sse_client body =
   incr sse_client_counter;
   let id = !sse_client_counter in
-  let client = { body; connected = true } in
+  let client = { body; mutex = Eio.Mutex.create (); connected = true } in
   Hashtbl.add sse_clients id client;
-  id
+  (id, client)
 
 let unregister_sse_client id =
   (match Hashtbl.find_opt sse_clients id with
@@ -191,11 +192,13 @@ let unregister_sse_client id =
   Hashtbl.remove sse_clients id
 
 (** Send SSE event and flush immediately *)
-let send_sse_event body ~event ~data =
+let send_sse_event client ~event ~data =
   let data_lines = format_sse_data data in
   let msg = sprintf "event: %s\n%s\n\n" event data_lines in
-  Httpun.Body.Writer.write_string body msg;
-  Httpun.Body.Writer.flush body ignore
+  Eio.Mutex.use_rw ~protect:true client.mutex (fun () ->
+    Httpun.Body.Writer.write_string client.body msg;
+    Httpun.Body.Writer.flush client.body ignore
+  )
 
 let broadcast_sse_shutdown reason =
   let data = sprintf
@@ -205,7 +208,7 @@ let broadcast_sse_shutdown reason =
   Hashtbl.iter (fun _ client ->
     if client.connected then
       try
-        send_sse_event client.body ~event:"notification" ~data
+        send_sse_event client ~event:"notification" ~data
       with _ -> ()
   ) sse_clients
 
@@ -296,7 +299,7 @@ let mcp_post_handler ~sw ~domain_mgr server request reqd =
              Eio.Fiber.fork ~sw (fun () ->
                try
                  let response_str = run_mcp_request ~domain_mgr server body_str in
-                 send_sse_event client.body ~event:"message" ~data:response_str
+                 send_sse_event client ~event:"message" ~data:response_str
                with _ ->
                  unregister_sse_client id)
          | None ->
@@ -307,18 +310,18 @@ let mcp_post_handler ~sw ~domain_mgr server request reqd =
 let mcp_sse_handler ~clock _request reqd =
   Response.sse_stream reqd ~on_write:(fun body ->
     (* Register client for shutdown broadcast *)
-    let client_id = register_sse_client body in
+    let client_id, client = register_sse_client body in
 
     (* Send initial endpoint event (MCP protocol requirement) *)
     let endpoint = sprintf "/mcp?client_id=%d" client_id in
-    send_sse_event body ~event:"endpoint" ~data:endpoint;
+    send_sse_event client ~event:"endpoint" ~data:endpoint;
 
     (* Keep connection alive with periodic pings *)
     let rec ping_loop () =
       try
         Eio.Time.sleep clock 15.0;
         let timestamp = string_of_float (Unix.gettimeofday ()) in
-        send_sse_event body ~event:"ping" ~data:timestamp;
+        send_sse_event client ~event:"ping" ~data:timestamp;
         ping_loop ()
       with _ ->
         (* Client disconnected or error - unregister and close *)
