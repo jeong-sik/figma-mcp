@@ -131,17 +131,25 @@ let render_html_to_png ?(width=375) ?(height=812) html =
       else Error ("Failed to parse render output: " ^ output))
   | Error e -> Error e
 
-(** 두 PNG 이미지의 SSIM 비교
+(** 두 PNG 이미지의 SSIM 및 Delta E 비교
 
     @param figma_png Figma에서 내보낸 PNG 경로
     @param html_png HTML 렌더링 결과 PNG 경로
-    @return SSIM 점수 (0.0 ~ 1.0)
+    @return (SSIM, Delta E) 또는 에러 메시지
 *)
 let compare_renders ~figma_png ~html_png =
-  (* compare_paths_auto: OCaml native → Node.js fallback *)
   match Figma_image_similarity.compare_paths_auto ~path_a:figma_png ~path_b:html_png with
-  | Ok metrics -> Ok metrics.ssim
+  | Ok metrics -> Ok (metrics.ssim, metrics.delta_e)
   | Error e -> Error e
+
+(** Human-Eye SSIM 계산
+    SSIM(구조)과 Delta E(색상)를 결합하여 인간의 인지적 유사도를 도출합니다.
+    Delta E 1.0 = JND (Just Noticeable Difference).
+    Delta E > 10.0 = Significant difference.
+*)
+let calculate_human_ssim ssim delta_e =
+  let color_penalty = min 1.0 (delta_e /. 50.0) in (* 50 이상이면 색상 점수 0 *)
+  ssim *. (1.0 -. color_penalty)
 
 (** 전체 비교 메트릭 반환 *)
 let compare_renders_full ~figma_png ~html_png =
@@ -186,6 +194,7 @@ type comparison_with_regions = {
   ssim: float;
   psnr: float;
   mse: float;
+  delta_e: float;
   diff_pixels: int;
   total_pixels: int;
   width: int;
@@ -259,12 +268,13 @@ let compare_renders_with_regions ~figma_png ~html_png : (comparison_with_regions
         let ssim = json |> member "ssim" |> to_float in
         let psnr = json |> member "psnr" |> to_float in
         let mse = json |> member "mse" |> to_float in
+        let delta_e = json |> member "deltaE" |> to_float_option |> Option.value ~default:0.0 in
         let diff_pixels = json |> member "diffPixels" |> to_int in
         let total_pixels = json |> member "totalPixels" |> to_int in
         let width = json |> member "width" |> to_int in
         let height = json |> member "height" |> to_int in
         let regions = parse_diff_regions json in
-        Ok { ssim; psnr; mse; diff_pixels; total_pixels; width; height; regions }
+        Ok { ssim; psnr; mse; delta_e; diff_pixels; total_pixels; width; height; regions }
     | error_msg -> Error (to_string error_msg)
   with e -> Error (sprintf "JSON parse error: %s\nOutput: %s" (Printexc.to_string e) output)
 
@@ -468,6 +478,8 @@ let apply_corrections hints html =
 type evolution_step = {
   step_num: int;
   step_ssim: float;
+  step_delta_e: float;
+  step_human_ssim: float;
   step_html_path: string;
   step_png_path: string;
   corrections_this_step: correction_hint list;
@@ -475,6 +487,8 @@ type evolution_step = {
 
 type verification_result = {
   ssim: float;
+  delta_e: float;
+  human_ssim: float;
   passed: bool;
   iterations: int;
   figma_png: string;
@@ -490,6 +504,8 @@ let step_to_json step =
   `Assoc [
     ("step", `Int step.step_num);
     ("ssim", `Float step.step_ssim);
+    ("delta_e", `Float step.step_delta_e);
+    ("human_ssim", `Float step.step_human_ssim);
     ("html_path", `String step.step_html_path);
     ("png_path", `String step.step_png_path);
     ("corrections", `List (List.map hint_to_json step.corrections_this_step));
@@ -499,6 +515,8 @@ let step_to_json step =
 let result_to_json result =
   `Assoc [
     ("ssim", `Float result.ssim);
+    ("delta_e", `Float result.delta_e);
+    ("human_ssim", `Float result.human_ssim);
     ("passed", `Bool result.passed);
     ("iterations", `Int result.iterations);
     ("figma_png", `String result.figma_png);
@@ -569,22 +587,25 @@ let verify_visual
         let saved_html = if save_evolution then save_html ~dir:evo_dir ~step:iteration current_html else "" in
         (match compare_renders_with_regions ~figma_png ~html_png with
         | Ok result ->
+          let hssim = calculate_human_ssim result.ssim result.delta_e in
           let step = { step_num = iteration; step_ssim = result.ssim;
+                       step_delta_e = result.delta_e; step_human_ssim = hssim;
                        step_html_path = saved_html; step_png_path = saved_png;
                        corrections_this_step = [] } in
-          { ssim = result.ssim; passed = result.ssim >= target_ssim; iterations = iteration - 1;
+          { ssim = result.ssim; delta_e = result.delta_e; human_ssim = hssim;
+            passed = hssim >= target_ssim; iterations = iteration - 1;
             figma_png; html_png = saved_png; corrections_applied = corrections;
             final_html = Some current_html;
             evolution_history = List.rev (step :: history);
             evolution_dir = evo_dir }
         | Error _ ->
-          { ssim = 0.0; passed = false; iterations = iteration - 1;
+          { ssim = 0.0; delta_e = 0.0; human_ssim = 0.0; passed = false; iterations = iteration - 1;
             figma_png; html_png = ""; corrections_applied = corrections;
             final_html = Some current_html;
             evolution_history = List.rev history;
             evolution_dir = evo_dir })
       | Error _ ->
-        { ssim = 0.0; passed = false; iterations = iteration - 1;
+        { ssim = 0.0; delta_e = 0.0; human_ssim = 0.0; passed = false; iterations = iteration - 1;
           figma_png; html_png = ""; corrections_applied = corrections;
           final_html = Some current_html;
           evolution_history = List.rev history;
@@ -592,7 +613,7 @@ let verify_visual
     else
       match render_html_to_png ~width ~height current_html with
       | Error _e ->
-        { ssim = 0.0; passed = false; iterations = iteration;
+        { ssim = 0.0; delta_e = 0.0; human_ssim = 0.0; passed = false; iterations = iteration;
           figma_png; html_png = ""; corrections_applied = corrections;
           final_html = None;
           evolution_history = List.rev history;
@@ -602,18 +623,21 @@ let verify_visual
         let saved_html = if save_evolution then save_html ~dir:evo_dir ~step:iteration current_html else "" in
         match compare_renders_with_regions ~figma_png ~html_png with
         | Error _ ->
-          { ssim = 0.0; passed = false; iterations = iteration;
+          { ssim = 0.0; delta_e = 0.0; human_ssim = 0.0; passed = false; iterations = iteration;
             figma_png; html_png = saved_png; corrections_applied = corrections;
             final_html = Some current_html;
             evolution_history = List.rev history;
             evolution_dir = evo_dir }
         | Ok result ->
+          let hssim = calculate_human_ssim result.ssim result.delta_e in
           let step = { step_num = iteration; step_ssim = result.ssim;
+                       step_delta_e = result.delta_e; step_human_ssim = hssim;
                        step_html_path = saved_html; step_png_path = saved_png;
                        corrections_this_step = [] } in
-          if result.ssim >= target_ssim then
+          if hssim >= target_ssim then
             (* 목표 달성! *)
-            { ssim = result.ssim; passed = true; iterations = iteration;
+            { ssim = result.ssim; delta_e = result.delta_e; human_ssim = hssim;
+              passed = true; iterations = iteration;
               figma_png; html_png = saved_png; corrections_applied = corrections;
               final_html = Some current_html;
               evolution_history = List.rev (step :: history);
@@ -629,13 +653,13 @@ let verify_visual
 
 (** ============== Diff 시각화 ============== *)
 
-(** Quadrant SSIM 결과 *)
+(** Quadrant SSIM 결과 (SSIM, Delta E) *)
 type quadrant_result = {
-  top_left: float;
-  top_right: float;
-  bottom_left: float;
-  bottom_right: float;
-  overall: float;
+  top_left: float * float;
+  top_right: float * float;
+  bottom_left: float * float;
+  bottom_right: float * float;
+  overall: float * float;
 }
 
 (** 4분면별 SSIM 분석
@@ -656,7 +680,7 @@ let quadrant_analysis ~figma_png ~html_png =
            run_command "sh" [|"sh"; "-c"; cmd_b|]) with
     | (Ok _, Ok _) ->
         (match compare_renders ~figma_png:figma_crop ~html_png:html_crop with
-         | Ok ssim -> Some ssim
+         | Ok (ssim, de) -> Some (ssim, de)
          | Error _ -> None)
     | _ -> None
   in
@@ -676,11 +700,11 @@ let quadrant_analysis ~figma_png ~html_png =
       let br = crop_and_compare ~crop_spec:(sprintf "%dx%d+%d+%d" hw hh hw hh) ~suffix:"br" in
 
       Ok {
-        top_left = Option.value tl ~default:0.0;
-        top_right = Option.value tr ~default:0.0;
-        bottom_left = Option.value bl ~default:0.0;
-        bottom_right = Option.value br ~default:0.0;
-        overall = metrics.ssim;
+        top_left = Option.value tl ~default:(0.0, 0.0);
+        top_right = Option.value tr ~default:(0.0, 0.0);
+        bottom_left = Option.value bl ~default:(0.0, 0.0);
+        bottom_right = Option.value br ~default:(0.0, 0.0);
+        overall = (metrics.ssim, metrics.delta_e);
       }
 
 (** Diff 이미지 생성 결과 *)
@@ -776,18 +800,29 @@ let generate_diff_images ~figma_png ~html_png =
 
 (** Diff 결과를 JSON으로 변환 *)
 let quadrant_result_to_json result =
+  let json_field (ssim, de) =
+    `Assoc [
+      ("ssim", `Float ssim);
+      ("delta_e", `Float de);
+      ("human_ssim", `Float (calculate_human_ssim ssim de));
+    ]
+  in
   `Assoc [
-    ("top_left", `Float result.top_left);
-    ("top_right", `Float result.top_right);
-    ("bottom_left", `Float result.bottom_left);
-    ("bottom_right", `Float result.bottom_right);
-    ("overall", `Float result.overall);
+    ("top_left", json_field result.top_left);
+    ("top_right", json_field result.top_right);
+    ("bottom_left", json_field result.bottom_left);
+    ("bottom_right", json_field result.bottom_right);
+    ("overall", json_field result.overall);
     ("worst_quadrant", `String (
-      let min_ssim = min (min result.top_left result.top_right)
-                        (min result.bottom_left result.bottom_right) in
-      if min_ssim = result.top_left then "top_left"
-      else if min_ssim = result.top_right then "top_right"
-      else if min_ssim = result.bottom_left then "bottom_left"
+      let hssim (s, d) = calculate_human_ssim s d in
+      let tl_h = hssim result.top_left in
+      let tr_h = hssim result.top_right in
+      let bl_h = hssim result.bottom_left in
+      let br_h = hssim result.bottom_right in
+      let min_h = min (min tl_h tr_h) (min bl_h br_h) in
+      if min_h = tl_h then "top_left"
+      else if min_h = tr_h then "top_right"
+      else if min_h = bl_h then "bottom_left"
       else "bottom_right"
     ));
   ]

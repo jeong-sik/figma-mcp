@@ -124,6 +124,8 @@ let test_suggest_corrections_high_ssim () =
 let test_result_to_json () =
   let result = Visual_verifier.{
     ssim = 0.97;
+    delta_e = 0.5;
+    human_ssim = 0.96;
     passed = true;
     iterations = 2;
     figma_png = "/tmp/figma.png";
@@ -136,6 +138,8 @@ let test_result_to_json () =
   let json = Visual_verifier.result_to_json result in
   let open Yojson.Safe.Util in
   check (Alcotest.float 0.001) "ssim" 0.97 (json |> member "ssim" |> to_float);
+  check (Alcotest.float 0.001) "delta_e" 0.5 (json |> member "delta_e" |> to_float);
+  check (Alcotest.float 0.001) "human_ssim" 0.96 (json |> member "human_ssim" |> to_float);
   check bool "passed" true (json |> member "passed" |> to_bool);
   check int "iterations" 2 (json |> member "iterations" |> to_int);
   check int "corrections count" 1 (json |> member "corrections_applied" |> to_list |> List.length)
@@ -209,19 +213,23 @@ let integration_tests = [
 
 let test_quadrant_result_to_json () =
   let result = Visual_verifier.{
-    top_left = 0.95;
-    top_right = 0.92;
-    bottom_left = 0.98;
-    bottom_right = 0.91;
-    overall = 0.94;
+    top_left = (0.95, 0.5);
+    top_right = (0.92, 1.0);
+    bottom_left = (0.98, 0.2);
+    bottom_right = (0.91, 2.0);
+    overall = (0.94, 0.8);
   } in
   let json = Visual_verifier.quadrant_result_to_json result in
   let open Yojson.Safe.Util in
-  check (Alcotest.float 0.001) "top_left" 0.95 (json |> member "top_left" |> to_float);
-  check (Alcotest.float 0.001) "top_right" 0.92 (json |> member "top_right" |> to_float);
-  check (Alcotest.float 0.001) "bottom_left" 0.98 (json |> member "bottom_left" |> to_float);
-  check (Alcotest.float 0.001) "bottom_right" 0.91 (json |> member "bottom_right" |> to_float);
-  check (Alcotest.float 0.001) "overall" 0.94 (json |> member "overall" |> to_float)
+  let check_field name expected_ssim =
+    let field = json |> member name in
+    check (Alcotest.float 0.001) (name ^ " ssim") expected_ssim (field |> member "ssim" |> to_float)
+  in
+  check_field "top_left" 0.95;
+  check_field "top_right" 0.92;
+  check_field "bottom_left" 0.98;
+  check_field "bottom_right" 0.91;
+  check_field "overall" 0.94
 
 let test_diff_image_result_to_json () =
   let result = Visual_verifier.{
@@ -254,7 +262,7 @@ let test_quadrant_analysis_integration () =
       match Visual_verifier.quadrant_analysis ~figma_png:img1 ~html_png:img2 with
       | Ok result ->
           (* 동일 이미지이므로 높은 SSIM 예상 *)
-          check bool "overall ssim high" true (result.overall >= 0.9);
+          check bool "overall ssim high" true (fst result.overall >= 0.9);
           Unix.unlink img1;
           Unix.unlink img2
       | Error e ->

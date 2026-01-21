@@ -3,7 +3,8 @@
 type image = {
   width: int;
   height: int;
-  luma: float array;
+  lab: Ciede2000.lab array;
+  luma: float array; (** Backward compatibility for SSIM *)
 }
 
 type metrics = {
@@ -16,6 +17,7 @@ type metrics = {
   mse: float;
   psnr: float;
   ssim: float;
+  delta_e: float; (** Average CIEDE2000 color difference *)
 }
 
 let find_in_path bin =
@@ -124,15 +126,22 @@ let load_ppm path : (image, string) result =
     else
       let scale = 1.0 /. float_of_int maxv in
       let luma = Array.make (width * height) 0.0 in
+      let lab = Array.make (width * height) {Ciede2000.l=0.0; a=0.0; b=0.0} in
       for i = 0 to (width * height - 1) do
         let base = i * 3 in
         let r = float_of_int (Char.code pixel_data.[base]) in
         let g = float_of_int (Char.code pixel_data.[base + 1]) in
         let b = float_of_int (Char.code pixel_data.[base + 2]) in
+        
+        (* Backward compatible Luma calculation *)
         let y = (0.2126 *. r +. 0.7152 *. g +. 0.0722 *. b) *. scale in
-        luma.(i) <- y
+        luma.(i) <- y;
+
+        (* Lab calculation for CIEDE2000 *)
+        let rgb = { Ciede2000.r = r *. scale *. 255.0; g = g *. scale *. 255.0; b = b *. scale *. 255.0 } in
+        lab.(i) <- Ciede2000.rgb_to_lab rgb;
       done;
-      Ok { width; height; luma }
+      Ok { width; height; lab; luma }
 
 let ensure_ppm path =
   if Filename.extension path = ".ppm" then
@@ -228,6 +237,23 @@ let ssim a b ~window =
     done;
     if !count = 0 then 0.0 else !sum /. float_of_int !count
 
+let calculate_avg_delta_e a b =
+  let width = min a.width b.width in
+  let height = min a.height b.height in
+  let count = width * height in
+  if count = 0 then 0.0
+  else
+    let sum = ref 0.0 in
+    for y = 0 to height - 1 do
+      let row_a = y * a.width in
+      let row_b = y * b.width in
+      for x = 0 to width - 1 do
+        let d = Ciede2000.delta_e a.lab.(row_a + x) b.lab.(row_b + x) in
+        sum := !sum +. d
+      done
+    done;
+    !sum /. float_of_int count
+
 let compare_paths ~path_a ~path_b : (metrics, string) result =
   match ensure_ppm path_a with
   | Error err -> Error err
@@ -239,6 +265,7 @@ let compare_paths ~path_a ~path_b : (metrics, string) result =
             | (Ok img_a, Ok img_b) ->
                 let (mse, psnr, overlap_w, overlap_h) = mse_psnr img_a img_b in
                 let ssim_value = ssim img_a img_b ~window:8 in
+                let delta_e_value = calculate_avg_delta_e img_a img_b in
                 Ok {
                   width_a = img_a.width;
                   height_a = img_a.height;
@@ -249,6 +276,7 @@ let compare_paths ~path_a ~path_b : (metrics, string) result =
                   mse;
                   psnr;
                   ssim = ssim_value;
+                  delta_e = delta_e_value;
                 }
             | (Error err, _) -> Error err
             | (_, Error err) -> Error err))
@@ -293,6 +321,7 @@ let compare_with_nodejs ~path_a ~path_b : (metrics, string) result =
             let ssim = json |> member "ssim" |> to_float in
             let psnr = json |> member "psnr" |> to_float in
             let mse = json |> member "mse" |> to_float in
+            let delta_e = json |> member "deltaE" |> to_float_option |> Option.value ~default:0.0 in
             let width = json |> member "width" |> to_int in
             let height = json |> member "height" |> to_int in
             Ok {
@@ -305,6 +334,7 @@ let compare_with_nodejs ~path_a ~path_b : (metrics, string) result =
               mse;
               psnr;
               ssim;
+              delta_e;
             }
         | error_msg -> Error (to_string error_msg)
       with e -> Error (Printf.sprintf "JSON parse error: %s\nOutput: %s" (Printexc.to_string e) output)
