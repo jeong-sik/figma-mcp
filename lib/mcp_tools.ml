@@ -253,32 +253,8 @@ let tool_figma_get_node_chunk : tool_def = {
   ] [];
 }
 
-let tool_figma_chunk_index : tool_def = {
-  name = "figma_chunk_index";
-  description = "Figma DSL을 청킹한 뒤 청크 인덱스와 요약 통계를 반환합니다.";
-  input_schema = object_schema [
-    ("file_key", string_prop "Figma 파일 키");
-    ("node_id", string_prop "노드 ID (예: 123:456)");
-    ("url", string_prop "Figma URL (file_key/node_id 자동 추출)");
-    ("token", string_prop "Figma Personal Access Token (optional if FIGMA_TOKEN env var is set)");
-    ("format", enum_prop ["fidelity"; "raw"] "청킹 대상 포맷 (기본값: fidelity)");
-    ("depth", number_prop "Figma API depth");
-    ("geometry", enum_prop ["paths"] "벡터 경로 포함 (geometry=paths)");
-    ("chunk_size", number_prop "청크당 children 수 (기본값: 50)");
-    ("sample_size", number_prop "인덱스 샘플 크기 (기본값: 6)");
-    ("context_max_depth", number_prop "컨텍스트 최대 깊이 (기본값: 6)");
-    ("context_max_children", number_prop "컨텍스트 자식 최대 수 (기본값: 200)");
-    ("context_max_list_items", number_prop "컨텍스트 리스트 최대 항목 수 (기본값: 200)");
-    ("context_max_string", number_prop "컨텍스트 문자열 최대 길이 (기본값: 2000)");
-    ("selection_mode", enum_prop ["none"; "heuristic"; "llm"] "청크 선택 전략 (기본값: none)");
-    ("selection_limit", number_prop "선택할 청크 수 (기본값: 4)");
-    ("selection_task", string_prop "청크 선택 기준 설명 (옵션)");
-    ("selection_provider", enum_prop ["mcp-http"; "stub"] "LLM provider (기본값: mcp-http)");
-    ("selection_llm_tool", enum_prop ["codex"; "claude-cli"; "gemini"; "ollama"] "LLM 도구 (기본값: codex)");
-    ("selection_llm_args", object_prop "LLM 호출 인자 (model/timeout/...)");
-    ("selection_mcp_url", string_prop "MCP endpoint URL override");
-  ] [];
-}
+(* NOTE: figma_chunk_index was removed - not implemented.
+   Use figma_get_node + figma_codegen separately for chunked processing. *)
 
 let tool_figma_chunk_get : tool_def = {
   name = "figma_chunk_get";
@@ -896,7 +872,6 @@ let all_tools = [
   tool_figma_get_node_summary;
   tool_figma_select_nodes;
   tool_figma_get_node_chunk;
-  tool_figma_chunk_index;
   tool_figma_chunk_get;
   tool_figma_fidelity_loop;
   tool_figma_image_similarity;
@@ -5364,10 +5339,6 @@ let handle_codegen_sync args : (Yojson.Safe.t, string) result =
        | Ok result -> Ok (make_text_content result)
        | Error msg -> Error msg)
 
-(** chunk_index 핸들러 - Not implemented (use figma_get_node + figma_codegen separately) *)
-let handle_chunk_index_sync _args : (Yojson.Safe.t, string) result =
-  Error "figma_chunk_index is not implemented. Use figma_get_node + figma_codegen separately for chunked processing."
-
 (** llm_call 동기 버전 - Pure Eio *)
 let handle_llm_call_sync args : (Yojson.Safe.t, string) result =
   let provider_name = get_string_any ["provider"; "llm_provider"] args in
@@ -5480,7 +5451,6 @@ let all_handlers_sync : (string * tool_handler_sync) list = [
   ("figma_get_node_summary", wrap_sync_pure handle_get_node_summary);
   ("figma_select_nodes", wrap_sync_pure handle_select_nodes);
   ("figma_get_node_chunk", wrap_sync_pure handle_get_node_chunk);
-  ("figma_chunk_index", wrap_sync_pure handle_chunk_index_sync);
   ("figma_chunk_get", wrap_sync_pure handle_chunk_get);
   ("figma_fidelity_loop", wrap_sync_pure handle_fidelity_loop);
   ("figma_image_similarity", wrap_sync_pure handle_image_similarity);
