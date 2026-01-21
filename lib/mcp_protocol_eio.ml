@@ -289,11 +289,18 @@ let mcp_post_handler ~sw ~domain_mgr server request reqd =
                try
                  let response_str = run_mcp_request ~domain_mgr server body_str in
                  send_sse_event client ~event:"message" ~data:response_str
-               with _ ->
+               with exn ->
+                 eprintf "[MCP] SSE request failed (client=%d): %s\n%!" id (Printexc.to_string exn);
                  unregister_sse_client id)
          | None ->
-             let response_str = run_mcp_request ~domain_mgr server body_str in
-             Response.json response_str reqd))
+             (try
+               let response_str = run_mcp_request ~domain_mgr server body_str in
+               Response.json response_str reqd
+             with exn ->
+               eprintf "[MCP] request failed: %s\n%!" (Printexc.to_string exn);
+               let err = Mcp_protocol.make_error_response `Null
+                 Mcp_protocol.internal_error (Printexc.to_string exn) None in
+               Response.json ~status:`Internal_server_error (Yojson.Safe.to_string err) reqd)))
 
 (** MCP SSE handler for streamable-http protocol (GET /mcp) *)
 let mcp_sse_handler ~clock _request reqd =
