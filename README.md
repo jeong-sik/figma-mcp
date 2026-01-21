@@ -483,16 +483,29 @@ figma_llm_call
 
 슬롯이 비어 있으면 `figma_llm_*`만 실패하고 나머지 도구는 정상 동작합니다.
 
-## gRPC Streaming (대용량 응답)
+## gRPC Streaming (대용량 응답) - 권장
 
-대형 노드/반복 깊이 증가 작업은 gRPC 스트리밍이 유리합니다.
+### 언제 gRPC를 사용해야 하나?
+
+| 상황 | 권장 프로토콜 | 이유 |
+|------|--------------|------|
+| 7MB+ JSON 응답 | **gRPC** ✅ | 청크 스트리밍으로 메모리 효율적 |
+| 대형 Figma 파일 (100+ 노드) | **gRPC** ✅ | 점진적 로딩으로 타임아웃 방지 |
+| 재귀 탐색 (recursive: true) | **gRPC** ✅ | 실시간 진행 상황 표시 |
+| 빠른 단일 노드 조회 | HTTP | 오버헤드 낮음 |
+| Claude Code stdio 통합 | HTTP | MCP 프로토콜 호환 |
+
+> **권장**: 대용량 응답이 예상되면 **HTTP + gRPC 동시 실행** 모드를 사용하세요.
 
 ```bash
-# gRPC 단독 실행
+# ⭐ 권장: HTTP + gRPC 동시 실행 (production)
+./figma-mcp --port 8940 --grpc-port 50052
+
+# gRPC 단독 실행 (streaming-only 환경)
 ./figma-mcp --grpc-port 50052
 
-# HTTP + gRPC 동시 실행
-./figma-mcp --port 8940 --grpc-port 50052
+# HTTP 단독 실행 (소규모 요청)
+./figma-mcp --port 8940
 ```
 
 서비스/메서드:
