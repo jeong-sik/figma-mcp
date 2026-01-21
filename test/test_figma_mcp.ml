@@ -308,7 +308,7 @@ let tokens_tests = [
 let test_tool_codegen () =
   let json_str = read_fixture "simple_frame.json" in
   let args = `Assoc [("json", `String json_str); ("format", `String "compact")] in
-  match Lwt_main.run (Mcp_tools.handle_codegen args) with
+  match Mcp_tools.handle_codegen_sync args with
   | Ok result ->
       let content = Yojson.Safe.Util.(result |> member "content" |> to_list |> List.hd |> member "text" |> to_string) in
       check bool "result not empty" true (String.length content > 0)
@@ -317,7 +317,7 @@ let test_tool_codegen () =
 
 let test_tool_codegen_missing_json () =
   let args = `Assoc [("format", `String "compact")] in
-  match Lwt_main.run (Mcp_tools.handle_codegen args) with
+  match Mcp_tools.handle_codegen_sync args with
   | Ok _ -> fail "should have failed"
   | Error msg -> check bool "error mentions json" true (String.length msg > 0)
 

@@ -513,10 +513,10 @@ let run_stdio_server server =
         | Ok req ->
             if is_notification req then
               (* Notification: no response on stdout per JSON-RPC *)
-              ignore (Lwt_main.run (process_request server req))
+              ignore (process_request_sync server req)
             else
-              (* stdio 모드: Lwt_main.run으로 비동기 핸들러 실행 *)
-              let response = Lwt_main.run (process_request server req) in
+              (* stdio 모드: 동기 핸들러 직접 실행 (Lwt-free) *)
+              let response = process_request_sync server req in
               let response_str = Yojson.Safe.to_string response in
               print_endline response_str;
               flush stdout
@@ -534,7 +534,7 @@ let run_stdio_server server =
 
 (** ============== 서버 생성 헬퍼 ============== *)
 
-let create_server ?(handlers_sync=[]) tools handlers resources prompts read_resource =
+let create_server ?(handlers=[]) ?(handlers_sync=[]) tools resources prompts read_resource =
   { tools; handlers; handlers_sync; resources; prompts; read_resource }
 
 (** ============== HTTP 서버 (Cohttp-lwt) ============== *)
