@@ -6,14 +6,7 @@
    uri
    str
    ipaddr
-   ;; Lwt (Legacy: stdio mode only - HTTP/gRPC modes are Lwt-free)
-   ;; TODO: Remove when stdio mode is migrated to Eio
-   lwt
-   lwt.unix
-   cohttp-lwt-unix
-   conduit-lwt-unix
-   lwt_eio  ; Bridge for legacy fallback paths
-   ;; Eio (Primary: HTTP server + gRPC server + pure Figma API client)
+   ;; Eio (Pure: HTTP server + gRPC server + Figma API client)
    eio
    eio_main
    httpun-eio

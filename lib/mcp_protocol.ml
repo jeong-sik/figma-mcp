@@ -173,16 +173,12 @@ let prompt_to_detail_json (p : mcp_prompt) : Yojson.Safe.t =
 
 (** ============== 핸들러 타입 ============== *)
 
-(** 비동기 핸들러 - HTTP 모드에서 Lwt 루프 내 안전 실행 *)
-type tool_handler = Yojson.Safe.t -> (Yojson.Safe.t, string) result Lwt.t
-
-(** 동기 핸들러 타입 - HTTP/Eio 모드에서 사용 (Lwt 없음) *)
+(** 동기 핸들러 타입 - Pure Eio 기반 *)
 type tool_handler_sync = Yojson.Safe.t -> (Yojson.Safe.t, string) result
 
 type mcp_server = {
   tools: tool_def list;
-  handlers: (string * tool_handler) list;
-  handlers_sync: (string * tool_handler_sync) list;  (** HTTP 모드용 동기 핸들러 *)
+  handlers_sync: (string * tool_handler_sync) list;
   resources: mcp_resource list;
   prompts: mcp_prompt list;
   read_resource: resource_reader;
@@ -376,72 +372,9 @@ let handle_resources_read server params : (Yojson.Safe.t, int * string) result =
        | None -> Error (invalid_params, "Missing uri"))
   | _ -> Error (invalid_params, "Invalid params format")
 
-let handle_tools_call server params : (Yojson.Safe.t, int * string) result Lwt.t =
-  let open Lwt.Syntax in
-  match params with
-  | Some (`Assoc lst) ->
-      let name = match List.assoc_opt "name" lst with Some (`String s) -> Some s | _ -> None in
-      let arguments = List.assoc_opt "arguments" lst |> Option.value ~default:(`Assoc []) in
-      (match name with
-       | Some tool_name ->
-           (match List.assoc_opt tool_name server.handlers with
-            | Some handler ->
-                let* result = handler arguments in
-                (match result with
-                 | Ok res -> Lwt.return_ok res
-                 | Error msg -> Lwt.return_error (internal_error, msg))
-            | None -> Lwt.return_error (method_not_found, sprintf "Tool not found: %s" tool_name))
-       | None -> Lwt.return_error (invalid_params, "Missing tool name"))
-  | _ -> Lwt.return_error (invalid_params, "Invalid params format")
+(** ============== 동기 요청 처리 (Pure Eio) ============== *)
 
-(** ============== 메인 요청 처리 (비동기) ============== *)
-
-let process_request server req : Yojson.Safe.t Lwt.t =
-  let open Lwt.Syntax in
-  let id = Option.value req.id ~default:`Null in
-
-  match req.method_ with
-  | "initialize" ->
-      Lwt.return (make_success_response id (handle_initialize req.params))
-
-  | "initialized" | "notifications/initialized" ->
-      (* 알림 - 응답 불필요하지만 여기서는 빈 응답 *)
-      Lwt.return (make_success_response id `Null)
-
-  | "tools/list" ->
-      Lwt.return (make_success_response id (handle_tools_list server req.params))
-
-  | "tools/call" ->
-      let* result = handle_tools_call server req.params in
-      (match result with
-       | Ok res -> Lwt.return (make_success_response id res)
-       | Error (code, msg) -> Lwt.return (make_error_response id code msg None))
-
-  | "resources/list" ->
-      Lwt.return (make_success_response id (handle_resources_list server req.params))
-
-  | "resources/templates/list" ->
-      Lwt.return (make_success_response id (`Assoc [("resourceTemplates", `List [])]))
-
-  | "resources/read" ->
-      (match handle_resources_read server req.params with
-       | Ok res -> Lwt.return (make_success_response id res)
-       | Error (code, msg) -> Lwt.return (make_error_response id code msg None))
-
-  | "prompts/list" ->
-      Lwt.return (make_success_response id (handle_prompts_list server req.params))
-
-  | "prompts/get" ->
-      (match handle_prompts_get server req.params with
-       | Ok res -> Lwt.return (make_success_response id res)
-       | Error (code, msg) -> Lwt.return (make_error_response id code msg None))
-
-  | _ ->
-      Lwt.return (make_error_response id method_not_found (sprintf "Unknown method: %s" req.method_) None)
-
-(** ============== 동기 요청 처리 (Eio/HTTP 모드용) ============== *)
-
-(** tools/call 동기 핸들러 - Lwt 없이 직접 실행 *)
+(** tools/call 핸들러 - 동기 실행 *)
 let handle_tools_call_sync server params : (Yojson.Safe.t, int * string) result =
   match params with
   | Some (`Assoc lst) ->
@@ -514,12 +447,13 @@ let run_stdio_server server =
             if is_notification req then
               (* Notification: no response on stdout per JSON-RPC *)
               ignore (process_request_sync server req)
-            else
-              (* stdio 모드: 동기 핸들러 직접 실행 (Lwt-free) *)
+            else begin
+              (* stdio 모드: 동기 핸들러 직접 실행 *)
               let response = process_request_sync server req in
               let response_str = Yojson.Safe.to_string response in
               print_endline response_str;
               flush stdout
+            end
         | Error msg ->
             let err_response = make_error_response `Null parse_error msg None in
             print_endline (Yojson.Safe.to_string err_response);
@@ -534,68 +468,5 @@ let run_stdio_server server =
 
 (** ============== 서버 생성 헬퍼 ============== *)
 
-let create_server ?(handlers=[]) ?(handlers_sync=[]) tools resources prompts read_resource =
-  { tools; handlers; handlers_sync; resources; prompts; read_resource }
-
-(** ============== HTTP 서버 (Cohttp-lwt) ============== *)
-
-let health_response () =
-  Yojson.Safe.to_string (`Assoc [
-    ("status", `String "ok");
-    ("server", `String server_name);
-    ("version", `String server_version);
-    ("protocol", `String protocol_version);
-  ])
-
-let run_http_server ~host ~port server =
-  let open Lwt.Syntax in
-  let open Cohttp_lwt_unix in
-
-  Printf.eprintf "🎨 %s MCP %s server\n" server_name protocol_version;
-  Printf.eprintf "   HTTP: http://%s:%d\n" host port;
-  Printf.eprintf "   MCP:  http://%s:%d/mcp\n%!" host port;
-
-  let cors_headers = [
-    ("Access-Control-Allow-Origin", "*");
-    ("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-    ("Access-Control-Allow-Headers", "Content-Type, Accept, Access-Control-Request-Private-Network");
-    ("Access-Control-Allow-Private-Network", "true");
-  ] in
-
-  let callback _conn req body =
-    let uri = Cohttp.Request.uri req in
-    let path = Uri.path uri in
-    let meth = Cohttp.Request.meth req in
-
-    match (meth, path) with
-    (* Health check *)
-    | `GET, "/health" ->
-        let headers = Cohttp.Header.of_list (("Content-Type", "application/json") :: cors_headers) in
-        Server.respond_string ~status:`OK ~headers ~body:(health_response ()) ()
-
-    (* CORS preflight *)
-    | `OPTIONS, _ ->
-        let headers = Cohttp.Header.of_list cors_headers in
-        Server.respond_string ~status:`No_content ~headers ~body:"" ()
-
-    (* MCP endpoint - HTTP 모드: Lwt 컨텍스트 내에서 비동기 처리 *)
-    | `POST, "/" | `POST, "/mcp" ->
-        let* body_str = Cohttp_lwt.Body.to_string body in
-        let* response_json =
-          match parse_request body_str with
-          | Ok req -> process_request server req
-          | Error msg -> Lwt.return (make_error_response `Null parse_error msg None)
-        in
-        let response_str = Yojson.Safe.to_string response_json in
-        let headers = Cohttp.Header.of_list (("Content-Type", "application/json") :: cors_headers) in
-        Server.respond_string ~status:`OK ~headers ~body:response_str ()
-
-    (* 404 *)
-    | _ ->
-        let headers = Cohttp.Header.of_list cors_headers in
-        Server.respond_string ~status:`Not_found ~headers ~body:"Not Found" ()
-  in
-
-  let server_config = Server.make ~callback () in
-  let* _server = Server.create ~mode:(`TCP (`Port port)) server_config in
-  Lwt.return_unit
+let create_server ?(handlers_sync=[]) tools resources prompts read_resource =
+  { tools; handlers_sync; resources; prompts; read_resource }

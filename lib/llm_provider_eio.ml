@@ -1,7 +1,7 @@
 (** LLM Provider abstraction (Pure Eio) *)
 
-(** Reuse the shared llm_response type *)
-type response = Llm_mcp_client.llm_response
+(** Response type from LLM MCP calls *)
+type response = Llm_mcp_client_eio.llm_response
 
 type provider = {
   id: string;

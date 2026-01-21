@@ -6,7 +6,8 @@ open Cmdliner
 
 let run_mcp_server_stdio () =
   let server = Figma_mcp.Tools.create_figma_server () in
-  Figma_mcp.Protocol.run_stdio_server server
+  (* Use Eio-based stdio server for pure Eio execution *)
+  Figma_mcp.Protocol_eio.start_stdio_server server
 
 let run_mcp_server_http ~port =
   let server = Figma_mcp.Tools.create_figma_server () in

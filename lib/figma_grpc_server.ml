@@ -13,7 +13,7 @@ open Printf
 let default_port = 50052  (* Separate from MCP server *)
 let max_chunk_size = 64 * 1024  (* 64KB per chunk *)
 
-(** ============== Eio Context (for Lwt-free API calls) ============== *)
+(** ============== Eio Context (Pure Eio API calls) ============== *)
 
 (** Existential wrapper for clock to hide the type parameter *)
 type any_clock = Clock : _ Eio.Time.clock -> any_clock
@@ -40,21 +40,18 @@ let eio_error_to_figma_error = function
   | Figma_api_eio.Network_error msg -> Figma_api.NetworkError msg
   | Figma_api_eio.Timeout_error -> Figma_api.NetworkError "Timeout"
 
-(** Wrapper: get_file_nodes using Eio (pure) or Lwt (fallback) *)
+(** Wrapper: get_file_nodes using Pure Eio *)
 let get_file_nodes_unified ?depth ?geometry ?plugin_data ?version ~token ~file_key ~node_ids () =
   match !grpc_eio_sw, !grpc_eio_clock, !grpc_eio_client with
   | Some sw, Some (Clock clock), Some client ->
-      (* Pure Eio path with timeout support *)
       (match Figma_api_eio.get_file_nodes ?depth ?geometry ?plugin_data ?version
                ~sw ~clock ~client ~token ~file_key ~node_ids () with
        | Ok json -> Ok json
        | Error err -> Error (eio_error_to_figma_error err))
   | _ ->
-      (* Fallback to Lwt bridge *)
-      Lwt_main.run (Figma_api.get_file_nodes ?depth ?geometry ?plugin_data ?version
-                      ~token ~file_key ~node_ids ())
+      Error (Figma_api.NetworkError "gRPC server not initialized with Eio context")
 
-(** Wrapper: get_file_meta using Eio (pure) or Lwt (fallback) *)
+(** Wrapper: get_file_meta using Pure Eio *)
 let get_file_meta_unified ?version ~token ~file_key () =
   match !grpc_eio_sw, !grpc_eio_clock, !grpc_eio_client with
   | Some sw, Some (Clock clock), Some client ->
@@ -62,7 +59,7 @@ let get_file_meta_unified ?version ~token ~file_key () =
        | Ok json -> Ok json
        | Error err -> Error (eio_error_to_figma_error err))
   | _ ->
-      Lwt_main.run (Figma_api.get_file_meta ?version ~token ~file_key ())
+      Error (Figma_api.NetworkError "gRPC server not initialized with Eio context")
 
 (** ============== Protobuf Encoding/Decoding ============== *)
 
@@ -687,7 +684,7 @@ module Handlers = struct
         end else begin
           eprintf "[gRPC] GetNodeStream file_key=%s node_id=%s token_len=%d\n%!"
             file_key node_id (String.length token);
-          (* Fetch from Figma API using unified wrapper (Eio preferred, Lwt fallback) *)
+          (* Fetch from Figma API using Pure Eio *)
           let result =
             get_file_nodes_unified
               ?depth:req.depth ?geometry:req.geometry ?plugin_data:req.plugin_data ?version:req.version
@@ -1202,7 +1199,7 @@ let create_server ~port () =
 
 (** Start the gRPC server *)
 let serve ~sw ~env ?(port=default_port) () =
-  (* Set Eio context for pure Eio API calls (Lwt-free path) *)
+  (* Set Eio context for pure Eio API calls *)
   let net = Eio.Stdenv.net env in
   let clock = Eio.Stdenv.clock env in
   let eio_client = Figma_api_eio.make_client net in

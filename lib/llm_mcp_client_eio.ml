@@ -209,8 +209,8 @@ let extract_text_from_content content =
       items |> List.filter_map extract_item |> String.concat "\n"
   | _ -> ""
 
-(** Reuse llm_response type from the Lwt module for type compatibility *)
-type llm_response = Llm_mcp_client.llm_response = {
+(** LLM response type *)
+type llm_response = {
   text: string;
   is_error: bool;
   raw: Yojson.Safe.t;

@@ -1,11 +1,11 @@
-(** MCP Protocol Eio - httpun-eio 기반 HTTP 서버
+(** MCP Protocol Eio - Pure Eio HTTP/stdio 서버
 
-    Eio-native HTTP server for MCP protocol.
-    Uses lwt_eio bridge for Figma API calls (cohttp-lwt-unix).
+    Pure Eio-native server for MCP protocol.
+    No Lwt dependencies - uses cohttp-eio for all HTTP operations.
 
     Architecture:
-    - Server: httpun-eio (Eio native, Effect-based)
-    - Client: cohttp-lwt-unix via lwt_eio bridge
+    - HTTP Server: httpun-eio (Eio native, Effect-based)
+    - HTTP Client: cohttp-eio (Pure Eio)
     - JSON-RPC: Reuses types from mcp_protocol.ml
 *)
 
@@ -118,8 +118,6 @@ end
 (** Process MCP request synchronously (Eio-native, no Lwt).
     Uses process_request_sync which calls handlers_sync directly. *)
 let process_mcp_request_sync (server : Mcp_protocol.mcp_server) body_str =
-  (* HTTP 모드 설정 *)
-  Mcp_tools.is_http_mode := true;
   match Mcp_protocol.parse_request body_str with
   | Ok req ->
       (* process_request_sync: Lwt 없이 직접 실행 *)
@@ -652,13 +650,11 @@ let run ~sw ~net ~clock ~domain_mgr config server =
 (** Graceful shutdown exception *)
 exception Shutdown
 
-(** Start the server - entry point for main.ml *)
+(** Start the server - entry point for main.ml (Pure Eio, no Lwt) *)
 let start_server ?(config = default_config) server =
   Eio_main.run @@ fun env ->
   let net = Eio.Stdenv.net env in
   let clock = Eio.Stdenv.clock env in
-  (* Initialize Lwt-Eio bridge for Lwt_eio.run_lwt calls in Effect handlers *)
-  Lwt_eio.with_event_loop ~clock @@ fun _ ->
   let domain_mgr = Some (Eio.Stdenv.domain_mgr env) in
 
   (* Graceful shutdown setup *)
@@ -693,3 +689,80 @@ let start_server ?(config = default_config) server =
       eprintf "🎨 %s: Shutdown complete.\n%!" Mcp_protocol.server_name
   | Eio.Cancel.Cancelled _ ->
       eprintf "🎨 %s: Shutdown complete.\n%!" Mcp_protocol.server_name)
+
+(** ============== stdio Server (Pure Eio) ============== *)
+
+(** Run stdio server with Eio - blocking loop reading from stdin *)
+let run_stdio ~sw ~env ~net ~clock server =
+  (* Set Eio context for pure Eio handlers *)
+  let eio_client = Figma_api_eio.make_client net in
+  Mcp_tools.set_eio_context ~sw ~clock ~client:eio_client;
+
+  eprintf "[%s] MCP Server started (protocol: %s, mode: stdio/Eio)\n%!"
+    Mcp_protocol.server_name Mcp_protocol.protocol_version;
+
+  (* Create buffered reader for stdin *)
+  let stdin_flow = Eio.Stdenv.stdin env in
+  let buf_read = Eio.Buf_read.of_flow ~max_size:(1024 * 1024) stdin_flow in
+
+  let rec read_loop () =
+    match Eio.Buf_read.line buf_read with
+    | line ->
+        if String.trim line <> "" then begin
+          match Mcp_protocol.parse_request line with
+          | Ok req ->
+              if Mcp_protocol.is_notification req then
+                (* Notification: no response on stdout per JSON-RPC *)
+                ignore (Mcp_protocol.process_request_sync server req)
+              else begin
+                (* Process request using sync handler (runs in Eio context) *)
+                let response = Mcp_protocol.process_request_sync server req in
+                let response_str = Yojson.Safe.to_string response in
+                print_endline response_str;
+                flush stdout
+              end
+          | Error msg ->
+              let err_response = Mcp_protocol.make_error_response `Null Mcp_protocol.parse_error msg None in
+              print_endline (Yojson.Safe.to_string err_response);
+              flush stdout
+        end;
+        read_loop ()
+    | exception End_of_file ->
+        eprintf "[%s] Connection closed (EOF)\n%!" Mcp_protocol.server_name
+    | exception Eio.Buf_read.Buffer_limit_exceeded ->
+        eprintf "[%s] Error: Input line too long\n%!" Mcp_protocol.server_name
+    | exception exn ->
+        eprintf "[%s] Error: %s\n%!" Mcp_protocol.server_name (Printexc.to_string exn)
+  in
+  read_loop ()
+
+(** Start stdio server - entry point that sets up Eio runtime *)
+let start_stdio_server server =
+  Eio_main.run @@ fun env ->
+  let net = Eio.Stdenv.net env in
+  let clock = Eio.Stdenv.clock env in
+
+  (* Graceful shutdown setup *)
+  let switch_ref = ref None in
+  let shutdown_initiated = ref false in
+  let initiate_shutdown signal_name =
+    if not !shutdown_initiated then begin
+      shutdown_initiated := true;
+      eprintf "\n[%s] Received %s, shutting down...\n%!" Mcp_protocol.server_name signal_name;
+      match !switch_ref with
+      | Some sw -> Eio.Switch.fail sw Shutdown
+      | None -> ()
+    end
+  in
+  Sys.set_signal Sys.sigterm (Sys.Signal_handle (fun _ -> initiate_shutdown "SIGTERM"));
+  Sys.set_signal Sys.sigint (Sys.Signal_handle (fun _ -> initiate_shutdown "SIGINT"));
+
+  (try
+    Eio.Switch.run @@ fun sw ->
+    switch_ref := Some sw;
+    run_stdio ~sw ~env ~net ~clock server
+  with
+  | Shutdown ->
+      eprintf "[%s] Shutdown complete.\n%!" Mcp_protocol.server_name
+  | Eio.Cancel.Cancelled _ ->
+      eprintf "[%s] Shutdown complete.\n%!" Mcp_protocol.server_name)

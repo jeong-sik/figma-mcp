@@ -1171,9 +1171,6 @@ let node_duplicate_key node =
   in
   String.concat "|" [type_str; name; size]
 
-(** 실행 모드 설정 - HTTP 서버에서 변경됨 *)
-let is_http_mode = ref false
-
 (** Eio context for pure Eio handlers (set by mcp_protocol_eio at startup) *)
 let eio_switch : Eio.Switch.t option ref = ref None
 let eio_client : Figma_api_eio.client option ref = ref None
@@ -1188,12 +1185,7 @@ let set_eio_context ~sw ~clock ~client =
   eio_clock := Some (Clock clock);
   eio_client := Some client
 
-(** Ensure effect handler in stdio mode for non-wrapped Lwt handlers. *)
-let run_with_effects f =
-  if !is_http_mode then f ()
-  else Figma_effects.run_with_real_api f
-
-(** Call LLM tool - prefers pure Eio when context available *)
+(** Call LLM tool - requires Eio context *)
 let call_llm_tool_eio ~(provider : Llm_provider_eio.provider) ~url ~name ~arguments =
   match !eio_switch, !eio_clock, !eio_client with
   | Some sw, Some (Clock clock), Some client ->
@@ -5350,20 +5342,18 @@ let handle_cache_invalidate args : (Yojson.Safe.t, string) result =
   in
   Ok (`Assoc [("status", `String "ok"); ("message", `String message)])
 
-(** ============== 핸들러 맵 (동기 - Lwt-free) ============== *)
+(** ============== 핸들러 맵 (Pure Eio) ============== *)
 
-(** 동기 래퍼 - Lwt 없이 Effect 핸들러로 감싸서 실행
-    Eio context가 있으면 pure Eio, 없으면 Lwt_eio fallback *)
+(** 동기 래퍼 - Pure Eio Effect 핸들러로 감싸서 실행 *)
 let wrap_sync_pure (f : Yojson.Safe.t -> (Yojson.Safe.t, string) result) : tool_handler_sync =
   fun args ->
     match !eio_switch, !eio_clock, !eio_client with
     | Some sw, Some (Clock clock), Some client ->
         Figma_effects.run_with_pure_eio_api ~sw ~clock ~client (fun () -> f args)
     | _ ->
-        (* Fallback: Lwt_eio 기반 *)
-        Figma_effects.run_with_eio_api (fun () -> f args)
+        Error "Eio context not set - server not properly initialized"
 
-(** Lwt 핸들러의 동기 버전들 - Lwt.return만 제거 *)
+(** 순수 함수 핸들러들 *)
 let handle_codegen_sync args : (Yojson.Safe.t, string) result =
   let json_str = get_string "json" args in
   let format = get_string_or "format" "fidelity" args in
@@ -5374,9 +5364,9 @@ let handle_codegen_sync args : (Yojson.Safe.t, string) result =
        | Ok result -> Ok (make_text_content result)
        | Error msg -> Error msg)
 
-(** chunk_index 동기 버전 - Placeholder (Lwt 기반 버전 사용 권장) *)
+(** chunk_index 핸들러 - Not implemented (use figma_get_node + figma_codegen separately) *)
 let handle_chunk_index_sync _args : (Yojson.Safe.t, string) result =
-  Error "figma_chunk_index requires Lwt-based processing. Use stdio mode or call figma_get_node + figma_codegen separately."
+  Error "figma_chunk_index is not implemented. Use figma_get_node + figma_codegen separately for chunked processing."
 
 (** llm_call 동기 버전 - Pure Eio *)
 let handle_llm_call_sync args : (Yojson.Safe.t, string) result =
