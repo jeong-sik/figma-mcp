@@ -229,3 +229,215 @@ let to_json tokens =
     ("spacing", `List spacing_json);
     ("borderRadius", `List radii_json);
   ])
+
+(** SwiftUI (iOS/macOS) *)
+let to_swiftui tokens =
+  let lines = Buffer.create 1024 in
+  Buffer.add_string lines "// DesignTokens.swift - Auto-generated from Figma\nimport SwiftUI\n\n";
+
+  (* Colors *)
+  Buffer.add_string lines "// MARK: - Colors\nextension Color {\n";
+  List.iter (fun (c: color_token) ->
+    let name = Str.global_replace (Str.regexp "-") "_" c.name in
+    Buffer.add_string lines (Printf.sprintf "    static let %s = Color(hex: \"%s\")\n" name c.hex)
+  ) tokens.colors;
+  Buffer.add_string lines "}\n\n";
+
+  (* Spacing *)
+  Buffer.add_string lines "// MARK: - Spacing\nenum Spacing {\n";
+  List.iter (fun (s: spacing_token) ->
+    let name = Printf.sprintf "space%.0f" s.value in
+    Buffer.add_string lines (Printf.sprintf "    static let %s: CGFloat = %.0f\n" name s.value)
+  ) tokens.spacing;
+  Buffer.add_string lines "}\n\n";
+
+  (* Border Radius *)
+  Buffer.add_string lines "// MARK: - Corner Radius\nenum CornerRadius {\n";
+  List.iter (fun (r: radius_token) ->
+    let name = Printf.sprintf "radius%.0f" r.value in
+    Buffer.add_string lines (Printf.sprintf "    static let %s: CGFloat = %.0f\n" name r.value)
+  ) tokens.radii;
+  Buffer.add_string lines "}\n\n";
+
+  (* Typography *)
+  Buffer.add_string lines "// MARK: - Typography\nenum Typography {\n";
+  List.iter (fun (t: typography_token) ->
+    let name = Str.global_replace (Str.regexp "-") "_" t.name in
+    let weight = match t.font_weight with
+      | w when w >= 700 -> "bold"
+      | w when w >= 500 -> "medium"
+      | _ -> "regular"
+    in
+    Buffer.add_string lines (Printf.sprintf "    static let %s = Font.custom(\"%s\", size: %.0f).weight(.%s)\n"
+      name t.font_family t.font_size weight)
+  ) tokens.typography;
+  Buffer.add_string lines "}\n";
+
+  Buffer.contents lines
+
+(** Jetpack Compose (Android) *)
+let to_compose tokens =
+  let lines = Buffer.create 1024 in
+  Buffer.add_string lines "// DesignTokens.kt - Auto-generated from Figma\npackage com.example.design\n\n";
+  Buffer.add_string lines "import androidx.compose.ui.graphics.Color\nimport androidx.compose.ui.unit.dp\nimport androidx.compose.ui.unit.sp\nimport androidx.compose.ui.text.font.FontWeight\n\n";
+
+  (* Colors *)
+  Buffer.add_string lines "object AppColors {\n";
+  List.iter (fun (c: color_token) ->
+    let name = Str.global_replace (Str.regexp "-") "" c.name |> String.capitalize_ascii in
+    let hex = String.sub c.hex 1 6 in
+    Buffer.add_string lines (Printf.sprintf "    val %s = Color(0xFF%s)\n" name (String.uppercase_ascii hex))
+  ) tokens.colors;
+  Buffer.add_string lines "}\n\n";
+
+  (* Spacing *)
+  Buffer.add_string lines "object AppSpacing {\n";
+  List.iter (fun (s: spacing_token) ->
+    let name = Printf.sprintf "Space%.0f" s.value in
+    Buffer.add_string lines (Printf.sprintf "    val %s = %.0f.dp\n" name s.value)
+  ) tokens.spacing;
+  Buffer.add_string lines "}\n\n";
+
+  (* Border Radius *)
+  Buffer.add_string lines "object AppCorners {\n";
+  List.iter (fun (r: radius_token) ->
+    let name = Printf.sprintf "Radius%.0f" r.value in
+    Buffer.add_string lines (Printf.sprintf "    val %s = %.0f.dp\n" name r.value)
+  ) tokens.radii;
+  Buffer.add_string lines "}\n\n";
+
+  (* Typography *)
+  Buffer.add_string lines "object AppTypography {\n";
+  List.iter (fun (t: typography_token) ->
+    let name = Str.global_replace (Str.regexp "-") "" t.name |> String.capitalize_ascii in
+    let weight = match t.font_weight with
+      | w when w >= 700 -> "Bold"
+      | w when w >= 500 -> "Medium"
+      | _ -> "Normal"
+    in
+    Buffer.add_string lines (Printf.sprintf "    val %s = TextStyle(fontSize = %.0f.sp, fontWeight = FontWeight.%s)\n"
+      name t.font_size weight)
+  ) tokens.typography;
+  Buffer.add_string lines "}\n";
+
+  Buffer.contents lines
+
+(** Flutter (Dart) *)
+let to_flutter tokens =
+  let lines = Buffer.create 1024 in
+  Buffer.add_string lines "// design_tokens.dart - Auto-generated from Figma\nimport 'package:flutter/material.dart';\n\n";
+
+  (* Colors *)
+  Buffer.add_string lines "class AppColors {\n  AppColors._();\n\n";
+  List.iter (fun (c: color_token) ->
+    let name = Str.global_replace (Str.regexp "-") "" c.name in
+    let name = String.mapi (fun i c -> if i = 0 then Char.lowercase_ascii c else c) name in
+    let hex = String.sub c.hex 1 6 in
+    Buffer.add_string lines (Printf.sprintf "  static const %s = Color(0xFF%s);\n" name (String.uppercase_ascii hex))
+  ) tokens.colors;
+  Buffer.add_string lines "}\n\n";
+
+  (* Spacing *)
+  Buffer.add_string lines "class AppSpacing {\n  AppSpacing._();\n\n";
+  List.iter (fun (s: spacing_token) ->
+    let name = Printf.sprintf "space%.0f" s.value in
+    Buffer.add_string lines (Printf.sprintf "  static const double %s = %.0f;\n" name s.value)
+  ) tokens.spacing;
+  Buffer.add_string lines "}\n\n";
+
+  (* Border Radius *)
+  Buffer.add_string lines "class AppCorners {\n  AppCorners._();\n\n";
+  List.iter (fun (r: radius_token) ->
+    let name = Printf.sprintf "radius%.0f" r.value in
+    Buffer.add_string lines (Printf.sprintf "  static const double %s = %.0f;\n" name r.value);
+    Buffer.add_string lines (Printf.sprintf "  static final %sBorder = BorderRadius.circular(%.0f);\n" name r.value)
+  ) tokens.radii;
+  Buffer.add_string lines "}\n\n";
+
+  (* Typography *)
+  Buffer.add_string lines "class AppTextStyles {\n  AppTextStyles._();\n\n";
+  List.iter (fun (t: typography_token) ->
+    let name = Str.global_replace (Str.regexp "-") "" t.name in
+    let name = String.mapi (fun i c -> if i = 0 then Char.lowercase_ascii c else c) name in
+    let weight = match t.font_weight with
+      | w when w >= 700 -> "w700"
+      | w when w >= 500 -> "w500"
+      | _ -> "w400"
+    in
+    Buffer.add_string lines (Printf.sprintf "  static const %s = TextStyle(\n    fontFamily: '%s',\n    fontSize: %.0f,\n    fontWeight: FontWeight.%s,\n  );\n\n"
+      name t.font_family t.font_size weight)
+  ) tokens.typography;
+  Buffer.add_string lines "}\n";
+
+  Buffer.contents lines
+
+(** W3C Design Tokens Format (DTCG) - Community Group Standard *)
+let to_w3c_dtcg tokens =
+  let color_tokens = List.map (fun (c: color_token) ->
+    (c.name, `Assoc [
+      ("$type", `String "color");
+      ("$value", `String c.hex);
+    ])
+  ) tokens.colors in
+
+  let spacing_tokens = List.map (fun (s: spacing_token) ->
+    (s.name, `Assoc [
+      ("$type", `String "dimension");
+      ("$value", `String (Printf.sprintf "%.0fpx" s.value));
+    ])
+  ) tokens.spacing in
+
+  let radius_tokens = List.map (fun (r: radius_token) ->
+    (r.name, `Assoc [
+      ("$type", `String "dimension");
+      ("$value", `String (Printf.sprintf "%.0fpx" r.value));
+    ])
+  ) tokens.radii in
+
+  let typography_tokens = List.map (fun (t: typography_token) ->
+    (t.name, `Assoc [
+      ("$type", `String "typography");
+      ("$value", `Assoc [
+        ("fontFamily", `String t.font_family);
+        ("fontSize", `String (Printf.sprintf "%.0fpx" t.font_size));
+        ("fontWeight", `Int t.font_weight);
+      ]);
+    ])
+  ) tokens.typography in
+
+  Yojson.Safe.pretty_to_string (`Assoc [
+    ("color", `Assoc color_tokens);
+    ("spacing", `Assoc spacing_tokens);
+    ("borderRadius", `Assoc radius_tokens);
+    ("typography", `Assoc typography_tokens);
+  ])
+
+(** Output format enum *)
+type output_format =
+  | CSS
+  | Tailwind
+  | JSON
+  | SwiftUI
+  | Compose
+  | Flutter
+  | W3C_DTCG
+
+let format_of_string = function
+  | "css" -> CSS
+  | "tailwind" -> Tailwind
+  | "json" -> JSON
+  | "swiftui" | "swift" | "ios" -> SwiftUI
+  | "compose" | "kotlin" | "android" -> Compose
+  | "flutter" | "dart" -> Flutter
+  | "w3c" | "dtcg" | "tokens" -> W3C_DTCG
+  | _ -> JSON
+
+let export_tokens tokens format =
+  match format with
+  | CSS -> to_css tokens
+  | Tailwind -> to_tailwind tokens
+  | JSON -> to_json tokens
+  | SwiftUI -> to_swiftui tokens
+  | Compose -> to_compose tokens
+  | Flutter -> to_flutter tokens
+  | W3C_DTCG -> to_w3c_dtcg tokens
