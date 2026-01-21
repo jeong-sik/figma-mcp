@@ -176,9 +176,13 @@ let prompt_to_detail_json (p : mcp_prompt) : Yojson.Safe.t =
 (** 비동기 핸들러 - HTTP 모드에서 Lwt 루프 내 안전 실행 *)
 type tool_handler = Yojson.Safe.t -> (Yojson.Safe.t, string) result Lwt.t
 
+(** 동기 핸들러 타입 - HTTP/Eio 모드에서 사용 (Lwt 없음) *)
+type tool_handler_sync = Yojson.Safe.t -> (Yojson.Safe.t, string) result
+
 type mcp_server = {
   tools: tool_def list;
   handlers: (string * tool_handler) list;
+  handlers_sync: (string * tool_handler_sync) list;  (** HTTP 모드용 동기 핸들러 *)
   resources: mcp_resource list;
   prompts: mcp_prompt list;
   read_resource: resource_reader;
@@ -280,6 +284,33 @@ DSL: T("일괄 등록하기" 15 #333C47 weight:500)
 HTML (✅): <span>일괄 등록하기</span>
 HTML (❌): <span>Bulk Register</span>  <!-- hallucinated! -->
 HTML (❌): <span>등록하기</span>  <!-- partial/modified! -->
+```
+
+### 🖥️ HTML 렌더링 우선순위 (Chrome-First Strategy)
+
+Visual Verification 시 HTML을 PNG로 렌더링할 때 다음 우선순위를 따릅니다:
+
+**1순위: claude-in-chrome (권장)**
+`mcp__claude-in-chrome__*` 도구가 사용 가능한 경우:
+1. `mcp__claude-in-chrome__navigate`로 HTML 파일 열기 (file:// 또는 data URI)
+2. `mcp__claude-in-chrome__computer` action="screenshot"으로 스크린샷 캡처
+3. `figma_image_similarity`로 Figma 렌더와 SSIM 비교
+4. 장점: 실제 브라우저 환경, 폰트 렌더링 정확도 높음
+
+**2순위: figma_verify_visual (Fallback)**
+chrome 도구 불가 시 `figma_verify_visual` 내장 Playwright 사용:
+- 자동 HTML 렌더링 + SSIM 비교 + CSS 자동 보정
+- Playwright 설치 필요: `npx playwright install chromium`
+
+**Chrome-First 워크플로우 예시**:
+```
+1. figma_get_node_with_image → DSL + Figma 렌더 이미지 획득
+2. HTML 코드 생성 → 임시 파일 저장
+3. [Chrome 가용 시]
+   - claude-in-chrome navigate → screenshot
+   - figma_image_similarity로 SSIM 측정
+4. [Chrome 불가 시]
+   - figma_verify_visual html=<생성한HTML>
 ```
 |}
 
@@ -408,7 +439,67 @@ let process_request server req : Yojson.Safe.t Lwt.t =
   | _ ->
       Lwt.return (make_error_response id method_not_found (sprintf "Unknown method: %s" req.method_) None)
 
-(** ============== stdio 서버 루프 ============== *)
+(** ============== 동기 요청 처리 (Eio/HTTP 모드용) ============== *)
+
+(** tools/call 동기 핸들러 - Lwt 없이 직접 실행 *)
+let handle_tools_call_sync server params : (Yojson.Safe.t, int * string) result =
+  match params with
+  | Some (`Assoc lst) ->
+      let name = match List.assoc_opt "name" lst with Some (`String s) -> Some s | _ -> None in
+      let arguments = List.assoc_opt "arguments" lst |> Option.value ~default:(`Assoc []) in
+      (match name with
+       | Some tool_name ->
+           (match List.assoc_opt tool_name server.handlers_sync with
+            | Some handler ->
+                (match handler arguments with
+                 | Ok res -> Ok res
+                 | Error msg -> Error (internal_error, msg))
+            | None -> Error (method_not_found, sprintf "Tool not found: %s" tool_name))
+       | None -> Error (invalid_params, "Missing tool name"))
+  | _ -> Error (invalid_params, "Invalid params format")
+
+(** 메인 요청 처리 - 동기 버전 (HTTP/Eio 모드용) *)
+let process_request_sync server req : Yojson.Safe.t =
+  let id = Option.value req.id ~default:`Null in
+
+  match req.method_ with
+  | "initialize" ->
+      make_success_response id (handle_initialize req.params)
+
+  | "initialized" | "notifications/initialized" ->
+      make_success_response id `Null
+
+  | "tools/list" ->
+      make_success_response id (handle_tools_list server req.params)
+
+  | "tools/call" ->
+      (match handle_tools_call_sync server req.params with
+       | Ok res -> make_success_response id res
+       | Error (code, msg) -> make_error_response id code msg None)
+
+  | "resources/list" ->
+      make_success_response id (handle_resources_list server req.params)
+
+  | "resources/templates/list" ->
+      make_success_response id (`Assoc [("resourceTemplates", `List [])])
+
+  | "resources/read" ->
+      (match handle_resources_read server req.params with
+       | Ok res -> make_success_response id res
+       | Error (code, msg) -> make_error_response id code msg None)
+
+  | "prompts/list" ->
+      make_success_response id (handle_prompts_list server req.params)
+
+  | "prompts/get" ->
+      (match handle_prompts_get server req.params with
+       | Ok res -> make_success_response id res
+       | Error (code, msg) -> make_error_response id code msg None)
+
+  | _ ->
+      make_error_response id method_not_found (sprintf "Unknown method: %s" req.method_) None
+
+(** ============== stdio 서버 루프 ============== **)
 
 let run_stdio_server server =
   (* stderr로 로깅 *)
@@ -443,8 +534,8 @@ let run_stdio_server server =
 
 (** ============== 서버 생성 헬퍼 ============== *)
 
-let create_server tools handlers resources prompts read_resource =
-  { tools; handlers; resources; prompts; read_resource }
+let create_server ?(handlers_sync=[]) tools handlers resources prompts read_resource =
+  { tools; handlers; handlers_sync; resources; prompts; read_resource }
 
 (** ============== HTTP 서버 (Cohttp-lwt) ============== *)
 

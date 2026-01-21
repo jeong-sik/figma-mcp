@@ -115,24 +115,15 @@ end
 
 (** ============== MCP Request Processing ============== *)
 
-(** Process MCP request synchronously.
-    Run effects via Lwt_eio in Eio runtime. *)
+(** Process MCP request synchronously (Eio-native, no Lwt).
+    Uses process_request_sync which calls handlers_sync directly. *)
 let process_mcp_request_sync (server : Mcp_protocol.mcp_server) body_str =
-  (* HTTP 모드 설정 - wrap_sync에서 nested Lwt_main.run 방지 *)
+  (* HTTP 모드 설정 *)
   Mcp_tools.is_http_mode := true;
   match Mcp_protocol.parse_request body_str with
   | Ok req ->
-      (* HTTP 모드: Eio 컨텍스트에서 Lwt Promise를 즉시 해석 *)
-      let resolve_immediate promise =
-        match Lwt.state promise with
-        | Lwt.Return value -> value
-        | Lwt.Fail exn -> raise exn
-        | Lwt.Sleep ->
-            failwith "Unexpected async Lwt promise in HTTP MCP handler"
-      in
-      let response_json = Figma_effects.run_with_eio_api (fun () ->
-        resolve_immediate (Mcp_protocol.process_request server req)
-      ) in
+      (* process_request_sync: Lwt 없이 직접 실행 *)
+      let response_json = Mcp_protocol.process_request_sync server req in
       Yojson.Safe.to_string response_json
   | Error msg ->
       let err_response = Mcp_protocol.make_error_response
@@ -663,6 +654,8 @@ let start_server ?(config = default_config) server =
   Eio_main.run @@ fun env ->
   let net = Eio.Stdenv.net env in
   let clock = Eio.Stdenv.clock env in
+  (* Initialize Lwt-Eio bridge for Lwt_eio.run_lwt calls in Effect handlers *)
+  Lwt_eio.with_event_loop ~clock @@ fun _ ->
   let domain_mgr = Some (Eio.Stdenv.domain_mgr env) in
 
   (* Graceful shutdown setup *)

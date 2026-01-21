@@ -96,13 +96,13 @@ let tool_figma_get_file : tool_def = {
   description = "Figma 파일 데이터를 가져와 Fidelity DSL로 변환합니다.";
   input_schema = object_schema [
     ("file_key", string_prop "Figma 파일 키 (URL에서 추출: figma.com/file/KEY/...)");
-    ("token", string_prop "Figma Personal Access Token");
+    ("token", string_prop "Figma Personal Access Token (optional if FIGMA_TOKEN env var is set)");
     ("format", enum_prop ["fidelity"; "raw"; "html"] "출력 포맷 (기본값: fidelity)");
     ("depth", number_prop "트리 깊이 제한 (Figma API depth 파라미터)");
     ("geometry", enum_prop ["paths"] "벡터 경로 포함 (geometry=paths)");
     ("plugin_data", string_prop "plugin_data 파라미터 (쉼표 구분 plugin ID 또는 shared)");
     ("version", string_prop "특정 파일 버전 ID");
-  ] ["file_key"; "token"];
+  ] ["file_key"];
 }
 
 let tool_figma_get_file_meta : tool_def = {
@@ -110,9 +110,9 @@ let tool_figma_get_file_meta : tool_def = {
   description = "Figma 파일의 컴포넌트/스타일 메타데이터를 반환합니다.";
   input_schema = object_schema [
     ("file_key", string_prop "Figma 파일 키");
-    ("token", string_prop "Figma Personal Access Token");
+    ("token", string_prop "Figma Personal Access Token (optional if FIGMA_TOKEN env var is set)");
     ("version", string_prop "특정 파일 버전 ID");
-  ] ["file_key"; "token"];
+  ] ["file_key"];
 }
 
 let tool_figma_list_screens : tool_def = {
@@ -120,8 +120,8 @@ let tool_figma_list_screens : tool_def = {
   description = "Figma 파일 내 모든 화면(Frame/Component) 목록을 반환합니다.";
   input_schema = object_schema [
     ("file_key", string_prop "Figma 파일 키");
-    ("token", string_prop "Figma Personal Access Token");
-  ] ["file_key"; "token"];
+    ("token", string_prop "Figma Personal Access Token (optional if FIGMA_TOKEN env var is set)");
+  ] ["file_key"];
 }
 
 let tool_figma_get_node : tool_def = {
@@ -131,13 +131,13 @@ let tool_figma_get_node : tool_def = {
     ("file_key", string_prop "Figma 파일 키");
     ("node_id", string_prop "노드 ID (예: 123:456)");
     ("url", string_prop "Figma URL (file_key/node_id 자동 추출)");
-    ("token", string_prop "Figma Personal Access Token");
+    ("token", string_prop "Figma Personal Access Token (optional if FIGMA_TOKEN env var is set)");
     ("format", enum_prop ["fidelity"; "raw"; "html"] "출력 포맷");
     ("depth", number_prop "트리 깊이 제한 (Figma API depth 파라미터)");
     ("geometry", enum_prop ["paths"] "벡터 경로 포함 (geometry=paths)");
     ("plugin_data", string_prop "plugin_data 파라미터 (쉼표 구분 plugin ID 또는 shared)");
     ("version", string_prop "특정 파일 버전 ID");
-  ] ["token"];
+  ] [];
 }
 
 let tool_figma_get_node_with_image : tool_def = {
@@ -147,7 +147,7 @@ let tool_figma_get_node_with_image : tool_def = {
     ("file_key", string_prop "Figma 파일 키");
     ("node_id", string_prop "노드 ID (예: 123:456)");
     ("url", string_prop "Figma URL (file_key/node_id 자동 추출)");
-    ("token", string_prop "Figma Personal Access Token");
+    ("token", string_prop "Figma Personal Access Token (optional if FIGMA_TOKEN env var is set)");
     ("format", enum_prop ["fidelity"; "raw"; "html"] "DSL 출력 포맷 (기본값: fidelity)");
     ("image_format", enum_prop ["png"; "jpg"; "svg"; "pdf"] "이미지 포맷 (기본값: png)");
     ("scale", number_prop "스케일 (1-4, 기본값: 1)");
@@ -158,7 +158,7 @@ let tool_figma_get_node_with_image : tool_def = {
     ("geometry", enum_prop ["paths"] "벡터 경로 포함 (geometry=paths)");
     ("plugin_data", string_prop "plugin_data 파라미터 (쉼표 구분 plugin ID 또는 shared)");
     ("version", string_prop "특정 파일 버전 ID");
-  ] ["token"];
+  ] [];
 }
 
 let tool_figma_get_node_bundle : tool_def = {
@@ -168,7 +168,7 @@ let tool_figma_get_node_bundle : tool_def = {
     ("file_key", string_prop "Figma 파일 키");
     ("node_id", string_prop "노드 ID (예: 123:456)");
     ("url", string_prop "Figma URL (file_key/node_id 자동 추출)");
-    ("token", string_prop "Figma Personal Access Token");
+    ("token", string_prop "Figma Personal Access Token (optional if FIGMA_TOKEN env var is set)");
     ("format", enum_prop ["fidelity"; "raw"; "html"] "DSL 출력 포맷 (기본값: fidelity)");
     ("image_format", enum_prop ["png"; "jpg"; "svg"; "pdf"] "이미지 포맷 (기본값: png)");
     ("scale", number_prop "스케일 (1-4, 기본값: 1)");
@@ -193,7 +193,7 @@ let tool_figma_get_node_bundle : tool_def = {
     ("geometry", enum_prop ["paths"] "벡터 경로 포함 (geometry=paths)");
     ("plugin_data", string_prop "plugin_data 파라미터 (쉼표 구분 plugin ID 또는 shared)");
     ("version", string_prop "특정 파일 버전 ID");
-  ] ["token"];
+  ] [];
 }
 
 (** 경량 구조 요약 - 큰 노드를 탐색할 때 전체 로드 없이 구조 파악 *)
@@ -204,10 +204,10 @@ let tool_figma_get_node_summary : tool_def = {
     ("file_key", string_prop "Figma 파일 키");
     ("node_id", string_prop "노드 ID (예: 123:456)");
     ("url", string_prop "Figma URL (file_key/node_id 자동 추출)");
-    ("token", string_prop "Figma Personal Access Token");
+    ("token", string_prop "Figma Personal Access Token (optional if FIGMA_TOKEN env var is set)");
     ("max_children", number_prop "반환할 최대 자식 수 (기본값: 50)");
     ("version", string_prop "특정 파일 버전 ID");
-  ] ["token"];
+  ] [];
 }
 
 (** 노드 자동 선택 - 점수 기반 후보 선별 *)
@@ -218,7 +218,7 @@ let tool_figma_select_nodes : tool_def = {
     ("file_key", string_prop "Figma 파일 키");
     ("node_id", string_prop "노드 ID (예: 123:456)");
     ("url", string_prop "Figma URL (file_key/node_id 자동 추출)");
-    ("token", string_prop "Figma Personal Access Token");
+    ("token", string_prop "Figma Personal Access Token (optional if FIGMA_TOKEN env var is set)");
     ("summary_depth", number_prop "분석 depth (기본값: 1, 최대: 6)");
     ("preview", bool_prop "프리뷰 이미지 포함 여부 (기본값: true)");
     ("preview_format", enum_prop ["png"; "jpg"; "svg"; "pdf"] "프리뷰 이미지 포맷 (기본값: png)");
@@ -233,7 +233,7 @@ let tool_figma_select_nodes : tool_def = {
     ("notes_limit", number_prop "노트 텍스트 최대 개수 (기본값: 50)");
     ("excluded_limit", number_prop "제외 목록 최대 개수 (기본값: 50)");
     ("version", string_prop "특정 파일 버전 ID");
-  ] ["token"];
+  ] [];
 }
 
 (** 깊이 범위별 청크 로드 - 대형 노드를 점진적으로 로드 *)
@@ -244,13 +244,13 @@ let tool_figma_get_node_chunk : tool_def = {
     ("file_key", string_prop "Figma 파일 키");
     ("node_id", string_prop "노드 ID (예: 123:456)");
     ("url", string_prop "Figma URL (file_key/node_id 자동 추출)");
-    ("token", string_prop "Figma Personal Access Token");
+    ("token", string_prop "Figma Personal Access Token (optional if FIGMA_TOKEN env var is set)");
     ("depth_start", number_prop "시작 깊이 (기본값: 0)");
     ("depth_end", number_prop "종료 깊이 (기본값: 2)");
     ("format", enum_prop ["fidelity"; "raw"; "html"] "출력 포맷 (기본값: fidelity)");
     ("include_styles", bool_prop "스타일 정의 포함 여부 (기본값: false)");
     ("version", string_prop "특정 파일 버전 ID");
-  ] ["token"];
+  ] [];
 }
 
 let tool_figma_chunk_index : tool_def = {
@@ -260,7 +260,7 @@ let tool_figma_chunk_index : tool_def = {
     ("file_key", string_prop "Figma 파일 키");
     ("node_id", string_prop "노드 ID (예: 123:456)");
     ("url", string_prop "Figma URL (file_key/node_id 자동 추출)");
-    ("token", string_prop "Figma Personal Access Token");
+    ("token", string_prop "Figma Personal Access Token (optional if FIGMA_TOKEN env var is set)");
     ("format", enum_prop ["fidelity"; "raw"] "청킹 대상 포맷 (기본값: fidelity)");
     ("depth", number_prop "Figma API depth");
     ("geometry", enum_prop ["paths"] "벡터 경로 포함 (geometry=paths)");
@@ -277,7 +277,7 @@ let tool_figma_chunk_index : tool_def = {
     ("selection_llm_tool", enum_prop ["codex"; "claude-cli"; "gemini"; "ollama"] "LLM 도구 (기본값: codex)");
     ("selection_llm_args", object_prop "LLM 호출 인자 (model/timeout/...)");
     ("selection_mcp_url", string_prop "MCP endpoint URL override");
-  ] ["token"];
+  ] [];
 }
 
 let tool_figma_chunk_get : tool_def = {
@@ -296,7 +296,7 @@ let tool_figma_fidelity_loop : tool_def = {
     ("file_key", string_prop "Figma 파일 키");
     ("node_id", string_prop "노드 ID (예: 123:456)");
     ("url", string_prop "Figma URL (file_key/node_id 자동 추출)");
-    ("token", string_prop "Figma Personal Access Token");
+    ("token", string_prop "Figma Personal Access Token (optional if FIGMA_TOKEN env var is set)");
     ("target_score", number_prop "목표 fidelity score (0-1, 기본값: 0.92)");
     ("start_depth", number_prop "초기 depth (기본값: 4)");
     ("depth_step", number_prop "depth 증가폭 (기본값: 4)");
@@ -314,7 +314,7 @@ let tool_figma_fidelity_loop : tool_def = {
     ("plugin_channel_id", string_prop "플러그인 채널 ID (옵션)");
     ("plugin_depth", number_prop "플러그인 depth (기본값: 6)");
     ("plugin_timeout_ms", number_prop "플러그인 응답 대기 시간 (기본값: 20000)");
-  ] ["token"];
+  ] [];
 }
 
 let tool_figma_image_similarity : tool_def = {
@@ -324,7 +324,7 @@ let tool_figma_image_similarity : tool_def = {
     ("file_key", string_prop "Figma 파일 키");
     ("node_a_id", string_prop "기준 노드 ID");
     ("node_b_id", string_prop "비교 노드 ID");
-    ("token", string_prop "Figma Personal Access Token");
+    ("token", string_prop "Figma Personal Access Token (optional if FIGMA_TOKEN env var is set)");
     ("format", enum_prop ["png"; "jpg"] "이미지 포맷 (기본값: png)");
     ("start_scale", number_prop "시작 스케일 (기본값: 1)");
     ("max_scale", number_prop "최대 스케일 (기본값: start_scale)");
@@ -333,7 +333,7 @@ let tool_figma_image_similarity : tool_def = {
     ("use_absolute_bounds", bool_prop "효과 포함한 렌더 바운즈 사용 여부");
     ("version", string_prop "특정 파일 버전 ID");
     ("save_dir", string_prop "이미지 저장 경로 (기본값: ~/me/download/figma-assets/compare)");
-  ] ["file_key"; "node_a_id"; "node_b_id"; "token"];
+  ] ["file_key"; "node_a_id"; "node_b_id"];
 }
 
 (** Visual Feedback Loop - 코드 생성 및 시각적 검증 *)
@@ -343,7 +343,7 @@ let tool_figma_verify_visual : tool_def = {
   input_schema = object_schema [
     ("file_key", string_prop "Figma 파일 키");
     ("node_id", string_prop "노드 ID (예: 123:456)");
-    ("token", string_prop "Figma Personal Access Token");
+    ("token", string_prop "Figma Personal Access Token (optional if FIGMA_TOKEN env var is set)");
     ("html", string_prop "검증할 HTML 코드 (없으면 자동 생성)");
     ("target_ssim", number_prop "목표 SSIM (0-1, 기본값: 0.95)");
     ("max_iterations", number_prop "최대 반복 횟수 (기본값: 3)");
@@ -352,7 +352,7 @@ let tool_figma_verify_visual : tool_def = {
     ("version", string_prop "특정 파일 버전 ID");
     ("mode", enum_prop ["full"; "structure"; "icons"; "text"; "layout"] "비교 모드: full(전체), structure(레이아웃만), icons(아이콘만), text(텍스트만), layout(박스/컨테이너)");
     ("checkpoints", string_prop "사용자 정의 체크포인트 JSON 배열 [{name, x, y, width, height}]");
-  ] ["file_key"; "node_id"; "token"];
+  ] ["file_key"; "node_id"];
 }
 
 (** Region-based comparison - 영역별 상세 비교 *)
@@ -397,14 +397,14 @@ let tool_figma_export_image : tool_def = {
   input_schema = object_schema [
     ("file_key", string_prop "Figma 파일 키");
     ("node_ids", string_prop "노드 ID들 (쉼표 구분)");
-    ("token", string_prop "Figma Personal Access Token");
+    ("token", string_prop "Figma Personal Access Token (optional if FIGMA_TOKEN env var is set)");
     ("format", enum_prop ["png"; "jpg"; "svg"; "pdf"] "이미지 포맷");
     ("scale", number_prop "스케일 (1-4, 기본값: 1)");
     ("use_absolute_bounds", bool_prop "효과 포함한 렌더 바운즈 사용 여부");
     ("version", string_prop "특정 파일 버전 ID");
     ("download", bool_prop "이미지 다운로드 여부 (기본값: false)");
     ("save_dir", string_prop "다운로드 저장 경로 (기본값: ~/me/download/figma-assets)");
-  ] ["file_key"; "node_ids"; "token"];
+  ] ["file_key"; "node_ids"];
 }
 
 let tool_figma_get_image_fills : tool_def = {
@@ -412,11 +412,11 @@ let tool_figma_get_image_fills : tool_def = {
   description = "파일 내 이미지 채움(image fills) 원본 URL 맵을 반환합니다.";
   input_schema = object_schema [
     ("file_key", string_prop "Figma 파일 키");
-    ("token", string_prop "Figma Personal Access Token");
+    ("token", string_prop "Figma Personal Access Token (optional if FIGMA_TOKEN env var is set)");
     ("version", string_prop "특정 파일 버전 ID");
     ("download", bool_prop "이미지 다운로드 여부 (기본값: false)");
     ("save_dir", string_prop "다운로드 저장 경로 (기본값: ~/me/download/figma-assets)");
-  ] ["file_key"; "token"];
+  ] ["file_key"];
 }
 
 let tool_figma_get_nodes : tool_def = {
@@ -425,13 +425,13 @@ let tool_figma_get_nodes : tool_def = {
   input_schema = object_schema [
     ("file_key", string_prop "Figma 파일 키");
     ("node_ids", string_prop "노드 ID들 (쉼표 구분: 1:2,3:4)");
-    ("token", string_prop "Figma Personal Access Token");
+    ("token", string_prop "Figma Personal Access Token (optional if FIGMA_TOKEN env var is set)");
     ("format", enum_prop ["raw"; "fidelity"; "html"] "출력 포맷 (기본값: raw)");
     ("depth", number_prop "트리 깊이 제한");
     ("geometry", enum_prop ["paths"] "벡터 경로 포함 (geometry=paths)");
     ("plugin_data", string_prop "plugin_data 파라미터 (쉼표 구분 plugin ID 또는 shared)");
     ("version", string_prop "특정 파일 버전 ID");
-  ] ["file_key"; "node_ids"; "token"];
+  ] ["file_key"; "node_ids"];
 }
 
 let tool_figma_get_file_versions : tool_def = {
@@ -439,8 +439,8 @@ let tool_figma_get_file_versions : tool_def = {
   description = "파일 버전 목록을 조회합니다.";
   input_schema = object_schema [
     ("file_key", string_prop "Figma 파일 키");
-    ("token", string_prop "Figma Personal Access Token");
-  ] ["file_key"; "token"];
+    ("token", string_prop "Figma Personal Access Token (optional if FIGMA_TOKEN env var is set)");
+  ] ["file_key"];
 }
 
 let tool_figma_get_file_comments : tool_def = {
@@ -448,8 +448,8 @@ let tool_figma_get_file_comments : tool_def = {
   description = "파일 코멘트 목록을 조회합니다.";
   input_schema = object_schema [
     ("file_key", string_prop "Figma 파일 키");
-    ("token", string_prop "Figma Personal Access Token");
-  ] ["file_key"; "token"];
+    ("token", string_prop "Figma Personal Access Token (optional if FIGMA_TOKEN env var is set)");
+  ] ["file_key"];
 }
 
 let tool_figma_post_comment : tool_def = {
@@ -457,7 +457,7 @@ let tool_figma_post_comment : tool_def = {
   description = "파일에 코멘트를 추가합니다.";
   input_schema = object_schema [
     ("file_key", string_prop "Figma 파일 키");
-    ("token", string_prop "Figma Personal Access Token");
+    ("token", string_prop "Figma Personal Access Token (optional if FIGMA_TOKEN env var is set)");
     ("message", string_prop "코멘트 내용");
     ("x", number_prop "캔버스 좌표 x (client_meta)");
     ("y", number_prop "캔버스 좌표 y (client_meta)");
@@ -470,8 +470,8 @@ let tool_figma_get_file_components : tool_def = {
   description = "파일의 컴포넌트 목록을 조회합니다.";
   input_schema = object_schema [
     ("file_key", string_prop "Figma 파일 키");
-    ("token", string_prop "Figma Personal Access Token");
-  ] ["file_key"; "token"];
+    ("token", string_prop "Figma Personal Access Token (optional if FIGMA_TOKEN env var is set)");
+  ] ["file_key"];
 }
 
 let tool_figma_get_team_components : tool_def = {
@@ -479,8 +479,8 @@ let tool_figma_get_team_components : tool_def = {
   description = "팀의 컴포넌트 목록을 조회합니다.";
   input_schema = object_schema [
     ("team_id", string_prop "팀 ID");
-    ("token", string_prop "Figma Personal Access Token");
-  ] ["team_id"; "token"];
+    ("token", string_prop "Figma Personal Access Token (optional if FIGMA_TOKEN env var is set)");
+  ] ["team_id"];
 }
 
 let tool_figma_get_file_component_sets : tool_def = {
@@ -488,8 +488,8 @@ let tool_figma_get_file_component_sets : tool_def = {
   description = "파일의 컴포넌트 셋 목록을 조회합니다.";
   input_schema = object_schema [
     ("file_key", string_prop "Figma 파일 키");
-    ("token", string_prop "Figma Personal Access Token");
-  ] ["file_key"; "token"];
+    ("token", string_prop "Figma Personal Access Token (optional if FIGMA_TOKEN env var is set)");
+  ] ["file_key"];
 }
 
 let tool_figma_get_team_component_sets : tool_def = {
@@ -497,8 +497,8 @@ let tool_figma_get_team_component_sets : tool_def = {
   description = "팀의 컴포넌트 셋 목록을 조회합니다.";
   input_schema = object_schema [
     ("team_id", string_prop "팀 ID");
-    ("token", string_prop "Figma Personal Access Token");
-  ] ["team_id"; "token"];
+    ("token", string_prop "Figma Personal Access Token (optional if FIGMA_TOKEN env var is set)");
+  ] ["team_id"];
 }
 
 let tool_figma_get_file_styles : tool_def = {
@@ -506,8 +506,8 @@ let tool_figma_get_file_styles : tool_def = {
   description = "파일의 스타일 목록을 조회합니다.";
   input_schema = object_schema [
     ("file_key", string_prop "Figma 파일 키");
-    ("token", string_prop "Figma Personal Access Token");
-  ] ["file_key"; "token"];
+    ("token", string_prop "Figma Personal Access Token (optional if FIGMA_TOKEN env var is set)");
+  ] ["file_key"];
 }
 
 let tool_figma_get_team_styles : tool_def = {
@@ -515,8 +515,8 @@ let tool_figma_get_team_styles : tool_def = {
   description = "팀의 스타일 목록을 조회합니다.";
   input_schema = object_schema [
     ("team_id", string_prop "팀 ID");
-    ("token", string_prop "Figma Personal Access Token");
-  ] ["team_id"; "token"];
+    ("token", string_prop "Figma Personal Access Token (optional if FIGMA_TOKEN env var is set)");
+  ] ["team_id"];
 }
 
 let tool_figma_get_component : tool_def = {
@@ -524,8 +524,8 @@ let tool_figma_get_component : tool_def = {
   description = "컴포넌트 키로 상세 정보를 조회합니다.";
   input_schema = object_schema [
     ("component_key", string_prop "컴포넌트 키");
-    ("token", string_prop "Figma Personal Access Token");
-  ] ["component_key"; "token"];
+    ("token", string_prop "Figma Personal Access Token (optional if FIGMA_TOKEN env var is set)");
+  ] ["component_key"];
 }
 
 let tool_figma_get_component_set : tool_def = {
@@ -533,8 +533,8 @@ let tool_figma_get_component_set : tool_def = {
   description = "컴포넌트 셋 키로 상세 정보를 조회합니다.";
   input_schema = object_schema [
     ("component_set_key", string_prop "컴포넌트 셋 키");
-    ("token", string_prop "Figma Personal Access Token");
-  ] ["component_set_key"; "token"];
+    ("token", string_prop "Figma Personal Access Token (optional if FIGMA_TOKEN env var is set)");
+  ] ["component_set_key"];
 }
 
 let tool_figma_get_style : tool_def = {
@@ -542,8 +542,8 @@ let tool_figma_get_style : tool_def = {
   description = "스타일 키로 상세 정보를 조회합니다.";
   input_schema = object_schema [
     ("style_key", string_prop "스타일 키");
-    ("token", string_prop "Figma Personal Access Token");
-  ] ["style_key"; "token"];
+    ("token", string_prop "Figma Personal Access Token (optional if FIGMA_TOKEN env var is set)");
+  ] ["style_key"];
 }
 
 (** ============== Plugin Bridge 도구 ============== *)
@@ -668,7 +668,7 @@ let tool_figma_llm_task : tool_def = {
     ("file_key", string_prop "Figma 파일 키 (DSL/변수/이미지 fill 추출용)");
     ("node_id", string_prop "노드 ID (예: 123:456)");
     ("url", string_prop "Figma URL (file_key/node_id 자동 추출)");
-    ("token", string_prop "Figma Personal Access Token");
+    ("token", string_prop "Figma Personal Access Token (optional if FIGMA_TOKEN env var is set)");
     ("depth", number_prop "Figma API depth");
     ("geometry", enum_prop ["paths"] "벡터 경로 포함 (geometry=paths)");
     ("include_variables", bool_prop "변수 포함 여부 (기본값: quality에 따라 자동)");
@@ -734,8 +734,8 @@ let tool_figma_get_me : tool_def = {
   name = "figma_get_me";
   description = "현재 인증된 사용자 정보를 반환합니다.";
   input_schema = object_schema [
-    ("token", string_prop "Figma Personal Access Token");
-  ] ["token"];
+    ("token", string_prop "Figma Personal Access Token (optional if FIGMA_TOKEN env var is set)");
+  ] [];
 }
 
 let tool_figma_list_projects : tool_def = {
@@ -743,8 +743,8 @@ let tool_figma_list_projects : tool_def = {
   description = "팀의 모든 프로젝트 목록을 반환합니다.";
   input_schema = object_schema [
     ("team_id", string_prop "팀 ID (URL에서 추출 또는 figma_parse_url 사용)");
-    ("token", string_prop "Figma Personal Access Token");
-  ] ["team_id"; "token"];
+    ("token", string_prop "Figma Personal Access Token (optional if FIGMA_TOKEN env var is set)");
+  ] ["team_id"];
 }
 
 let tool_figma_list_files : tool_def = {
@@ -752,8 +752,8 @@ let tool_figma_list_files : tool_def = {
   description = "프로젝트의 모든 파일 목록을 반환합니다.";
   input_schema = object_schema [
     ("project_id", string_prop "프로젝트 ID");
-    ("token", string_prop "Figma Personal Access Token");
-  ] ["project_id"; "token"];
+    ("token", string_prop "Figma Personal Access Token (optional if FIGMA_TOKEN env var is set)");
+  ] ["project_id"];
 }
 
 let tool_figma_get_variables : tool_def = {
@@ -761,9 +761,9 @@ let tool_figma_get_variables : tool_def = {
   description = "파일의 디자인 토큰/변수를 반환합니다 (색상, 타이포, 간격 등).";
   input_schema = object_schema [
     ("file_key", string_prop "Figma 파일 키");
-    ("token", string_prop "Figma Personal Access Token");
+    ("token", string_prop "Figma Personal Access Token (optional if FIGMA_TOKEN env var is set)");
     ("format", enum_prop ["summary"; "raw"; "resolved"] "출력 포맷 (기본값: summary)");
-  ] ["file_key"; "token"];
+  ] ["file_key"];
 }
 
 (** ============== Phase 2: 고급 쿼리 도구 ============== *)
@@ -773,7 +773,7 @@ let tool_figma_query : tool_def = {
   description = "노드를 조건으로 필터링합니다. SQL WHERE처럼 type, 크기, 색상 등으로 검색합니다.";
   input_schema = object_schema [
     ("file_key", string_prop "Figma 파일 키");
-    ("token", string_prop "Figma Personal Access Token");
+    ("token", string_prop "Figma Personal Access Token (optional if FIGMA_TOKEN env var is set)");
     ("node_id", string_prop "시작 노드 ID (생략시 전체 파일)");
     ("type", string_prop "노드 타입 필터 (FRAME, TEXT, COMPONENT 등, 쉼표 구분)");
     ("width_min", number_prop "최소 너비");
@@ -784,7 +784,7 @@ let tool_figma_query : tool_def = {
     ("name", string_prop "이름 패턴 (substring 매칭)");
     ("depth", number_prop "탐색 깊이 (1=자식만, 2=손자까지, 생략=무제한)");
     ("limit", number_prop "결과 개수 제한");
-  ] ["file_key"; "token"];
+  ] ["file_key"];
 }
 
 let tool_figma_search : tool_def = {
@@ -792,7 +792,7 @@ let tool_figma_search : tool_def = {
   description = "텍스트 내용이나 이름으로 노드를 검색합니다.";
   input_schema = object_schema [
     ("file_key", string_prop "Figma 파일 키");
-    ("token", string_prop "Figma Personal Access Token");
+    ("token", string_prop "Figma Personal Access Token (optional if FIGMA_TOKEN env var is set)");
     ("query", string_prop "검색어 (텍스트 내용 또는 노드 이름)");
     ("search_in", enum_prop ["name"; "text"; "both"] "검색 대상 (기본값: both)");
     ("limit", number_prop "결과 개수 제한 (기본값: 20)");
@@ -804,13 +804,13 @@ let tool_figma_compare : tool_def = {
   description = "두 노드(또는 Web/Mobile 컴포넌트)를 비교하여 일관성을 검사합니다. 크기, 색상, 타이포그래피, 레이아웃 차이를 분석합니다.";
   input_schema = object_schema [
     ("file_key", string_prop "Figma 파일 키");
-    ("token", string_prop "Figma Personal Access Token");
+    ("token", string_prop "Figma Personal Access Token (optional if FIGMA_TOKEN env var is set)");
     ("node_a_id", string_prop "첫 번째 노드 ID (예: 100:200)");
     ("node_b_id", string_prop "두 번째 노드 ID");
     ("mode", enum_prop ["single"; "batch"] "비교 모드: single (단일 쌍), batch (Web/Mobile 일괄 매칭)");
     ("web_prefix", string_prop "Web 노드 이름 접두사 (batch 모드)");
     ("mobile_prefix", string_prop "Mobile 노드 이름 접두사 (batch 모드)");
-  ] ["file_key"; "token"];
+  ] ["file_key"];
 }
 
 let tool_figma_tree : tool_def = {
@@ -818,13 +818,13 @@ let tool_figma_tree : tool_def = {
   description = "Figma 노드 트리를 시각적으로 표시합니다. ASCII 트리, 들여쓰기, 압축 포맷 지원.";
   input_schema = object_schema [
     ("file_key", string_prop "Figma 파일 키");
-    ("token", string_prop "Figma Personal Access Token");
+    ("token", string_prop "Figma Personal Access Token (optional if FIGMA_TOKEN env var is set)");
     ("node_id", string_prop "시작 노드 ID (생략시 전체 문서)");
     ("style", enum_prop ["ascii"; "indent"; "compact"] "출력 스타일 (기본값: ascii)");
     ("max_depth", number_prop "최대 깊이 (기본값: 무제한)");
     ("show_size", enum_prop ["true"; "false"] "크기 표시 (기본값: true)");
     ("show_stats", enum_prop ["true"; "false"] "통계 포함 (기본값: false)");
-  ] ["file_key"; "token"];
+  ] ["file_key"];
 }
 
 let tool_figma_stats : tool_def = {
@@ -832,9 +832,9 @@ let tool_figma_stats : tool_def = {
   description = "Figma 파일의 디자인 통계를 분석합니다. 색상, 폰트, 크기, 컴포넌트 사용 현황.";
   input_schema = object_schema [
     ("file_key", string_prop "Figma 파일 키");
-    ("token", string_prop "Figma Personal Access Token");
+    ("token", string_prop "Figma Personal Access Token (optional if FIGMA_TOKEN env var is set)");
     ("node_id", string_prop "분석 시작 노드 ID (생략시 전체 문서)");
-  ] ["file_key"; "token"];
+  ] ["file_key"];
 }
 
 let tool_figma_export_tokens : tool_def = {
@@ -842,10 +842,10 @@ let tool_figma_export_tokens : tool_def = {
   description = "Figma 파일에서 디자인 토큰을 추출합니다. CSS, Tailwind, JSON, Semantic DSL 포맷 지원.";
   input_schema = object_schema [
     ("file_key", string_prop "Figma 파일 키");
-    ("token", string_prop "Figma Personal Access Token");
+    ("token", string_prop "Figma Personal Access Token (optional if FIGMA_TOKEN env var is set)");
     ("format", enum_prop ["css"; "tailwind"; "json"; "semantic"] "출력 포맷 (기본값: css). semantic=UIFormer 스타일 DSL");
     ("node_id", string_prop "추출 시작 노드 ID (생략시 전체 문서)");
-  ] ["file_key"; "token"];
+  ] ["file_key"];
 }
 
 (** 환경/의존성 점검 도구 *)
@@ -1052,6 +1052,13 @@ let get_bool_or key default json =
   match get_bool key json with
   | Some b -> b
   | None -> default
+
+(** Token resolution with FIGMA_TOKEN environment variable fallback.
+    Priority: 1) explicit "token" parameter 2) FIGMA_TOKEN env var *)
+let resolve_token args =
+  match get_string "token" args with
+  | Some t when String.length t > 0 -> Some t
+  | _ -> Sys.getenv_opt "FIGMA_TOKEN"
 
 (** ============== Node selection helpers ============== *)
 
@@ -1707,7 +1714,7 @@ let handle_codegen args : (Yojson.Safe.t, string) result Lwt.t =
 (** figma_get_file 핸들러 *)
 let handle_get_file args : (Yojson.Safe.t, string) result =
   let file_key = get_string "file_key" args in
-  let token = get_string "token" args in
+  let token = resolve_token args in
   let format = get_string_or "format" "fidelity" args in
   let depth = get_int "depth" args in
   let geometry = get_string "geometry" args in
@@ -1733,7 +1740,7 @@ let handle_get_file args : (Yojson.Safe.t, string) result =
 (** figma_get_file_meta 핸들러 *)
 let handle_get_file_meta args : (Yojson.Safe.t, string) result =
   let file_key = get_string "file_key" args in
-  let token = get_string "token" args in
+  let token = resolve_token args in
   let version = get_string "version" args in
 
   match (file_key, token) with
@@ -1748,7 +1755,7 @@ let handle_get_file_meta args : (Yojson.Safe.t, string) result =
 (** figma_list_screens 핸들러 *)
 let handle_list_screens args : (Yojson.Safe.t, string) result =
   let file_key = get_string "file_key" args in
-  let token = get_string "token" args in
+  let token = resolve_token args in
 
   match (file_key, token) with
   | (Some file_key, Some token) ->
@@ -1769,7 +1776,7 @@ let handle_list_screens args : (Yojson.Safe.t, string) result =
 (** figma_get_node 핸들러 *)
 let handle_get_node args : (Yojson.Safe.t, string) result =
   let (file_key, node_id) = resolve_file_key_node_id args in
-  let token = get_string "token" args in
+  let token = resolve_token args in
   let format = get_string_or "format" "fidelity" args in
   let depth = get_int "depth" args in
   let geometry = get_string "geometry" args in
@@ -1801,7 +1808,7 @@ let handle_get_node args : (Yojson.Safe.t, string) result =
 (** figma_get_node_with_image 핸들러 *)
 let handle_get_node_with_image args : (Yojson.Safe.t, string) result =
   let (file_key, node_id) = resolve_file_key_node_id args in
-  let token = get_string "token" args in
+  let token = resolve_token args in
   let format = get_string_or "format" "fidelity" args in
   let image_format = get_string_or "image_format" "png" args in
   let scale = get_float_or "scale" 1.0 args |> int_of_float in
@@ -1874,7 +1881,7 @@ let handle_get_node_with_image args : (Yojson.Safe.t, string) result =
 (** figma_get_node_bundle 핸들러 *)
 let handle_get_node_bundle args : (Yojson.Safe.t, string) result =
   let (file_key, node_id) = resolve_file_key_node_id args in
-  let token = get_string "token" args in
+  let token = resolve_token args in
   let format = get_string_or "format" "fidelity" args in
   let image_format = get_string_or "image_format" "png" args in
   let scale = get_float_or "scale" 1.0 args in
@@ -2184,7 +2191,7 @@ let handle_get_node_bundle args : (Yojson.Safe.t, string) result =
 (** figma_get_node_summary 핸들러 - 경량 구조 요약 *)
 let handle_get_node_summary args : (Yojson.Safe.t, string) result =
   let (file_key, node_id) = resolve_file_key_node_id args in
-  let token = get_string "token" args in
+  let token = resolve_token args in
   let max_children = match get_int "max_children" args with Some n when n > 0 -> n | _ -> 50 in
   let version = get_string "version" args in
 
@@ -2244,7 +2251,7 @@ let handle_get_node_summary args : (Yojson.Safe.t, string) result =
 (** figma_select_nodes 핸들러 - 점수 기반 후보 선별 *)
 let handle_select_nodes args : (Yojson.Safe.t, string) result =
   let (file_key, node_id) = resolve_file_key_node_id args in
-  let token = get_string "token" args in
+  let token = resolve_token args in
   let max_summary_depth = 6 in
   let raw_summary_depth = match get_int "summary_depth" args with Some d -> d | _ -> 1 in
   let summary_depth =
@@ -2574,7 +2581,7 @@ let handle_select_nodes args : (Yojson.Safe.t, string) result =
 (** figma_get_node_chunk 핸들러 - 깊이 범위별 청크 로드 *)
 let handle_get_node_chunk args : (Yojson.Safe.t, string) result =
   let (file_key, node_id) = resolve_file_key_node_id args in
-  let token = get_string "token" args in
+  let token = resolve_token args in
   let depth_start = match get_int "depth_start" args with Some d when d >= 0 -> d | _ -> 0 in
   let depth_end = match get_int "depth_end" args with Some d when d >= 0 -> d | _ -> 2 in
   let format = get_string_or "format" "fidelity" args in
@@ -2663,7 +2670,7 @@ let handle_get_node_chunk args : (Yojson.Safe.t, string) result =
 (** figma_fidelity_loop 핸들러 *)
 let handle_fidelity_loop args : (Yojson.Safe.t, string) result =
   let (file_key, node_id) = resolve_file_key_node_id args in
-  let token = get_string "token" args in
+  let token = resolve_token args in
   let format = get_string_or "format" "fidelity" args in
   let target_score = get_float_or "target_score" 0.92 args in
   let start_depth = match get_int "start_depth" args with Some d when d > 0 -> d | _ -> 4 in
@@ -2950,7 +2957,7 @@ let handle_image_similarity args : (Yojson.Safe.t, string) result =
 
   let clamp_scale s = max 1 (min 4 s) in
 
-  match (get_string "file_key" args, get_string "node_a_id" args, get_string "node_b_id" args, get_string "token" args) with
+  match (get_string "file_key" args, get_string "node_a_id" args, get_string "node_b_id" args, resolve_token args) with
   | (Some file_key, Some node_a_id, Some node_b_id, Some token) ->
       let compare_scale scale =
         match Figma_effects.Perform.get_images ~token ~file_key
@@ -3070,7 +3077,7 @@ let handle_image_similarity args : (Yojson.Safe.t, string) result =
 let handle_verify_visual args : (Yojson.Safe.t, string) result =
   let file_key = get_string "file_key" args in
   let node_id = get_string "node_id" args in
-  let token = get_string "token" args in
+  let token = resolve_token args in
   let html = get_string "html" args in
   let target_ssim = get_float_or "target_ssim" 0.95 args in
   let max_iterations = match get_int "max_iterations" args with Some i when i > 0 -> i | _ -> 3 in
@@ -3501,7 +3508,7 @@ let handle_compare_elements args : (Yojson.Safe.t, string) result =
 let handle_export_image args : (Yojson.Safe.t, string) result =
   let file_key = get_string "file_key" args in
   let node_ids_str = get_string "node_ids" args in
-  let token = get_string "token" args in
+  let token = resolve_token args in
   let format = get_string_or "format" "png" args in
   let scale = get_float_or "scale" 1.0 args in
   let use_absolute_bounds = get_bool "use_absolute_bounds" args in
@@ -3550,7 +3557,7 @@ let handle_export_image args : (Yojson.Safe.t, string) result =
 (** figma_get_image_fills 핸들러 *)
 let handle_get_image_fills args : (Yojson.Safe.t, string) result =
   let file_key = get_string "file_key" args in
-  let token = get_string "token" args in
+  let token = resolve_token args in
   let version = get_string "version" args in
   let download = get_bool_or "download" false args in
   let save_dir = get_string_or "save_dir" (default_asset_dir ()) args in
@@ -3585,7 +3592,7 @@ let handle_get_image_fills args : (Yojson.Safe.t, string) result =
 let handle_get_nodes args : (Yojson.Safe.t, string) result =
   let file_key = get_string "file_key" args in
   let node_ids_str = get_string "node_ids" args in
-  let token = get_string "token" args in
+  let token = resolve_token args in
   let format = get_string_or "format" "raw" args in
   let depth = get_int "depth" args in
   let geometry = get_string "geometry" args in
@@ -3635,7 +3642,7 @@ let handle_get_nodes args : (Yojson.Safe.t, string) result =
 (** figma_get_file_versions 핸들러 *)
 let handle_get_file_versions args : (Yojson.Safe.t, string) result =
   let file_key = get_string "file_key" args in
-  let token = get_string "token" args in
+  let token = resolve_token args in
 
   match (file_key, token) with
   | (Some file_key, Some token) ->
@@ -3647,7 +3654,7 @@ let handle_get_file_versions args : (Yojson.Safe.t, string) result =
 (** figma_get_file_comments 핸들러 *)
 let handle_get_file_comments args : (Yojson.Safe.t, string) result =
   let file_key = get_string "file_key" args in
-  let token = get_string "token" args in
+  let token = resolve_token args in
 
   match (file_key, token) with
   | (Some file_key, Some token) ->
@@ -3659,7 +3666,7 @@ let handle_get_file_comments args : (Yojson.Safe.t, string) result =
 (** figma_post_comment 핸들러 *)
 let handle_post_comment args : (Yojson.Safe.t, string) result =
   let file_key = get_string "file_key" args in
-  let token = get_string "token" args in
+  let token = resolve_token args in
   let message = get_string "message" args in
   let x = get_float "x" args in
   let y = get_float "y" args in
@@ -3682,7 +3689,7 @@ let handle_post_comment args : (Yojson.Safe.t, string) result =
 (** figma_get_file_components 핸들러 *)
 let handle_get_file_components args : (Yojson.Safe.t, string) result =
   let file_key = get_string "file_key" args in
-  let token = get_string "token" args in
+  let token = resolve_token args in
 
   match (file_key, token) with
   | (Some file_key, Some token) ->
@@ -3694,7 +3701,7 @@ let handle_get_file_components args : (Yojson.Safe.t, string) result =
 (** figma_get_team_components 핸들러 *)
 let handle_get_team_components args : (Yojson.Safe.t, string) result =
   let team_id = get_string "team_id" args in
-  let token = get_string "token" args in
+  let token = resolve_token args in
 
   match (team_id, token) with
   | (Some team_id, Some token) ->
@@ -3706,7 +3713,7 @@ let handle_get_team_components args : (Yojson.Safe.t, string) result =
 (** figma_get_file_component_sets 핸들러 *)
 let handle_get_file_component_sets args : (Yojson.Safe.t, string) result =
   let file_key = get_string "file_key" args in
-  let token = get_string "token" args in
+  let token = resolve_token args in
 
   match (file_key, token) with
   | (Some file_key, Some token) ->
@@ -3718,7 +3725,7 @@ let handle_get_file_component_sets args : (Yojson.Safe.t, string) result =
 (** figma_get_team_component_sets 핸들러 *)
 let handle_get_team_component_sets args : (Yojson.Safe.t, string) result =
   let team_id = get_string "team_id" args in
-  let token = get_string "token" args in
+  let token = resolve_token args in
 
   match (team_id, token) with
   | (Some team_id, Some token) ->
@@ -3730,7 +3737,7 @@ let handle_get_team_component_sets args : (Yojson.Safe.t, string) result =
 (** figma_get_file_styles 핸들러 *)
 let handle_get_file_styles args : (Yojson.Safe.t, string) result =
   let file_key = get_string "file_key" args in
-  let token = get_string "token" args in
+  let token = resolve_token args in
 
   match (file_key, token) with
   | (Some file_key, Some token) ->
@@ -3742,7 +3749,7 @@ let handle_get_file_styles args : (Yojson.Safe.t, string) result =
 (** figma_get_team_styles 핸들러 *)
 let handle_get_team_styles args : (Yojson.Safe.t, string) result =
   let team_id = get_string "team_id" args in
-  let token = get_string "token" args in
+  let token = resolve_token args in
 
   match (team_id, token) with
   | (Some team_id, Some token) ->
@@ -3754,7 +3761,7 @@ let handle_get_team_styles args : (Yojson.Safe.t, string) result =
 (** figma_get_component 핸들러 *)
 let handle_get_component args : (Yojson.Safe.t, string) result =
   let component_key = get_string "component_key" args in
-  let token = get_string "token" args in
+  let token = resolve_token args in
 
   match (component_key, token) with
   | (Some component_key, Some token) ->
@@ -3766,7 +3773,7 @@ let handle_get_component args : (Yojson.Safe.t, string) result =
 (** figma_get_component_set 핸들러 *)
 let handle_get_component_set args : (Yojson.Safe.t, string) result =
   let component_set_key = get_string "component_set_key" args in
-  let token = get_string "token" args in
+  let token = resolve_token args in
 
   match (component_set_key, token) with
   | (Some component_set_key, Some token) ->
@@ -3778,7 +3785,7 @@ let handle_get_component_set args : (Yojson.Safe.t, string) result =
 (** figma_get_style 핸들러 *)
 let handle_get_style args : (Yojson.Safe.t, string) result =
   let style_key = get_string "style_key" args in
-  let token = get_string "token" args in
+  let token = resolve_token args in
 
   match (style_key, token) with
   | (Some style_key, Some token) ->
@@ -4747,7 +4754,7 @@ let resolve_llm_task_preset name =
 let handle_chunk_index args : (Yojson.Safe.t, string) result Lwt.t =
   let open Lwt.Syntax in
   let (file_key, node_id) = resolve_file_key_node_id args in
-  let token = get_string "token" args in
+  let token = resolve_token args in
   let format = get_string_or "format" "fidelity" args in
   let depth = get_int "depth" args in
   let geometry = get_string "geometry" args in
@@ -5273,7 +5280,7 @@ let handle_llm_task args : (Yojson.Safe.t, string) result Lwt.t =
         | Some mode -> mode
         | None -> if node_id <> None then "node" else "selection"
       in
-      let token = get_string "token" args in
+      let token = resolve_token args in
       let depth = get_int "depth" args in
       let geometry = get_string "geometry" args in
 
@@ -6193,8 +6200,8 @@ let handle_parse_url args : (Yojson.Safe.t, string) result =
 
 (** figma_get_me 핸들러 - 현재 사용자 정보 *)
 let handle_get_me args : (Yojson.Safe.t, string) result =
-  match get_string "token" args with
-  | None -> Error "Missing required parameter: token"
+  match resolve_token args with
+  | None -> Error "Missing required parameter: token (set FIGMA_TOKEN env var or pass explicitly)"
   | Some token ->
       (match Figma_effects.Perform.get_me ~token with
        | Ok json ->
@@ -6212,7 +6219,7 @@ let handle_get_me args : (Yojson.Safe.t, string) result =
 (** figma_list_projects 핸들러 - 팀의 프로젝트 목록 *)
 let handle_list_projects args : (Yojson.Safe.t, string) result =
   let team_id = get_string "team_id" args in
-  let token = get_string "token" args in
+  let token = resolve_token args in
 
   match (team_id, token) with
   | (Some team_id, Some token) ->
@@ -6240,7 +6247,7 @@ let handle_list_projects args : (Yojson.Safe.t, string) result =
 (** figma_list_files 핸들러 - 프로젝트의 파일 목록 *)
 let handle_list_files args : (Yojson.Safe.t, string) result =
   let project_id = get_string "project_id" args in
-  let token = get_string "token" args in
+  let token = resolve_token args in
 
   match (project_id, token) with
   | (Some project_id, Some token) ->
@@ -6268,7 +6275,7 @@ let handle_list_files args : (Yojson.Safe.t, string) result =
 (** figma_get_variables 핸들러 - 디자인 토큰/변수 *)
 let handle_get_variables args : (Yojson.Safe.t, string) result =
   let file_key = get_string "file_key" args in
-  let token = get_string "token" args in
+  let token = resolve_token args in
   let format = get_string_or "format" "summary" args in
 
   match (file_key, token) with
@@ -6312,7 +6319,7 @@ let handle_get_variables args : (Yojson.Safe.t, string) result =
 (** figma_query 핸들러 - 노드 필터링 *)
 let handle_query args : (Yojson.Safe.t, string) result =
   let file_key = get_string "file_key" args in
-  let token = get_string "token" args in
+  let token = resolve_token args in
   let node_id = get_string "node_id" args in
   let type_filter = get_string "type" args in
   let width_min = get_float "width_min" args in
@@ -6376,7 +6383,7 @@ let handle_query args : (Yojson.Safe.t, string) result =
 (** figma_search 핸들러 - 텍스트/이름 검색 *)
 let handle_search args : (Yojson.Safe.t, string) result =
   let file_key = get_string "file_key" args in
-  let token = get_string "token" args in
+  let token = resolve_token args in
   let query = get_string "query" args in
   let search_in = get_string_or "search_in" "both" args in
   let limit = get_float "limit" args |> Option.map int_of_float |> Option.value ~default:20 in
@@ -6431,7 +6438,7 @@ let handle_search args : (Yojson.Safe.t, string) result =
 (** figma_compare 핸들러 *)
 let handle_compare args : (Yojson.Safe.t, string) result =
   let file_key = get_string "file_key" args in
-  let token = get_string "token" args in
+  let token = resolve_token args in
   let node_a_id = get_string "node_a_id" args in
   let node_b_id = get_string "node_b_id" args in
   let mode = get_string_or "mode" "single" args in
@@ -6495,7 +6502,7 @@ let handle_compare args : (Yojson.Safe.t, string) result =
 (** figma_tree 핸들러 *)
 let handle_tree args : (Yojson.Safe.t, string) result =
   let file_key = get_string "file_key" args in
-  let token = get_string "token" args in
+  let token = resolve_token args in
   let node_id = get_string "node_id" args in
   let style_str = get_string_or "style" "ascii" args in
   let max_depth = get_float "max_depth" args |> Option.map int_of_float in
@@ -6534,7 +6541,7 @@ let handle_tree args : (Yojson.Safe.t, string) result =
 (** figma_stats 핸들러 *)
 let handle_stats args : (Yojson.Safe.t, string) result =
   let file_key = get_string "file_key" args in
-  let token = get_string "token" args in
+  let token = resolve_token args in
   let node_id = get_string "node_id" args in
 
   match file_key, token with
@@ -6564,7 +6571,7 @@ let handle_stats args : (Yojson.Safe.t, string) result =
 (** figma_export_tokens 핸들러 *)
 let handle_export_tokens args : (Yojson.Safe.t, string) result =
   let file_key = get_string "file_key" args in
-  let token = get_string "token" args in
+  let token = resolve_token args in
   let format = get_string_or "format" "css" args in
   let node_id = get_string "node_id" args in
 
@@ -6653,23 +6660,25 @@ let handle_doctor _args : (Yojson.Safe.t, string) result =
 
   let checks = `List [
     mk_check "node" node_ok node_version;
-    mk_check "playwright" playwright_ok (if playwright_ok then "ok" else "missing");
+    mk_check "playwright" playwright_ok (if playwright_ok then "ok (fallback renderer)" else "missing");
     mk_check "pngjs" pngjs_ok (if pngjs_ok then "ok" else "missing");
     mk_check "pixelmatch" pixelmatch_ok (if pixelmatch_ok then "ok" else "missing");
     mk_check "imagemagick" magick_ok magick_detail;
     mk_check "sips" sips_ok (if sips_ok then "ok" else "missing");
     mk_check "render_script" render_script_ok render_script;
     mk_check "ssim_script" ssim_script_ok ssim_script;
+    mk_check "claude-in-chrome" true "preferred renderer (Claude Code built-in, runtime detection)";
   ] in
 
   let hints =
     List.filter_map Fun.id [
       if not node_ok then Some "Install Node.js (node required for render/compare scripts)." else None;
-      if node_ok && not playwright_ok then Some "Install Playwright: npm i -D playwright && npx playwright install chromium." else None;
+      if node_ok && not playwright_ok then Some "Playwright missing - will use claude-in-chrome if available, otherwise install: npm i -D playwright && npx playwright install chromium." else None;
       if node_ok && (not pngjs_ok || not pixelmatch_ok) then Some "Install image deps: npm i -D pngjs pixelmatch." else None;
       if not magick_ok then Some "Install ImageMagick (magick/convert) for PPM conversion." else None;
       if not render_script_ok then Some "Ensure render-html.js path is valid (FIGMA_RENDER_SCRIPT or scripts/render-html.js)." else None;
       if not ssim_script_ok then Some "Ensure ssim-compare.js path is valid (scripts/ssim-compare.js)." else None;
+      Some "Chrome-First: When claude-in-chrome is available, use it for HTML rendering before falling back to Playwright.";
     ]
   in
 
@@ -6739,15 +6748,17 @@ let handle_cache_invalidate args : (Yojson.Safe.t, string) result =
 (** ============== 핸들러 맵 ============== *)
 
 (** sync 핸들러를 Lwt로 래핑.
-    - stdio 모드: Effect 핸들러로 감싸서 실행 (테스트 가능)
-    - HTTP 모드: Effect 없이 직접 실행 (Lwt_main.run 중첩 방지) *)
+    - stdio 모드: run_with_real_api (Lwt_main.run 기반 Effect 처리)
+    - HTTP 모드: run_with_eio_api (Lwt_eio.run_lwt 기반 Effect 처리) *)
 let wrap_sync (f : Yojson.Safe.t -> (Yojson.Safe.t, string) result) : tool_handler =
   fun args ->
     if !is_http_mode then
-      (* HTTP 모드: Effect 없이 직접 실행 - Lwt가 이미 실행 중 *)
-      Lwt.return (f args)
+      (* HTTP 모드: Eio 환경에서 run_with_eio_api로 Effect 처리
+         (Lwt_eio.run_lwt를 내부적으로 사용하여 API 호출) *)
+      let result = Figma_effects.run_with_eio_api (fun () -> f args) in
+      Lwt.return result
     else
-      (* stdio 모드: Effect 핸들러로 감싸서 실행 *)
+      (* stdio 모드: Lwt_main.run 기반 Effect 핸들러로 감싸서 실행 *)
       let result = Figma_effects.run_with_real_api (fun () -> f args) in
       Lwt.return result
 
@@ -6817,7 +6828,105 @@ let all_handlers : (string * tool_handler) list = [
   ("figma_cache_invalidate", wrap_sync handle_cache_invalidate);
 ]
 
-(** ============== Resources / Prompts ============== *)
+(** ============== 동기 핸들러 (HTTP/Eio 모드용) ============== *)
+
+(** 동기 래퍼 - Lwt 없이 Effect 핸들러로 감싸서 실행 *)
+let wrap_sync_pure (f : Yojson.Safe.t -> (Yojson.Safe.t, string) result) : tool_handler_sync =
+  fun args ->
+    (* HTTP/Eio 모드에서 run_with_eio_api로 직접 실행 *)
+    Figma_effects.run_with_eio_api (fun () -> f args)
+
+(** Lwt 핸들러의 동기 버전들 - Lwt.return만 제거 *)
+let handle_codegen_sync args : (Yojson.Safe.t, string) result =
+  let json_str = get_string "json" args in
+  let format = get_string_or "format" "fidelity" args in
+  match json_str with
+  | None -> Error "Missing required parameter: json"
+  | Some json_str ->
+      (match process_json_string ~format json_str with
+       | Ok result -> Ok (make_text_content result)
+       | Error msg -> Error msg)
+
+(** chunk_index 동기 버전 - Placeholder (Lwt 기반 버전 사용 권장) *)
+let handle_chunk_index_sync _args : (Yojson.Safe.t, string) result =
+  Error "figma_chunk_index requires Lwt-based processing. Use stdio mode or call figma_get_node + figma_codegen separately."
+
+(** llm_call 동기 버전 - Placeholder *)
+let handle_llm_call_sync _args : (Yojson.Safe.t, string) result =
+  Error "figma_llm_call is not supported in HTTP mode. Use figma_llm_task instead."
+
+(** llm_task 동기 버전 - Placeholder *)
+let handle_llm_task_sync _args : (Yojson.Safe.t, string) result =
+  Error "figma_llm_task requires LLM MCP. Please use the LLM MCP tools directly."
+
+(** 동기 핸들러 리스트 - HTTP/Eio 모드에서 사용 *)
+let all_handlers_sync : (string * tool_handler_sync) list = [
+  (* 기존 도구 - 동기 버전 *)
+  ("figma_codegen", wrap_sync_pure handle_codegen_sync);
+  ("figma_get_file", wrap_sync_pure handle_get_file);
+  ("figma_get_file_meta", wrap_sync_pure handle_get_file_meta);
+  ("figma_list_screens", wrap_sync_pure handle_list_screens);
+  ("figma_get_node", wrap_sync_pure handle_get_node);
+  ("figma_get_node_with_image", wrap_sync_pure handle_get_node_with_image);
+  ("figma_get_node_bundle", wrap_sync_pure handle_get_node_bundle);
+  ("figma_get_node_summary", wrap_sync_pure handle_get_node_summary);
+  ("figma_select_nodes", wrap_sync_pure handle_select_nodes);
+  ("figma_get_node_chunk", wrap_sync_pure handle_get_node_chunk);
+  ("figma_chunk_index", wrap_sync_pure handle_chunk_index_sync);
+  ("figma_chunk_get", wrap_sync_pure handle_chunk_get);
+  ("figma_fidelity_loop", wrap_sync_pure handle_fidelity_loop);
+  ("figma_image_similarity", wrap_sync_pure handle_image_similarity);
+  ("figma_verify_visual", wrap_sync_pure handle_verify_visual);
+  ("figma_compare_regions", wrap_sync_pure handle_compare_regions);
+  ("figma_evolution_report", wrap_sync_pure handle_evolution_report);
+  ("figma_compare_elements", wrap_sync_pure handle_compare_elements);
+  ("figma_export_image", wrap_sync_pure handle_export_image);
+  ("figma_get_image_fills", wrap_sync_pure handle_get_image_fills);
+  ("figma_get_nodes", wrap_sync_pure handle_get_nodes);
+  ("figma_get_file_versions", wrap_sync_pure handle_get_file_versions);
+  ("figma_get_file_comments", wrap_sync_pure handle_get_file_comments);
+  ("figma_post_comment", wrap_sync_pure handle_post_comment);
+  ("figma_get_file_components", wrap_sync_pure handle_get_file_components);
+  ("figma_get_team_components", wrap_sync_pure handle_get_team_components);
+  ("figma_get_file_component_sets", wrap_sync_pure handle_get_file_component_sets);
+  ("figma_get_team_component_sets", wrap_sync_pure handle_get_team_component_sets);
+  ("figma_get_file_styles", wrap_sync_pure handle_get_file_styles);
+  ("figma_get_team_styles", wrap_sync_pure handle_get_team_styles);
+  ("figma_get_component", wrap_sync_pure handle_get_component);
+  ("figma_get_component_set", wrap_sync_pure handle_get_component_set);
+  ("figma_get_style", wrap_sync_pure handle_get_style);
+  ("figma_plugin_connect", wrap_sync_pure handle_plugin_connect);
+  ("figma_plugin_use_channel", wrap_sync_pure handle_plugin_use_channel);
+  ("figma_plugin_status", wrap_sync_pure handle_plugin_status);
+  ("figma_plugin_read_selection", wrap_sync_pure handle_plugin_read_selection);
+  ("figma_plugin_get_node", wrap_sync_pure handle_plugin_get_node);
+  ("figma_plugin_export_node_image", wrap_sync_pure handle_plugin_export_node_image);
+  ("figma_plugin_get_variables", wrap_sync_pure handle_plugin_get_variables);
+  ("figma_plugin_apply_ops", wrap_sync_pure handle_plugin_apply_ops);
+  ("figma_llm_call", wrap_sync_pure handle_llm_call_sync);
+  ("figma_llm_task", wrap_sync_pure handle_llm_task_sync);
+  (* Phase 1: 탐색 도구 *)
+  ("figma_parse_url", wrap_sync_pure handle_parse_url);
+  ("figma_get_me", wrap_sync_pure handle_get_me);
+  ("figma_list_projects", wrap_sync_pure handle_list_projects);
+  ("figma_list_files", wrap_sync_pure handle_list_files);
+  ("figma_get_variables", wrap_sync_pure handle_get_variables);
+  (* Phase 2: 고급 쿼리 *)
+  ("figma_query", wrap_sync_pure handle_query);
+  ("figma_search", wrap_sync_pure handle_search);
+  ("figma_compare", wrap_sync_pure handle_compare);
+  (* Phase 3: 분석/추출 *)
+  ("figma_tree", wrap_sync_pure handle_tree);
+  ("figma_stats", wrap_sync_pure handle_stats);
+  ("figma_export_tokens", wrap_sync_pure handle_export_tokens);
+  ("figma_doctor", wrap_sync_pure handle_doctor);
+  ("figma_read_large_result", wrap_sync_pure handle_read_large_result);
+  (* 캐시 관리 *)
+  ("figma_cache_stats", wrap_sync_pure handle_cache_stats);
+  ("figma_cache_invalidate", wrap_sync_pure handle_cache_invalidate);
+]
+
+(** ============== Resources / Prompts ============== **)
 
 let resources : mcp_resource list = [
   {
@@ -6974,4 +7083,4 @@ let read_resource uri =
 (** ============== 서버 생성 ============== *)
 
 let create_figma_server () =
-  Mcp_protocol.create_server all_tools all_handlers resources prompts read_resource
+  Mcp_protocol.create_server ~handlers_sync:all_handlers_sync all_tools all_handlers resources prompts read_resource
