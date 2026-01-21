@@ -1174,16 +1174,54 @@ let node_duplicate_key node =
 (** 실행 모드 설정 - HTTP 서버에서 변경됨 *)
 let is_http_mode = ref false
 
+(** Eio context for pure Eio handlers (set by mcp_protocol_eio at startup) *)
+let eio_switch : Eio.Switch.t option ref = ref None
+let eio_client : Figma_api_eio.client option ref = ref None
+
+(** Existential wrapper for clock to hide the type parameter *)
+type any_clock = Clock : _ Eio.Time.clock -> any_clock
+let eio_clock : any_clock option ref = ref None
+
+(** Set Eio context from server startup *)
+let set_eio_context ~sw ~clock ~client =
+  eio_switch := Some sw;
+  eio_clock := Some (Clock clock);
+  eio_client := Some client
+
 (** Ensure effect handler in stdio mode for non-wrapped Lwt handlers. *)
 let run_with_effects f =
   if !is_http_mode then f ()
   else Figma_effects.run_with_real_api f
 
+(** Call LLM tool - prefers pure Eio when context available *)
+let call_llm_tool_eio ~(provider : Llm_provider_eio.provider) ~url ~name ~arguments =
+  match !eio_switch, !eio_clock, !eio_client with
+  | Some sw, Some (Clock clock), Some client ->
+      provider.call_tool ~sw ~clock ~client ~url ~name ~arguments
+  | _ ->
+      Error "Eio context not set - call set_eio_context first"
+
+(** Convert Eio provider to legacy Lwt-compatible call (blocking) *)
 let call_llm_tool ~(provider : Llm_provider.provider) ~url ~name ~arguments =
-  if !is_http_mode then
-    Lwt.return (Lwt_main.run (provider.call_tool ~url ~name ~arguments))
-  else
-    provider.call_tool ~url ~name ~arguments
+  (* Try Eio version first if context is available *)
+  match !eio_switch, !eio_clock, !eio_client with
+  | Some sw, Some (Clock clock), Some client ->
+      (* Map provider name to Eio provider *)
+      (match Llm_provider_eio.provider_of_string provider.id with
+       | Ok eio_provider ->
+           Lwt.return (eio_provider.call_tool ~sw ~clock ~client ~url ~name ~arguments)
+       | Error _ ->
+           (* Fallback to Lwt *)
+           if !is_http_mode then
+             Lwt.return (Lwt_main.run (provider.call_tool ~url ~name ~arguments))
+           else
+             provider.call_tool ~url ~name ~arguments)
+  | _ ->
+      (* No Eio context - use Lwt *)
+      if !is_http_mode then
+        Lwt.return (Lwt_main.run (provider.call_tool ~url ~name ~arguments))
+      else
+        provider.call_tool ~url ~name ~arguments
 
 let resolve_channel_id args =
   match get_string "channel_id" args with
@@ -6749,14 +6787,20 @@ let handle_cache_invalidate args : (Yojson.Safe.t, string) result =
 
 (** sync 핸들러를 Lwt로 래핑.
     - stdio 모드: run_with_real_api (Lwt_main.run 기반 Effect 처리)
-    - HTTP 모드: run_with_eio_api (Lwt_eio.run_lwt 기반 Effect 처리) *)
+    - HTTP 모드 (Eio context): run_with_pure_eio_api (순수 Eio, Lwt 미사용)
+    - HTTP 모드 (fallback): run_with_eio_api (Lwt_eio.run_lwt 기반) *)
 let wrap_sync (f : Yojson.Safe.t -> (Yojson.Safe.t, string) result) : tool_handler =
   fun args ->
     if !is_http_mode then
-      (* HTTP 모드: Eio 환경에서 run_with_eio_api로 Effect 처리
-         (Lwt_eio.run_lwt를 내부적으로 사용하여 API 호출) *)
-      let result = Figma_effects.run_with_eio_api (fun () -> f args) in
-      Lwt.return result
+      (* HTTP 모드: Eio context가 있으면 pure Eio 사용 *)
+      match !eio_switch, !eio_client with
+      | Some sw, Some client ->
+          let result = Figma_effects.run_with_pure_eio_api ~sw ~client (fun () -> f args) in
+          Lwt.return result
+      | _ ->
+          (* Fallback: Lwt_eio.run_lwt 기반 Effect 처리 *)
+          let result = Figma_effects.run_with_eio_api (fun () -> f args) in
+          Lwt.return result
     else
       (* stdio 모드: Lwt_main.run 기반 Effect 핸들러로 감싸서 실행 *)
       let result = Figma_effects.run_with_real_api (fun () -> f args) in
@@ -6830,11 +6874,16 @@ let all_handlers : (string * tool_handler) list = [
 
 (** ============== 동기 핸들러 (HTTP/Eio 모드용) ============== *)
 
-(** 동기 래퍼 - Lwt 없이 Effect 핸들러로 감싸서 실행 *)
+(** 동기 래퍼 - Lwt 없이 Effect 핸들러로 감싸서 실행
+    Eio context가 있으면 pure Eio, 없으면 Lwt_eio fallback *)
 let wrap_sync_pure (f : Yojson.Safe.t -> (Yojson.Safe.t, string) result) : tool_handler_sync =
   fun args ->
-    (* HTTP/Eio 모드에서 run_with_eio_api로 직접 실행 *)
-    Figma_effects.run_with_eio_api (fun () -> f args)
+    match !eio_switch, !eio_client with
+    | Some sw, Some client ->
+        Figma_effects.run_with_pure_eio_api ~sw ~client (fun () -> f args)
+    | _ ->
+        (* Fallback: Lwt_eio 기반 *)
+        Figma_effects.run_with_eio_api (fun () -> f args)
 
 (** Lwt 핸들러의 동기 버전들 - Lwt.return만 제거 *)
 let handle_codegen_sync args : (Yojson.Safe.t, string) result =

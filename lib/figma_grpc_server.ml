@@ -13,6 +13,52 @@ open Printf
 let default_port = 50052  (* Separate from MCP server *)
 let max_chunk_size = 64 * 1024  (* 64KB per chunk *)
 
+(** ============== Eio Context (for Lwt-free API calls) ============== *)
+
+(** Eio context stored as refs for handler access *)
+let grpc_eio_sw : Eio.Switch.t option ref = ref None
+let grpc_eio_client : Figma_api_eio.client option ref = ref None
+
+(** Set Eio context from server startup - enables pure Eio API calls *)
+let set_grpc_eio_context ~sw ~client =
+  grpc_eio_sw := Some sw;
+  grpc_eio_client := Some client
+
+(** Convert Eio API error to Figma_api.api_error for handler compatibility *)
+let eio_error_to_figma_error = function
+  | Figma_api_eio.Http_error (code, msg) ->
+      if code = 401 || code = 403 then Figma_api.AuthError msg
+      else if code = 404 then Figma_api.NotFound msg
+      else if code = 429 then Figma_api.RateLimited
+      else Figma_api.UnknownError (code, msg)
+  | Figma_api_eio.Json_error msg -> Figma_api.ParseError msg
+  | Figma_api_eio.Network_error msg -> Figma_api.NetworkError msg
+  | Figma_api_eio.Timeout_error -> Figma_api.NetworkError "Timeout"
+
+(** Wrapper: get_file_nodes using Eio (pure) or Lwt (fallback) *)
+let get_file_nodes_unified ?depth ?geometry ?plugin_data ?version ~token ~file_key ~node_ids () =
+  match !grpc_eio_sw, !grpc_eio_client with
+  | Some sw, Some client ->
+      (* Pure Eio path - Note: Figma_api_eio doesn't need clock for HTTP calls *)
+      (match Figma_api_eio.get_file_nodes ?depth ?geometry ?plugin_data ?version
+               ~sw ~client ~token ~file_key ~node_ids () with
+       | Ok json -> Ok json
+       | Error err -> Error (eio_error_to_figma_error err))
+  | _ ->
+      (* Fallback to Lwt bridge *)
+      Lwt_main.run (Figma_api.get_file_nodes ?depth ?geometry ?plugin_data ?version
+                      ~token ~file_key ~node_ids ())
+
+(** Wrapper: get_file_meta using Eio (pure) or Lwt (fallback) *)
+let get_file_meta_unified ?version ~token ~file_key () =
+  match !grpc_eio_sw, !grpc_eio_client with
+  | Some sw, Some client ->
+      (match Figma_api_eio.get_file_meta ?version ~sw ~client ~token ~file_key () with
+       | Ok json -> Ok json
+       | Error err -> Error (eio_error_to_figma_error err))
+  | _ ->
+      Lwt_main.run (Figma_api.get_file_meta ?version ~token ~file_key ())
+
 (** ============== Protobuf Encoding/Decoding ============== *)
 
 module Proto = Grpc_proto
@@ -582,10 +628,9 @@ module Handlers = struct
                 | Some json -> Ok json
                 | None ->
                     let result =
-                      Lwt_main.run
-                        (Figma_api.get_file_nodes
-                           ~depth:depth_per_call ?geometry:req.geometry ?plugin_data:req.plugin_data ?version:req.version
-                           ~token ~file_key ~node_ids:[current_id] ())
+                      get_file_nodes_unified
+                        ~depth:depth_per_call ?geometry:req.geometry ?plugin_data:req.plugin_data ?version:req.version
+                        ~token ~file_key ~node_ids:[current_id] ()
                     in
                     (match result with
                      | Ok json ->
@@ -637,12 +682,11 @@ module Handlers = struct
         end else begin
           eprintf "[gRPC] GetNodeStream file_key=%s node_id=%s token_len=%d\n%!"
             file_key node_id (String.length token);
-          (* Fetch from Figma API using Lwt bridge *)
+          (* Fetch from Figma API using unified wrapper (Eio preferred, Lwt fallback) *)
           let result =
-            Lwt_main.run
-              (Figma_api.get_file_nodes
-                 ?depth:req.depth ?geometry:req.geometry ?plugin_data:req.plugin_data ?version:req.version
-                 ~token ~file_key ~node_ids:[node_id] ())
+            get_file_nodes_unified
+              ?depth:req.depth ?geometry:req.geometry ?plugin_data:req.plugin_data ?version:req.version
+              ~token ~file_key ~node_ids:[node_id] ()
           in
           (match result with
            | Ok json ->
@@ -682,8 +726,7 @@ module Handlers = struct
         eprintf "[gRPC] GetFileMeta file_key=%s token_len=%d\n%!"
           file_key (String.length token);
         let result =
-          Lwt_main.run
-            (Figma_api.get_file_meta ~token ~file_key ?version ())
+          get_file_meta_unified ~token ~file_key ?version ()
         in
         (match result with
          | Ok json ->
@@ -721,8 +764,7 @@ module Handlers = struct
           incr attempt;
 
           let result =
-            Lwt_main.run
-              (Figma_api.get_file_nodes ~depth:!current_depth ~token:tok ~file_key:fk ~node_ids:[node_id] ())
+            get_file_nodes_unified ~depth:!current_depth ~token:tok ~file_key:fk ~node_ids:[node_id] ()
           in
 
           (match result with
@@ -858,12 +900,11 @@ module Handlers = struct
           match cached_json with
           | Some json -> Ok json
           | None ->
-              (* Fetch from Figma API using Lwt bridge *)
+              (* Fetch from Figma API using unified wrapper *)
               let fetched =
-                Lwt_main.run
-                  (Figma_api.get_file_nodes
-                     ?depth:req.depth
-                     ~token ~file_key ~node_ids:[node_id] ())
+                get_file_nodes_unified
+                  ?depth:req.depth
+                  ~token ~file_key ~node_ids:[node_id] ()
               in
               (match fetched with
                | Ok json ->
@@ -1040,10 +1081,9 @@ module Handlers = struct
                 | Some json -> Ok json
                 | None ->
                     let result =
-                      Lwt_main.run
-                        (Figma_api.get_file_nodes
-                           ~depth:depth_per_call
-                           ~token ~file_key ~node_ids:[current_id] ())
+                      get_file_nodes_unified
+                        ~depth:depth_per_call
+                        ~token ~file_key ~node_ids:[current_id] ()
                     in
                     (match result with
                      | Ok json ->
@@ -1095,10 +1135,9 @@ module Handlers = struct
             ~root_node_id:node_id
         end else begin
           let result =
-            Lwt_main.run
-              (Figma_api.get_file_nodes
-                 ?depth:req.depth
-                 ~token ~file_key ~node_ids:[node_id] ())
+            get_file_nodes_unified
+              ?depth:req.depth
+              ~token ~file_key ~node_ids:[node_id] ()
           in
           (match result with
            | Ok json ->
@@ -1158,6 +1197,11 @@ let create_server ~port () =
 
 (** Start the gRPC server *)
 let serve ~sw ~env ?(port=default_port) () =
+  (* Set Eio context for pure Eio API calls (Lwt-free path) *)
+  let net = Eio.Stdenv.net env in
+  let eio_client = Figma_api_eio.make_client net in
+  set_grpc_eio_context ~sw ~client:eio_client;
+
   let server = create_server ~port () in
   printf "🚀 Figma gRPC server starting on port %d...\n%!" port;
   printf "   Methods:\n%!";

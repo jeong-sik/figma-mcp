@@ -565,6 +565,9 @@ let error_handler _client_addr ?request:_ error start_response =
 
 (** Run HTTP server with Eio *)
 let run ~sw ~net ~clock ~domain_mgr config server =
+  (* Set Eio context for pure Eio handlers (Lwt-free path) *)
+  let eio_client = Figma_api_eio.make_client net in
+  Mcp_tools.set_eio_context ~sw ~clock ~client:eio_client;
   let request_handler = make_request_handler ~clock ~domain_mgr ~sw server in
   let resolve_listen_ips host =
     match String.lowercase_ascii host with
