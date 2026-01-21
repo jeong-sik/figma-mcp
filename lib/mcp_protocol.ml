@@ -75,7 +75,7 @@ let protocol_version_from_params params =
 
 let protocol_version = default_protocol_version  (* for backward compat *)
 let server_name = "figma-mcp"
-let server_version = "0.3.2"
+let server_version = "0.3.3"
 
 (** ============== JSON 유틸리티 ============== *)
 
