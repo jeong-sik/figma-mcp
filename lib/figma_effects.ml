@@ -775,7 +775,7 @@ let run_with_mock : 'a. mock_store -> (unit -> 'a) -> 'a = fun store computation
     @param sw Eio switch for resource management
     @param client Cohttp_eio HTTP client
     @param computation The effectful computation to run *)
-let run_with_pure_eio_api ~sw ~client computation =
+let run_with_pure_eio_api ~sw ~clock ~client computation =
   Effect.Deep.match_with computation ()
     { retc = (fun x -> x);
       exnc = (fun e -> raise e);
@@ -784,7 +784,7 @@ let run_with_pure_eio_api ~sw ~client computation =
         | Figma_get_file { token; file_key; depth; geometry; plugin_data; version } ->
             Some (fun (k : (a, _) Effect.Deep.continuation) ->
               let result =
-                Figma_api_eio.get_file ~sw ~client ~token ~file_key ?depth ?geometry ?plugin_data ?version ()
+                Figma_api_eio.get_file ~sw ~clock ~client ~token ~file_key ?depth ?geometry ?plugin_data ?version ()
               in
               let result' = Result.map_error Figma_api_eio.api_error_to_string result in
               Effect.Deep.continue k result')
@@ -792,7 +792,7 @@ let run_with_pure_eio_api ~sw ~client computation =
         | Figma_get_nodes { token; file_key; node_ids; depth; geometry; plugin_data; version } ->
             Some (fun (k : (a, _) Effect.Deep.continuation) ->
               let result =
-                Figma_api_eio.get_file_nodes ~sw ~client ~token ~file_key ~node_ids ?depth ?geometry ?plugin_data ?version ()
+                Figma_api_eio.get_file_nodes ~sw ~clock ~client ~token ~file_key ~node_ids ?depth ?geometry ?plugin_data ?version ()
               in
               let result' = Result.map_error Figma_api_eio.api_error_to_string result in
               Effect.Deep.continue k result')
@@ -800,7 +800,7 @@ let run_with_pure_eio_api ~sw ~client computation =
         | Figma_get_images { token; file_key; node_ids; format; scale; use_absolute_bounds; version } ->
             Some (fun (k : (a, _) Effect.Deep.continuation) ->
               let result =
-                Figma_api_eio.get_images ~sw ~client ~token ~file_key ~node_ids ~format ~scale ?use_absolute_bounds ?version ()
+                Figma_api_eio.get_images ~sw ~clock ~client ~token ~file_key ~node_ids ~format ~scale ?use_absolute_bounds ?version ()
               in
               let result' = Result.map_error Figma_api_eio.api_error_to_string result in
               Effect.Deep.continue k result')
@@ -808,7 +808,7 @@ let run_with_pure_eio_api ~sw ~client computation =
         | Figma_get_file_images { token; file_key; version } ->
             Some (fun (k : (a, _) Effect.Deep.continuation) ->
               let result =
-                Figma_api_eio.get_file_images ~sw ~client ~token ~file_key ?version ()
+                Figma_api_eio.get_file_images ~sw ~clock ~client ~token ~file_key ?version ()
               in
               let result' = Result.map_error Figma_api_eio.api_error_to_string result in
               Effect.Deep.continue k result')
@@ -816,7 +816,7 @@ let run_with_pure_eio_api ~sw ~client computation =
         | Figma_get_file_meta { token; file_key; version } ->
             Some (fun (k : (a, _) Effect.Deep.continuation) ->
               let result =
-                Figma_api_eio.get_file_meta ~sw ~client ~token ~file_key ?version ()
+                Figma_api_eio.get_file_meta ~sw ~clock ~client ~token ~file_key ?version ()
               in
               let result' = Result.map_error Figma_api_eio.api_error_to_string result in
               Effect.Deep.continue k result')
@@ -824,7 +824,7 @@ let run_with_pure_eio_api ~sw ~client computation =
         | Figma_get_file_components { token; file_key } ->
             Some (fun (k : (a, _) Effect.Deep.continuation) ->
               let result =
-                Figma_api_eio.get_file_components ~sw ~client ~token ~file_key
+                Figma_api_eio.get_file_components ~sw ~clock ~client ~token ~file_key
               in
               let result' = Result.map_error Figma_api_eio.api_error_to_string result in
               Effect.Deep.continue k result')
@@ -832,7 +832,7 @@ let run_with_pure_eio_api ~sw ~client computation =
         | Figma_get_team_components { token; team_id } ->
             Some (fun (k : (a, _) Effect.Deep.continuation) ->
               let result =
-                Figma_api_eio.get_team_components ~sw ~client ~token ~team_id
+                Figma_api_eio.get_team_components ~sw ~clock ~client ~token ~team_id
               in
               let result' = Result.map_error Figma_api_eio.api_error_to_string result in
               Effect.Deep.continue k result')
@@ -840,7 +840,7 @@ let run_with_pure_eio_api ~sw ~client computation =
         | Figma_get_file_component_sets { token; file_key } ->
             Some (fun (k : (a, _) Effect.Deep.continuation) ->
               let result =
-                Figma_api_eio.get_file_component_sets ~sw ~client ~token ~file_key
+                Figma_api_eio.get_file_component_sets ~sw ~clock ~client ~token ~file_key
               in
               let result' = Result.map_error Figma_api_eio.api_error_to_string result in
               Effect.Deep.continue k result')
@@ -848,7 +848,7 @@ let run_with_pure_eio_api ~sw ~client computation =
         | Figma_get_team_component_sets { token; team_id } ->
             Some (fun (k : (a, _) Effect.Deep.continuation) ->
               let result =
-                Figma_api_eio.get_team_component_sets ~sw ~client ~token ~team_id
+                Figma_api_eio.get_team_component_sets ~sw ~clock ~client ~token ~team_id
               in
               let result' = Result.map_error Figma_api_eio.api_error_to_string result in
               Effect.Deep.continue k result')
@@ -856,7 +856,7 @@ let run_with_pure_eio_api ~sw ~client computation =
         | Figma_get_file_styles { token; file_key } ->
             Some (fun (k : (a, _) Effect.Deep.continuation) ->
               let result =
-                Figma_api_eio.get_file_styles ~sw ~client ~token ~file_key
+                Figma_api_eio.get_file_styles ~sw ~clock ~client ~token ~file_key
               in
               let result' = Result.map_error Figma_api_eio.api_error_to_string result in
               Effect.Deep.continue k result')
@@ -864,7 +864,7 @@ let run_with_pure_eio_api ~sw ~client computation =
         | Figma_get_team_styles { token; team_id } ->
             Some (fun (k : (a, _) Effect.Deep.continuation) ->
               let result =
-                Figma_api_eio.get_team_styles ~sw ~client ~token ~team_id
+                Figma_api_eio.get_team_styles ~sw ~clock ~client ~token ~team_id
               in
               let result' = Result.map_error Figma_api_eio.api_error_to_string result in
               Effect.Deep.continue k result')
@@ -872,7 +872,7 @@ let run_with_pure_eio_api ~sw ~client computation =
         | Figma_get_component { token; component_key } ->
             Some (fun (k : (a, _) Effect.Deep.continuation) ->
               let result =
-                Figma_api_eio.get_component ~sw ~client ~token ~component_key
+                Figma_api_eio.get_component ~sw ~clock ~client ~token ~component_key
               in
               let result' = Result.map_error Figma_api_eio.api_error_to_string result in
               Effect.Deep.continue k result')
@@ -880,7 +880,7 @@ let run_with_pure_eio_api ~sw ~client computation =
         | Figma_get_component_set { token; component_set_key } ->
             Some (fun (k : (a, _) Effect.Deep.continuation) ->
               let result =
-                Figma_api_eio.get_component_set ~sw ~client ~token ~component_set_key
+                Figma_api_eio.get_component_set ~sw ~clock ~client ~token ~component_set_key
               in
               let result' = Result.map_error Figma_api_eio.api_error_to_string result in
               Effect.Deep.continue k result')
@@ -888,7 +888,7 @@ let run_with_pure_eio_api ~sw ~client computation =
         | Figma_get_style { token; style_key } ->
             Some (fun (k : (a, _) Effect.Deep.continuation) ->
               let result =
-                Figma_api_eio.get_style ~sw ~client ~token ~style_key
+                Figma_api_eio.get_style ~sw ~clock ~client ~token ~style_key
               in
               let result' = Result.map_error Figma_api_eio.api_error_to_string result in
               Effect.Deep.continue k result')
@@ -896,7 +896,7 @@ let run_with_pure_eio_api ~sw ~client computation =
         | Figma_get_file_versions { token; file_key } ->
             Some (fun (k : (a, _) Effect.Deep.continuation) ->
               let result =
-                Figma_api_eio.get_file_versions ~sw ~client ~token ~file_key
+                Figma_api_eio.get_file_versions ~sw ~clock ~client ~token ~file_key
               in
               let result' = Result.map_error Figma_api_eio.api_error_to_string result in
               Effect.Deep.continue k result')
@@ -904,7 +904,7 @@ let run_with_pure_eio_api ~sw ~client computation =
         | Figma_get_file_comments { token; file_key } ->
             Some (fun (k : (a, _) Effect.Deep.continuation) ->
               let result =
-                Figma_api_eio.get_file_comments ~sw ~client ~token ~file_key
+                Figma_api_eio.get_file_comments ~sw ~clock ~client ~token ~file_key
               in
               let result' = Result.map_error Figma_api_eio.api_error_to_string result in
               Effect.Deep.continue k result')
@@ -912,14 +912,14 @@ let run_with_pure_eio_api ~sw ~client computation =
         | Figma_post_file_comment { token; file_key; message; client_meta } ->
             Some (fun (k : (a, _) Effect.Deep.continuation) ->
               let result =
-                Figma_api_eio.post_file_comment ~sw ~client ~token ~file_key ~message ~client_meta
+                Figma_api_eio.post_file_comment ~sw ~clock ~client ~token ~file_key ~message ~client_meta
               in
               let result' = Result.map_error Figma_api_eio.api_error_to_string result in
               Effect.Deep.continue k result')
 
         | Figma_download_url { url; path } ->
             Some (fun (k : (a, _) Effect.Deep.continuation) ->
-              let result = Figma_api_eio.download_url ~sw ~client ~url ~path in
+              let result = Figma_api_eio.download_url ~sw ~clock ~client ~url ~path in
               (* download_url returns (unit, api_error), but effect expects (string, string) *)
               let result' = Result.map (fun () -> path) result in
               let result'' = Result.map_error Figma_api_eio.api_error_to_string result' in
@@ -927,25 +927,25 @@ let run_with_pure_eio_api ~sw ~client computation =
 
         | Figma_get_me { token } ->
             Some (fun (k : (a, _) Effect.Deep.continuation) ->
-              let result = Figma_api_eio.get_me ~sw ~client ~token in
+              let result = Figma_api_eio.get_me ~sw ~clock ~client ~token in
               let result' = Result.map_error Figma_api_eio.api_error_to_string result in
               Effect.Deep.continue k result')
 
         | Figma_get_team_projects { token; team_id } ->
             Some (fun (k : (a, _) Effect.Deep.continuation) ->
-              let result = Figma_api_eio.get_team_projects ~sw ~client ~token ~team_id in
+              let result = Figma_api_eio.get_team_projects ~sw ~clock ~client ~token ~team_id in
               let result' = Result.map_error Figma_api_eio.api_error_to_string result in
               Effect.Deep.continue k result')
 
         | Figma_get_project_files { token; project_id } ->
             Some (fun (k : (a, _) Effect.Deep.continuation) ->
-              let result = Figma_api_eio.get_project_files ~sw ~client ~token ~project_id in
+              let result = Figma_api_eio.get_project_files ~sw ~clock ~client ~token ~project_id in
               let result' = Result.map_error Figma_api_eio.api_error_to_string result in
               Effect.Deep.continue k result')
 
         | Figma_get_variables { token; file_key } ->
             Some (fun (k : (a, _) Effect.Deep.continuation) ->
-              let result = Figma_api_eio.get_local_variables ~sw ~client ~token ~file_key in
+              let result = Figma_api_eio.get_local_variables ~sw ~clock ~client ~token ~file_key in
               let result' = Result.map_error Figma_api_eio.api_error_to_string result in
               Effect.Deep.continue k result')
 

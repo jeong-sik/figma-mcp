@@ -6793,9 +6793,9 @@ let wrap_sync (f : Yojson.Safe.t -> (Yojson.Safe.t, string) result) : tool_handl
   fun args ->
     if !is_http_mode then
       (* HTTP 모드: Eio context가 있으면 pure Eio 사용 *)
-      match !eio_switch, !eio_client with
-      | Some sw, Some client ->
-          let result = Figma_effects.run_with_pure_eio_api ~sw ~client (fun () -> f args) in
+      match !eio_switch, !eio_clock, !eio_client with
+      | Some sw, Some (Clock clock), Some client ->
+          let result = Figma_effects.run_with_pure_eio_api ~sw ~clock ~client (fun () -> f args) in
           Lwt.return result
       | _ ->
           (* Fallback: Lwt_eio.run_lwt 기반 Effect 처리 *)
@@ -6878,9 +6878,9 @@ let all_handlers : (string * tool_handler) list = [
     Eio context가 있으면 pure Eio, 없으면 Lwt_eio fallback *)
 let wrap_sync_pure (f : Yojson.Safe.t -> (Yojson.Safe.t, string) result) : tool_handler_sync =
   fun args ->
-    match !eio_switch, !eio_client with
-    | Some sw, Some client ->
-        Figma_effects.run_with_pure_eio_api ~sw ~client (fun () -> f args)
+    match !eio_switch, !eio_clock, !eio_client with
+    | Some sw, Some (Clock clock), Some client ->
+        Figma_effects.run_with_pure_eio_api ~sw ~clock ~client (fun () -> f args)
     | _ ->
         (* Fallback: Lwt_eio 기반 *)
         Figma_effects.run_with_eio_api (fun () -> f args)

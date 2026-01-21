@@ -8,6 +8,9 @@ open Printf
 
 (** ============== Types ============== *)
 
+(** 타임아웃 예외 - 내부에서만 사용 *)
+exception Request_timeout
+
 type api_error =
   | Http_error of int * string   (** HTTP 상태 코드 + 메시지 *)
   | Json_error of string         (** JSON 파싱 에러 *)
@@ -24,6 +27,16 @@ let api_error_to_string = function
 
 let api_base = "https://api.figma.com/v1"
 let default_timeout = 30.0  (* seconds *)
+let max_body_size = 10 * 1024 * 1024  (* 10MB *)
+
+(** ============== Logging ============== *)
+
+(** 에러 로깅 - 침묵하지 않고 stderr로 출력 *)
+let log_error context msg =
+  Printf.eprintf "[figma_api_eio] %s: %s\n%!" context msg
+
+let log_warning context msg =
+  Printf.eprintf "[figma_api_eio] WARN %s: %s\n%!" context msg
 
 (** ============== URL Utilities ============== *)
 
@@ -78,45 +91,75 @@ let make_client (net : _ Eio.Net.t) : client =
   let https = make_https_handler () in
   Cohttp_eio.Client.make ~https net
 
-(** GET 요청 실행 *)
-let http_get ~sw ~client ~headers url =
+(** GET 요청 실행 (내부용) *)
+let http_get_raw ~sw ~client ~headers url =
   let uri = Uri.of_string url in
   let headers = Http.Header.of_list headers in
   let resp, body = Cohttp_eio.Client.get client ~sw ~headers uri in
   let status = Http.Response.status resp in
-  let body_str = Eio.Buf_read.(of_flow ~max_size:(10 * 1024 * 1024) body |> take_all) in
+  let body_str = Eio.Buf_read.(of_flow ~max_size:max_body_size body |> take_all) in
   (Http.Status.to_int status, body_str)
 
-(** POST 요청 실행 *)
-let http_post ~sw ~client ~headers url body_str =
+(** POST 요청 실행 (내부용) *)
+let http_post_raw ~sw ~client ~headers url body_str =
   let uri = Uri.of_string url in
   let headers = Http.Header.of_list headers in
   let body = Cohttp_eio.Body.of_string body_str in
   let resp, body = Cohttp_eio.Client.post client ~sw ~headers ~body uri in
   let status = Http.Response.status resp in
-  let body_str = Eio.Buf_read.(of_flow ~max_size:(10 * 1024 * 1024) body |> take_all) in
+  let body_str = Eio.Buf_read.(of_flow ~max_size:max_body_size body |> take_all) in
   (Http.Status.to_int status, body_str)
+
+(** GET 요청 with timeout *)
+let http_get ~sw ~clock ~client ~headers ?(timeout=default_timeout) url =
+  match Eio.Time.with_timeout clock timeout (fun () ->
+    Ok (http_get_raw ~sw ~client ~headers url)
+  ) with
+  | Ok result -> result
+  | Error `Timeout ->
+    log_error "http_get" (sprintf "Timeout after %.1fs: %s" timeout url);
+    raise Request_timeout
+
+(** POST 요청 with timeout *)
+let http_post ~sw ~clock ~client ~headers ?(timeout=default_timeout) url body_str =
+  match Eio.Time.with_timeout clock timeout (fun () ->
+    Ok (http_post_raw ~sw ~client ~headers url body_str)
+  ) with
+  | Ok result -> result
+  | Error `Timeout ->
+    log_error "http_post" (sprintf "Timeout after %.1fs: %s" timeout url);
+    raise Request_timeout
 
 (** ============== Figma API Core ============== *)
 
-(** Figma API GET 요청 *)
-let get_json ~sw ~client ~token url : (Yojson.Safe.t, api_error) result =
+(** Figma API GET 요청 - 에러 로깅 포함 *)
+let get_json ~sw ~clock ~client ~token url : (Yojson.Safe.t, api_error) result =
   let headers = [
     ("X-Figma-Token", token);
     ("Accept", "application/json");
   ] in
   try
-    let status, body = http_get ~sw ~client ~headers url in
+    let status, body = http_get ~sw ~clock ~client ~headers url in
     if status >= 200 && status < 300 then
       try Ok (Yojson.Safe.from_string body)
-      with Yojson.Json_error msg -> Error (Json_error msg)
-    else
+      with Yojson.Json_error msg ->
+        log_error "get_json" (sprintf "JSON parse error: %s (url: %s)" msg url);
+        Error (Json_error msg)
+    else begin
+      log_error "get_json" (sprintf "HTTP %d: %s (url: %s)" status (String.sub body 0 (min 200 (String.length body))) url);
       Error (Http_error (status, body))
-  with exn ->
-    Error (Network_error (Printexc.to_string exn))
+    end
+  with
+  | Request_timeout ->
+    log_error "get_json" (sprintf "Timeout (url: %s)" url);
+    Error Timeout_error
+  | exn ->
+    let msg = Printexc.to_string exn in
+    log_error "get_json" (sprintf "Network error: %s (url: %s)" msg url);
+    Error (Network_error msg)
 
-(** Figma API POST 요청 *)
-let post_json ~sw ~client ~token url body_json : (Yojson.Safe.t, api_error) result =
+(** Figma API POST 요청 - 에러 로깅 포함 *)
+let post_json ~sw ~clock ~client ~token url body_json : (Yojson.Safe.t, api_error) result =
   let headers = [
     ("X-Figma-Token", token);
     ("Content-Type", "application/json");
@@ -124,20 +167,30 @@ let post_json ~sw ~client ~token url body_json : (Yojson.Safe.t, api_error) resu
   ] in
   let body_str = Yojson.Safe.to_string body_json in
   try
-    let status, body = http_post ~sw ~client ~headers url body_str in
+    let status, body = http_post ~sw ~clock ~client ~headers url body_str in
     if status >= 200 && status < 300 then
       try Ok (Yojson.Safe.from_string body)
-      with Yojson.Json_error msg -> Error (Json_error msg)
-    else
+      with Yojson.Json_error msg ->
+        log_error "post_json" (sprintf "JSON parse error: %s (url: %s)" msg url);
+        Error (Json_error msg)
+    else begin
+      log_error "post_json" (sprintf "HTTP %d: %s (url: %s)" status (String.sub body 0 (min 200 (String.length body))) url);
       Error (Http_error (status, body))
+    end
   with
-  | exn -> Error (Network_error (Printexc.to_string exn))
+  | Request_timeout ->
+    log_error "post_json" (sprintf "Timeout (url: %s)" url);
+    Error Timeout_error
+  | exn ->
+    let msg = Printexc.to_string exn in
+    log_error "post_json" (sprintf "Network error: %s (url: %s)" msg url);
+    Error (Network_error msg)
 
-(** 파일 다운로드 *)
-let download_url ~sw ~client ~url ~path : (unit, api_error) result =
+(** 파일 다운로드 - 에러 로깅 포함 *)
+let download_url ~sw ~clock ~client ~url ~path : (unit, api_error) result =
   let headers = [] in
   try
-    let status, body = http_get ~sw ~client ~headers url in
+    let status, body = http_get ~sw ~clock ~client ~headers url in
     if status >= 200 && status < 300 then begin
       (* 디렉토리 생성 *)
       let dir = Filename.dirname path in
@@ -148,10 +201,18 @@ let download_url ~sw ~client ~url ~path : (unit, api_error) result =
       output_string oc body;
       close_out oc;
       Ok ()
-    end else
+    end else begin
+      log_error "download_url" (sprintf "HTTP %d (url: %s, path: %s)" status url path);
       Error (Http_error (status, body))
+    end
   with
-  | exn -> Error (Network_error (Printexc.to_string exn))
+  | Request_timeout ->
+    log_error "download_url" (sprintf "Timeout (url: %s)" url);
+    Error Timeout_error
+  | exn ->
+    let msg = Printexc.to_string exn in
+    log_error "download_url" (sprintf "Failed: %s (url: %s, path: %s)" msg url path);
+    Error (Network_error msg)
 
 (** ============== JSON Utilities ============== *)
 
@@ -220,7 +281,7 @@ let get_all_screens json =
 (** ============== Figma API Endpoints ============== *)
 
 (** 파일 전체 가져오기 *)
-let get_file ?depth ?geometry ?plugin_data ?version ~sw ~client ~token ~file_key ()
+let get_file ~clock ?depth ?geometry ?plugin_data ?version ~sw ~client ~token ~file_key ()
   : (Yojson.Safe.t, api_error) result =
   let params =
     []
@@ -230,10 +291,10 @@ let get_file ?depth ?geometry ?plugin_data ?version ~sw ~client ~token ~file_key
     |> add_param "plugin_data" plugin_data
   in
   let url = with_query (sprintf "%s/files/%s" api_base file_key) params in
-  get_json ~sw ~client ~token url
+  get_json ~sw ~clock ~client ~token url
 
 (** 파일 노드들만 가져오기 (특정 노드 ID들) *)
-let get_file_nodes ?depth ?geometry ?plugin_data ?version ~sw ~client ~token ~file_key ~node_ids ()
+let get_file_nodes ~clock ?depth ?geometry ?plugin_data ?version ~sw ~client ~token ~file_key ~node_ids ()
   : (Yojson.Safe.t, api_error) result =
   let node_ids = normalize_node_ids node_ids in
   let ids_param = String.concat "," node_ids in
@@ -245,10 +306,10 @@ let get_file_nodes ?depth ?geometry ?plugin_data ?version ~sw ~client ~token ~fi
     |> add_param "plugin_data" plugin_data
   in
   let url = with_query (sprintf "%s/files/%s/nodes" api_base file_key) params in
-  get_json ~sw ~client ~token url
+  get_json ~sw ~clock ~client ~token url
 
 (** 이미지 내보내기 URL 가져오기 *)
-let get_images ?use_absolute_bounds ?version ~sw ~client ~token ~file_key ~node_ids ~format ~scale ()
+let get_images ~clock ?use_absolute_bounds ?version ~sw ~client ~token ~file_key ~node_ids ~format ~scale ()
   : (Yojson.Safe.t, api_error) result =
   let node_ids = normalize_node_ids node_ids in
   let ids_param = String.concat "," node_ids in
@@ -260,79 +321,79 @@ let get_images ?use_absolute_bounds ?version ~sw ~client ~token ~file_key ~node_
     |> add_param "version" version
   in
   let url = with_query (sprintf "%s/images/%s" api_base file_key) params in
-  get_json ~sw ~client ~token url
+  get_json ~sw ~clock ~client ~token url
 
 (** 이미지 채움(image fills) 원본 URL 가져오기 *)
-let get_file_images ?version ~sw ~client ~token ~file_key ()
+let get_file_images ~clock ?version ~sw ~client ~token ~file_key ()
   : (Yojson.Safe.t, api_error) result =
   let params = [] |> add_param "version" version in
   let url = with_query (sprintf "%s/files/%s/images" api_base file_key) params in
-  get_json ~sw ~client ~token url
+  get_json ~sw ~clock ~client ~token url
 
 (** 파일 메타데이터(components/styles/componentSets) 가져오기 *)
-let get_file_meta ?version ~sw ~client ~token ~file_key ()
+let get_file_meta ~clock ?version ~sw ~client ~token ~file_key ()
   : (Yojson.Safe.t, api_error) result =
   let params = [] |> add_param "version" version in
   let url = with_query (sprintf "%s/files/%s/meta" api_base file_key) params in
-  get_json ~sw ~client ~token url
+  get_json ~sw ~clock ~client ~token url
 
 (** 파일 컴포넌트 목록 *)
-let get_file_components ~sw ~client ~token ~file_key : (Yojson.Safe.t, api_error) result =
+let get_file_components ~clock ~sw ~client ~token ~file_key : (Yojson.Safe.t, api_error) result =
   let url = sprintf "%s/files/%s/components" api_base file_key in
-  get_json ~sw ~client ~token url
+  get_json ~sw ~clock ~client ~token url
 
 (** 팀 컴포넌트 목록 *)
-let get_team_components ~sw ~client ~token ~team_id : (Yojson.Safe.t, api_error) result =
+let get_team_components ~clock ~sw ~client ~token ~team_id : (Yojson.Safe.t, api_error) result =
   let url = sprintf "%s/teams/%s/components" api_base team_id in
-  get_json ~sw ~client ~token url
+  get_json ~sw ~clock ~client ~token url
 
 (** 파일 컴포넌트 셋 목록 *)
-let get_file_component_sets ~sw ~client ~token ~file_key : (Yojson.Safe.t, api_error) result =
+let get_file_component_sets ~clock ~sw ~client ~token ~file_key : (Yojson.Safe.t, api_error) result =
   let url = sprintf "%s/files/%s/component_sets" api_base file_key in
-  get_json ~sw ~client ~token url
+  get_json ~sw ~clock ~client ~token url
 
 (** 팀 컴포넌트 셋 목록 *)
-let get_team_component_sets ~sw ~client ~token ~team_id : (Yojson.Safe.t, api_error) result =
+let get_team_component_sets ~clock ~sw ~client ~token ~team_id : (Yojson.Safe.t, api_error) result =
   let url = sprintf "%s/teams/%s/component_sets" api_base team_id in
-  get_json ~sw ~client ~token url
+  get_json ~sw ~clock ~client ~token url
 
 (** 파일 스타일 목록 *)
-let get_file_styles ~sw ~client ~token ~file_key : (Yojson.Safe.t, api_error) result =
+let get_file_styles ~clock ~sw ~client ~token ~file_key : (Yojson.Safe.t, api_error) result =
   let url = sprintf "%s/files/%s/styles" api_base file_key in
-  get_json ~sw ~client ~token url
+  get_json ~sw ~clock ~client ~token url
 
 (** 팀 스타일 목록 *)
-let get_team_styles ~sw ~client ~token ~team_id : (Yojson.Safe.t, api_error) result =
+let get_team_styles ~clock ~sw ~client ~token ~team_id : (Yojson.Safe.t, api_error) result =
   let url = sprintf "%s/teams/%s/styles" api_base team_id in
-  get_json ~sw ~client ~token url
+  get_json ~sw ~clock ~client ~token url
 
 (** 개별 컴포넌트 조회 *)
-let get_component ~sw ~client ~token ~component_key : (Yojson.Safe.t, api_error) result =
+let get_component ~clock ~sw ~client ~token ~component_key : (Yojson.Safe.t, api_error) result =
   let url = sprintf "%s/components/%s" api_base component_key in
-  get_json ~sw ~client ~token url
+  get_json ~sw ~clock ~client ~token url
 
 (** 개별 컴포넌트 셋 조회 *)
-let get_component_set ~sw ~client ~token ~component_set_key : (Yojson.Safe.t, api_error) result =
+let get_component_set ~clock ~sw ~client ~token ~component_set_key : (Yojson.Safe.t, api_error) result =
   let url = sprintf "%s/component_sets/%s" api_base component_set_key in
-  get_json ~sw ~client ~token url
+  get_json ~sw ~clock ~client ~token url
 
 (** 개별 스타일 조회 *)
-let get_style ~sw ~client ~token ~style_key : (Yojson.Safe.t, api_error) result =
+let get_style ~clock ~sw ~client ~token ~style_key : (Yojson.Safe.t, api_error) result =
   let url = sprintf "%s/styles/%s" api_base style_key in
-  get_json ~sw ~client ~token url
+  get_json ~sw ~clock ~client ~token url
 
 (** 파일 버전 목록 *)
-let get_file_versions ~sw ~client ~token ~file_key : (Yojson.Safe.t, api_error) result =
+let get_file_versions ~clock ~sw ~client ~token ~file_key : (Yojson.Safe.t, api_error) result =
   let url = sprintf "%s/files/%s/versions" api_base file_key in
-  get_json ~sw ~client ~token url
+  get_json ~sw ~clock ~client ~token url
 
 (** 파일 코멘트 목록 *)
-let get_file_comments ~sw ~client ~token ~file_key : (Yojson.Safe.t, api_error) result =
+let get_file_comments ~clock ~sw ~client ~token ~file_key : (Yojson.Safe.t, api_error) result =
   let url = sprintf "%s/files/%s/comments" api_base file_key in
-  get_json ~sw ~client ~token url
+  get_json ~sw ~clock ~client ~token url
 
 (** 파일 코멘트 생성 *)
-let post_file_comment ~sw ~client ~token ~file_key ~message ~client_meta
+let post_file_comment ~clock ~sw ~client ~token ~file_key ~message ~client_meta
   : (Yojson.Safe.t, api_error) result =
   let url = sprintf "%s/files/%s/comments" api_base file_key in
   let body =
@@ -341,27 +402,27 @@ let post_file_comment ~sw ~client ~token ~file_key ~message ~client_meta
       ("client_meta", client_meta);
     ]
   in
-  post_json ~sw ~client ~token url body
+  post_json ~sw ~clock ~client ~token url body
 
 (** 현재 사용자 정보 *)
-let get_me ~sw ~client ~token : (Yojson.Safe.t, api_error) result =
+let get_me ~clock ~sw ~client ~token : (Yojson.Safe.t, api_error) result =
   let url = sprintf "%s/me" api_base in
-  get_json ~sw ~client ~token url
+  get_json ~sw ~clock ~client ~token url
 
 (** 팀의 프로젝트 목록 *)
-let get_team_projects ~sw ~client ~token ~team_id : (Yojson.Safe.t, api_error) result =
+let get_team_projects ~clock ~sw ~client ~token ~team_id : (Yojson.Safe.t, api_error) result =
   let url = sprintf "%s/teams/%s/projects" api_base team_id in
-  get_json ~sw ~client ~token url
+  get_json ~sw ~clock ~client ~token url
 
 (** 프로젝트의 파일 목록 *)
-let get_project_files ~sw ~client ~token ~project_id : (Yojson.Safe.t, api_error) result =
+let get_project_files ~clock ~sw ~client ~token ~project_id : (Yojson.Safe.t, api_error) result =
   let url = sprintf "%s/projects/%s/files" api_base project_id in
-  get_json ~sw ~client ~token url
+  get_json ~sw ~clock ~client ~token url
 
 (** 파일의 로컬 변수 (Design Tokens) *)
-let get_local_variables ~sw ~client ~token ~file_key : (Yojson.Safe.t, api_error) result =
+let get_local_variables ~clock ~sw ~client ~token ~file_key : (Yojson.Safe.t, api_error) result =
   let url = sprintf "%s/files/%s/variables/local" api_base file_key in
-  get_json ~sw ~client ~token url
+  get_json ~sw ~clock ~client ~token url
 
 (** ============== URL Parsing ============== *)
 

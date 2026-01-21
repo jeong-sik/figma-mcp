@@ -15,13 +15,18 @@ let max_chunk_size = 64 * 1024  (* 64KB per chunk *)
 
 (** ============== Eio Context (for Lwt-free API calls) ============== *)
 
+(** Existential wrapper for clock to hide the type parameter *)
+type any_clock = Clock : _ Eio.Time.clock -> any_clock
+
 (** Eio context stored as refs for handler access *)
 let grpc_eio_sw : Eio.Switch.t option ref = ref None
+let grpc_eio_clock : any_clock option ref = ref None
 let grpc_eio_client : Figma_api_eio.client option ref = ref None
 
 (** Set Eio context from server startup - enables pure Eio API calls *)
-let set_grpc_eio_context ~sw ~client =
+let set_grpc_eio_context ~sw ~clock ~client =
   grpc_eio_sw := Some sw;
+  grpc_eio_clock := Some (Clock clock);
   grpc_eio_client := Some client
 
 (** Convert Eio API error to Figma_api.api_error for handler compatibility *)
@@ -37,11 +42,11 @@ let eio_error_to_figma_error = function
 
 (** Wrapper: get_file_nodes using Eio (pure) or Lwt (fallback) *)
 let get_file_nodes_unified ?depth ?geometry ?plugin_data ?version ~token ~file_key ~node_ids () =
-  match !grpc_eio_sw, !grpc_eio_client with
-  | Some sw, Some client ->
-      (* Pure Eio path - Note: Figma_api_eio doesn't need clock for HTTP calls *)
+  match !grpc_eio_sw, !grpc_eio_clock, !grpc_eio_client with
+  | Some sw, Some (Clock clock), Some client ->
+      (* Pure Eio path with timeout support *)
       (match Figma_api_eio.get_file_nodes ?depth ?geometry ?plugin_data ?version
-               ~sw ~client ~token ~file_key ~node_ids () with
+               ~sw ~clock ~client ~token ~file_key ~node_ids () with
        | Ok json -> Ok json
        | Error err -> Error (eio_error_to_figma_error err))
   | _ ->
@@ -51,9 +56,9 @@ let get_file_nodes_unified ?depth ?geometry ?plugin_data ?version ~token ~file_k
 
 (** Wrapper: get_file_meta using Eio (pure) or Lwt (fallback) *)
 let get_file_meta_unified ?version ~token ~file_key () =
-  match !grpc_eio_sw, !grpc_eio_client with
-  | Some sw, Some client ->
-      (match Figma_api_eio.get_file_meta ?version ~sw ~client ~token ~file_key () with
+  match !grpc_eio_sw, !grpc_eio_clock, !grpc_eio_client with
+  | Some sw, Some (Clock clock), Some client ->
+      (match Figma_api_eio.get_file_meta ?version ~sw ~clock ~client ~token ~file_key () with
        | Ok json -> Ok json
        | Error err -> Error (eio_error_to_figma_error err))
   | _ ->
@@ -1199,8 +1204,9 @@ let create_server ~port () =
 let serve ~sw ~env ?(port=default_port) () =
   (* Set Eio context for pure Eio API calls (Lwt-free path) *)
   let net = Eio.Stdenv.net env in
+  let clock = Eio.Stdenv.clock env in
   let eio_client = Figma_api_eio.make_client net in
-  set_grpc_eio_context ~sw ~client:eio_client;
+  set_grpc_eio_context ~sw ~clock ~client:eio_client;
 
   let server = create_server ~port () in
   printf "🚀 Figma gRPC server starting on port %d...\n%!" port;
