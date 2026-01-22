@@ -237,6 +237,252 @@ function deltaE00(lab1, lab2) {
 }
 
 /**
+ * ============== 논문 기반 고급 메트릭 (2025-01 추가) ==============
+ */
+
+/**
+ * True SSIM (Wang et al., 2004)
+ * "Image Quality Assessment: From Error Visibility to Structural Similarity"
+ * IEEE Transactions on Image Processing, Vol. 13, No. 4
+ *
+ * SSIM(x,y) = [l(x,y)]^α · [c(x,y)]^β · [s(x,y)]^γ
+ * - l(x,y) = (2μxμy + C1) / (μx² + μy² + C1)  // luminance
+ * - c(x,y) = (2σxσy + C2) / (σx² + σy² + C2)  // contrast
+ * - s(x,y) = (σxy + C3) / (σxσy + C3)          // structure
+ *
+ * With α=β=γ=1 and C3=C2/2:
+ * SSIM(x,y) = (2μxμy + C1)(2σxy + C2) / (μx² + μy² + C1)(σx² + σy² + C2)
+ */
+function calculateTrueSSIM(img1Data, img2Data, width, height) {
+  const K1 = 0.01, K2 = 0.03;
+  const L = 255; // dynamic range
+  const C1 = (K1 * L) ** 2;
+  const C2 = (K2 * L) ** 2;
+  const windowSize = 11;
+  const sigma = 1.5;
+
+  // Gaussian window weights (11x11) - normalized
+  const weights = createGaussianWindow(windowSize, sigma);
+
+  // Convert RGBA to grayscale (Y = 0.299R + 0.587G + 0.114B)
+  const gray1 = new Float32Array(width * height);
+  const gray2 = new Float32Array(width * height);
+  for (let i = 0; i < width * height; i++) {
+    const idx = i * 4;
+    gray1[i] = 0.299 * img1Data[idx] + 0.587 * img1Data[idx + 1] + 0.114 * img1Data[idx + 2];
+    gray2[i] = 0.299 * img2Data[idx] + 0.587 * img2Data[idx + 1] + 0.114 * img2Data[idx + 2];
+  }
+
+  let ssimSum = 0;
+  let count = 0;
+  const halfW = Math.floor(windowSize / 2);
+
+  for (let y = halfW; y < height - halfW; y++) {
+    for (let x = halfW; x < width - halfW; x++) {
+      // Single-pass computation (numerically stable)
+      // mu_x = sum(w * x), mu_y = sum(w * y)
+      // sigma_x^2 = sum(w * x^2) - mu_x^2
+      // sigma_xy = sum(w * x * y) - mu_x * mu_y
+      let sumW1 = 0, sumW2 = 0;
+      let sumW1Sq = 0, sumW2Sq = 0;
+      let sumW12 = 0;
+
+      for (let wy = -halfW; wy <= halfW; wy++) {
+        for (let wx = -halfW; wx <= halfW; wx++) {
+          const idx = (y + wy) * width + (x + wx);
+          const w = weights[(wy + halfW) * windowSize + (wx + halfW)];
+          const v1 = gray1[idx];
+          const v2 = gray2[idx];
+
+          sumW1 += w * v1;
+          sumW2 += w * v2;
+          sumW1Sq += w * v1 * v1;
+          sumW2Sq += w * v2 * v2;
+          sumW12 += w * v1 * v2;
+        }
+      }
+
+      const mu1 = sumW1;
+      const mu2 = sumW2;
+      const sigma1Sq = sumW1Sq - mu1 * mu1;
+      const sigma2Sq = sumW2Sq - mu2 * mu2;
+      const sigma12 = sumW12 - mu1 * mu2;
+
+      // SSIM formula (Wang et al. 2004)
+      const numerator = (2 * mu1 * mu2 + C1) * (2 * sigma12 + C2);
+      const denominator = (mu1 * mu1 + mu2 * mu2 + C1) * (sigma1Sq + sigma2Sq + C2);
+      const localSSIM = numerator / denominator;
+
+      ssimSum += localSSIM;
+      count++;
+    }
+  }
+
+  return count > 0 ? ssimSum / count : 0;
+}
+
+/**
+ * MS-SSIM (Wang et al., 2003)
+ * "Multi-scale Structural Similarity for Image Quality Assessment"
+ * Asilomar Conference on Signals, Systems and Computers
+ *
+ * MS-SSIM = ∏(j=1 to M) [c_j(x,y)]^βj · [s_j(x,y)]^γj · [l_M(x,y)]^αM
+ *
+ * 5 scales with weights: [0.0448, 0.2856, 0.3001, 0.2363, 0.1333] (from paper)
+ */
+function calculateMSSSIM(img1Data, img2Data, width, height) {
+  const scales = 5;
+  const weights = [0.0448, 0.2856, 0.3001, 0.2363, 0.1333]; // Exponents from paper
+
+  // Convert to grayscale
+  let gray1 = new Float32Array(width * height);
+  let gray2 = new Float32Array(width * height);
+  for (let i = 0; i < width * height; i++) {
+    const idx = i * 4;
+    gray1[i] = 0.299 * img1Data[idx] + 0.587 * img1Data[idx + 1] + 0.114 * img1Data[idx + 2];
+    gray2[i] = 0.299 * img2Data[idx] + 0.587 * img2Data[idx + 1] + 0.114 * img2Data[idx + 2];
+  }
+
+  let msSSIM = 1.0;
+  let currentWidth = width;
+  let currentHeight = height;
+
+  for (let scale = 0; scale < scales; scale++) {
+    // Minimum size check
+    if (currentWidth < 11 || currentHeight < 11) break;
+
+    // Compute contrast and structure at this scale
+    const { contrast, structure, luminance } = computeCSL(gray1, gray2, currentWidth, currentHeight);
+
+    if (scale === scales - 1) {
+      // Last scale: include luminance
+      msSSIM *= Math.pow(luminance, weights[scale]);
+    }
+    msSSIM *= Math.pow(contrast, weights[scale]) * Math.pow(structure, weights[scale]);
+
+    // Downsample by 2x for next scale (average pooling)
+    const newWidth = Math.floor(currentWidth / 2);
+    const newHeight = Math.floor(currentHeight / 2);
+
+    gray1 = downsample(gray1, currentWidth, currentHeight, newWidth, newHeight);
+    gray2 = downsample(gray2, currentWidth, currentHeight, newWidth, newHeight);
+
+    currentWidth = newWidth;
+    currentHeight = newHeight;
+  }
+
+  return msSSIM;
+}
+
+/**
+ * Compute Contrast, Structure, and Luminance components
+ */
+function computeCSL(gray1, gray2, width, height) {
+  const K1 = 0.01, K2 = 0.03, L = 255;
+  const C1 = (K1 * L) ** 2, C2 = (K2 * L) ** 2, C3 = C2 / 2;
+
+  let mu1 = 0, mu2 = 0;
+  const n = width * height;
+
+  for (let i = 0; i < n; i++) {
+    mu1 += gray1[i];
+    mu2 += gray2[i];
+  }
+  mu1 /= n;
+  mu2 /= n;
+
+  let sigma1Sq = 0, sigma2Sq = 0, sigma12 = 0;
+  for (let i = 0; i < n; i++) {
+    const d1 = gray1[i] - mu1;
+    const d2 = gray2[i] - mu2;
+    sigma1Sq += d1 * d1;
+    sigma2Sq += d2 * d2;
+    sigma12 += d1 * d2;
+  }
+  sigma1Sq /= (n - 1);
+  sigma2Sq /= (n - 1);
+  sigma12 /= (n - 1);
+
+  const sigma1 = Math.sqrt(sigma1Sq);
+  const sigma2 = Math.sqrt(sigma2Sq);
+
+  const luminance = (2 * mu1 * mu2 + C1) / (mu1 * mu1 + mu2 * mu2 + C1);
+  const contrast = (2 * sigma1 * sigma2 + C2) / (sigma1Sq + sigma2Sq + C2);
+  const structure = (sigma12 + C3) / (sigma1 * sigma2 + C3);
+
+  return { luminance, contrast, structure };
+}
+
+/**
+ * Create normalized Gaussian window
+ */
+function createGaussianWindow(size, sigma) {
+  const weights = new Float32Array(size * size);
+  const half = Math.floor(size / 2);
+  let sum = 0;
+
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const dx = x - half, dy = y - half;
+      const w = Math.exp(-(dx * dx + dy * dy) / (2 * sigma * sigma));
+      weights[y * size + x] = w;
+      sum += w;
+    }
+  }
+
+  // Normalize
+  for (let i = 0; i < weights.length; i++) {
+    weights[i] /= sum;
+  }
+
+  return weights;
+}
+
+/**
+ * Downsample image by factor of 2 (average pooling)
+ */
+function downsample(data, oldW, oldH, newW, newH) {
+  const result = new Float32Array(newW * newH);
+  for (let y = 0; y < newH; y++) {
+    for (let x = 0; x < newW; x++) {
+      const x2 = x * 2, y2 = y * 2;
+      let sum = 0, count = 0;
+      for (let dy = 0; dy < 2 && y2 + dy < oldH; dy++) {
+        for (let dx = 0; dx < 2 && x2 + dx < oldW; dx++) {
+          sum += data[(y2 + dy) * oldW + (x2 + dx)];
+          count++;
+        }
+      }
+      result[y * newW + x] = sum / count;
+    }
+  }
+  return result;
+}
+
+/**
+ * LPIPS placeholder - requires Python + PyTorch
+ * Will be computed by external script if available
+ */
+function calculateLPIPS(path1, path2) {
+  try {
+    // Check for LPIPS Python script
+    const lpipsScript = path.join(__dirname, 'lpips-compare.py');
+    if (fs.existsSync(lpipsScript)) {
+      const result = execSync(`python3 "${lpipsScript}" "${path1}" "${path2}"`, { encoding: 'utf8', timeout: 30000 });
+      const parsed = JSON.parse(result.trim());
+      return parsed.lpips || null;
+    }
+  } catch (e) {
+    // LPIPS not available
+  }
+  return null; // Not available
+}
+
+/**
+ * ============== 비교 함수 ==============
+ */
+
+/**
  * 두 이미지의 픽셀 차이 계산 (pixelmatch + CIEDE2000 기반)
  */
 function compareImages(path1, path2) {
@@ -276,15 +522,25 @@ function compareImages(path1, path2) {
   const avgDeltaE = totalDeltaE / (width * height);
 
   const totalPixels = width * height;
-  const ssim = 1 - (diffPixels / totalPixels);
+  const pixelMatchSSIM = 1 - (diffPixels / totalPixels);  // Legacy: pixelmatch-based
   const mse = diffPixels / totalPixels;
   const psnr = mse === 0 ? 100 : 10 * Math.log10(1 / mse);
+
+  // 🆕 True SSIM (Wang et al. 2004) - 논문 기반
+  const trueSSIM = calculateTrueSSIM(img1Data, img2Data, width, height);
+
+  // 🆕 MS-SSIM (Wang et al. 2003) - 다중 스케일
+  const msSSIM = calculateMSSSIM(img1Data, img2Data, width, height);
+
+  // 🆕 LPIPS (선택적 - Python 스크립트 필요)
+  const lpips = calculateLPIPS(path1, path2);
 
   // 영역별 diff 분석
   const regions = analyzeRegions(diffBuffer, width, height);
 
   return {
-    ssim: parseFloat(ssim.toFixed(6)),
+    // Legacy metrics (backward compatible)
+    ssim: parseFloat(trueSSIM.toFixed(6)),  // 🆕 Now uses true SSIM
     psnr: parseFloat(psnr.toFixed(2)),
     mse: parseFloat(mse.toFixed(6)),
     deltaE: parseFloat(avgDeltaE.toFixed(4)),
@@ -292,7 +548,20 @@ function compareImages(path1, path2) {
     totalPixels: totalPixels,
     width: width,
     height: height,
-    regions: regions
+    regions: regions,
+
+    // 🆕 Advanced metrics (논문 기반)
+    advanced: {
+      trueSSIM: parseFloat(trueSSIM.toFixed(6)),       // Wang et al. 2004
+      msSSIM: parseFloat(msSSIM.toFixed(6)),           // Multi-scale SSIM
+      pixelMatch: parseFloat(pixelMatchSSIM.toFixed(6)), // Legacy pixelmatch-based
+      lpips: lpips,                                     // LPIPS (null if unavailable)
+      _papers: {
+        trueSSIM: "Wang et al. 2004 - IEEE TIP Vol.13 No.4",
+        msSSIM: "Wang et al. 2003 - Asilomar Conference",
+        lpips: "Zhang et al. 2018 - CVPR (requires Python)"
+      }
+    }
   };
 }
 

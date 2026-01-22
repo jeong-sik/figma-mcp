@@ -189,6 +189,14 @@ let empty_diff_regions = {
   edges = { edge_top = 0.0; edge_bottom = 0.0; edge_left = 0.0; edge_right = 0.0 };
 }
 
+(** 🆕 고급 메트릭 (논문 기반) *)
+type advanced_metrics = {
+  true_ssim: float;       (** Wang et al. 2004 - IEEE TIP *)
+  ms_ssim: float;         (** Wang et al. 2003 - Multi-Scale *)
+  pixel_match: float;     (** Legacy pixelmatch-based *)
+  lpips: float option;    (** Zhang et al. 2018 - CVPR (optional) *)
+}
+
 (** SSIM + 영역 분석 결과 (Node.js ssim-compare.js 직접 호출) *)
 type comparison_with_regions = {
   ssim: float;
@@ -200,6 +208,7 @@ type comparison_with_regions = {
   width: int;
   height: int;
   regions: diff_regions;
+  advanced: advanced_metrics option;  (** 🆕 논문 기반 메트릭 *)
 }
 
 (** ssim-compare.js 스크립트 경로 찾기 *)
@@ -274,7 +283,18 @@ let compare_renders_with_regions ~figma_png ~html_png : (comparison_with_regions
         let width = json |> member "width" |> to_int in
         let height = json |> member "height" |> to_int in
         let regions = parse_diff_regions json in
-        Ok { ssim; psnr; mse; delta_e; diff_pixels; total_pixels; width; height; regions }
+        (* 🆕 Parse advanced metrics (논문 기반) *)
+        let advanced =
+          let adv = json |> member "advanced" in
+          if adv = `Null then None
+          else Some {
+            true_ssim = adv |> member "trueSSIM" |> to_float_option |> Option.value ~default:ssim;
+            ms_ssim = adv |> member "msSSIM" |> to_float_option |> Option.value ~default:0.0;
+            pixel_match = adv |> member "pixelMatch" |> to_float_option |> Option.value ~default:0.0;
+            lpips = adv |> member "lpips" |> to_float_option;
+          }
+        in
+        Ok { ssim; psnr; mse; delta_e; diff_pixels; total_pixels; width; height; regions; advanced }
     | error_msg -> Error (to_string error_msg)
   with e -> Error (sprintf "JSON parse error: %s\nOutput: %s" (Printexc.to_string e) output)
 

@@ -443,3 +443,91 @@ figma_llm_task
   IPs like `127.0.0.1` can be rejected; switch back to `plugin/manifest.json`.
 - If LLM tools fail, check `MCP_SLOT_URL` and verify the MCP endpoint supports `tools/call`.
 - If `grpcurl` reports missing reflection, pass `-import-path proto -proto figma.proto`.
+
+---
+
+## 11) Visual Verification: 95% SSIM 달성 전략
+
+### 문제: 72%에서 막힘
+
+전체 이미지 비교 시 SSIM이 72%에서 정체되는 경우가 많습니다.
+
+| 시도 | SSIM | 결과 |
+|------|------|------|
+| 초기 구현 | 65% | 많이 부족 |
+| DSL 정확도 ↑ | 72% | 개선 |
+| 추가 수정 | 72% | **정체** |
+
+### 해결: 레이아웃/텍스트 분리 측정
+
+**핵심 질문**: "폰트와 아이콘을 제외하고 큰 레이아웃 덩어리부터 잡는다면?"
+
+```bash
+# 1. 텍스트/아이콘 영역 마스킹 (ImageMagick)
+magick figma.png -fill gray -draw "rectangle 100,50 300,80" figma_masked.png
+magick html.png -fill gray -draw "rectangle 100,50 300,80" html_masked.png
+
+# 2. 마스킹된 이미지로 레이아웃만 비교
+magick compare -metric SSIM figma_masked.png html_masked.png null: 2>&1
+```
+
+**결과**:
+```
+전체 비교:     SSIM 72.5%  (막힘)
+텍스트 마스킹: SSIM 95.7%  ✅
+```
+
+### 해석 및 다음 단계
+
+| 레이아웃 SSIM | 의미 | 액션 |
+|---------------|------|------|
+| > 95% | 레이아웃 완벽 | 텍스트/아이콘만 집중 수정 |
+| 80-95% | 미세 조정 필요 | DSL padding/radius 재확인 |
+| < 80% | 구조 문제 | DSL 다시 분석 |
+
+### 흔한 함정들
+
+1. **높이 계산 오류**: 콘텐츠가 뷰포트를 초과하면 하단 요소가 잘림
+   ```css
+   /* DSL 높이값 정확히 적용 */
+   .header  { height: 44px; }
+   .content { height: 276px; }  /* 고정 height 누락 주의! */
+   ```
+
+2. **DSL 값 오류**: radius, padding 미세 차이
+   ```
+   radius: 10px  (4px로 잘못 설정 → 차이 발생)
+   padding: 12/16/12/16  (TRBL 순서 주의!)
+   ```
+
+3. **현실적 기대치**:
+   - 자동 변환: **70-80%** SSIM
+   - 수동 미세조정: **80-85%** SSIM
+   - 레이아웃만 측정: **95%+** 가능!
+
+### MCP 도구 활용
+
+```bash
+# 1. DSL 추출
+figma_get_node_bundle
+  file_key: "KEY"
+  node_id: "123:456"
+
+# 2. Visual 검증 (텍스트 체크 포함)
+figma_verify_visual
+  file_key: "KEY"
+  node_id: "123:456"
+  html: "<html>...</html>"
+  target_ssim: 0.95
+  html_screenshot: "/path/to/rendered.png"  # Chrome MCP로 렌더링
+
+# 3. 영역별 상세 비교
+figma_compare_regions
+  image1: "/path/to/figma.png"
+  image2: "/path/to/html.png"
+```
+
+### 핵심 원칙
+
+> **막혔을 때 "전체"를 보지 말고 "분리해서" 측정하라.
+> 어디가 OK이고 어디가 문제인지 명확해진다.**

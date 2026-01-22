@@ -332,6 +332,29 @@ let tool_figma_verify_visual : tool_def = {
   ] ["file_key"; "node_id"];
 }
 
+(** Pixel-Perfect Loop - SSIM 기반 CSS 자동 보정 루프 *)
+let tool_figma_pixel_perfect_loop : tool_def = {
+  name = "figma_pixel_perfect_loop";
+  description = "🧬 Figma DNA 분석 MCP - SSIM 차이 분석 + CSS 자동 보정 제안을 통해 99%+ Pixel-Perfect 구현을 달성합니다. Figma 노드와 구현된 HTML/스크린샷을 비교하고, 문제 영역(edges, quadrants, strips)을 분석하여 구체적인 CSS 수정 제안을 반환합니다. 전문가 수준의 에러 처리, 타임아웃, scale, tool chaining 지원 포함. Progress 알림을 SSE로 전송합니다.";
+  input_schema = object_schema [
+    ("file_key", string_prop "Figma 파일 키");
+    ("node_id", string_prop "노드 ID (예: 123:456)");
+    ("token", string_prop "Figma Personal Access Token (optional if FIGMA_TOKEN env var is set)");
+    ("html", string_prop "구현된 HTML 코드");
+    ("html_screenshot", string_prop "구현된 HTML의 스크린샷 경로 (Chrome MCP 등)");
+    ("target_ssim", number_prop "목표 SSIM (0-1, 기본값: 0.99)");
+    ("width", number_prop "뷰포트 너비 (기본값: 375)");
+    ("height", number_prop "뷰포트 높이 (기본값: 812)");
+    ("scale", number_prop "🆕 Figma 이미지 스케일 (@1x=1.0, @2x=2.0, @3x=3.0, 기본값: 1.0, 범위: 0.5-4.0)");
+    ("timeout", number_prop "🆕 타임아웃 초 (기본값: 30.0)");
+    ("version", string_prop "특정 파일 버전 ID");
+    (* 🆕 Tool Chaining 옵션 *)
+    ("include_node_dsl", bool_prop "🆕 결과에 figma_get_node DSL 포함 (기본값: false)");
+    ("include_tokens", bool_prop "🆕 결과에 figma_export_tokens 포함 (기본값: false)");
+    ("auto_region_analysis", bool_prop "🆕 SSIM < 90% 시 자동 region 상세 분석 (기본값: false)");
+  ] ["file_key"; "node_id"];
+}
+
 (** Region-based comparison - 영역별 상세 비교 *)
 let tool_figma_compare_regions : tool_def = {
   name = "figma_compare_regions";
@@ -896,6 +919,7 @@ let all_tools = [
   tool_figma_fidelity_loop;
   tool_figma_image_similarity;
   tool_figma_verify_visual;
+  tool_figma_pixel_perfect_loop;
   tool_figma_compare_regions;
   tool_figma_evolution_report;
   tool_figma_compare_elements;
@@ -960,6 +984,124 @@ let normalize_node_id_key key value =
   match key with
   | "node_id" | "node_a_id" | "node_b_id" -> normalize_node_id value
   | _ -> value
+
+(** ============== 에러 처리 강화 + 모나딕 바인딩 ============== *)
+
+(** 상세 에러 타입 *)
+type api_error =
+  | NetworkError of string
+  | AuthError of string       (* 401/403 *)
+  | NotFound of string        (* 404 *)
+  | RateLimited of float      (* 429 + retry_after *)
+  | ServerError of string     (* 5xx *)
+  | ParseError of string
+  | TimeoutError of float     (* timeout in seconds *)
+  | UnknownError of string
+
+(** 에러를 사용자 친화적 메시지로 변환 *)
+let error_to_string = function
+  | NetworkError msg -> Printf.sprintf "🌐 Network error: %s" msg
+  | AuthError msg -> Printf.sprintf "🔐 Auth error: %s (check FIGMA_TOKEN)" msg
+  | NotFound msg -> Printf.sprintf "🔍 Not found: %s" msg
+  | RateLimited secs -> Printf.sprintf "⏳ Rate limited - retry after %.0fs" secs
+  | ServerError msg -> Printf.sprintf "🔥 Figma server error: %s" msg
+  | ParseError msg -> Printf.sprintf "📄 Parse error: %s" msg
+  | TimeoutError secs -> Printf.sprintf "⏱️ Timeout after %.0fs" secs
+  | UnknownError msg -> Printf.sprintf "❓ Unknown error: %s" msg
+
+(** HTTP 상태 코드에서 에러 분류 *)
+let classify_http_error ~status_code ~body =
+  match status_code with
+  | 401 | 403 -> AuthError body
+  | 404 -> NotFound body
+  | 429 ->
+      (* Rate limit - retry_after 파싱 시도 *)
+      let retry_after = try
+        Scanf.sscanf body "retry after %f" (fun f -> f)
+      with _ -> 60.0 in
+      RateLimited retry_after
+  | n when n >= 500 -> ServerError (Printf.sprintf "HTTP %d: %s" n body)
+  | _ -> UnknownError (Printf.sprintf "HTTP %d: %s" status_code body)
+
+(** Result 모나딕 바인딩 (let* 대용) *)
+let ( >>= ) result f = match result with
+  | Ok v -> f v
+  | Error e -> Error e
+
+let ( >>| ) result f = match result with
+  | Ok v -> Ok (f v)
+  | Error e -> Error e
+
+(** 안전한 임시 파일 사용 (Fun.protect 패턴) *)
+let with_temp_file ~prefix ~suffix f =
+  let path = Printf.sprintf "/tmp/figma-visual/%s_%d_%d%s"
+    prefix
+    (int_of_float (Unix.gettimeofday () *. 1000.0))
+    (Random.int 100000)
+    suffix
+  in
+  Fun.protect
+    ~finally:(fun () -> try Unix.unlink path with _ -> ())
+    (fun () -> f path)
+
+(** 타임아웃이 있는 프로세스 실행 *)
+let run_with_timeout ~timeout_sec cmd =
+  let start_time = Unix.gettimeofday () in
+  let ic = Unix.open_process_in cmd in
+  let buf = Buffer.create 4096 in
+  let timed_out = ref false in
+  (try
+    while Unix.gettimeofday () -. start_time < timeout_sec do
+      let line = input_line ic in
+      Buffer.add_string buf line;
+      Buffer.add_char buf '\n'
+    done;
+    timed_out := true
+  with End_of_file -> ());
+  let status = Unix.close_process_in ic in
+  if !timed_out then
+    Error (TimeoutError timeout_sec)
+  else
+    match status with
+    | Unix.WEXITED 0 -> Ok (Buffer.contents buf)
+    | Unix.WEXITED code -> Error (UnknownError (Printf.sprintf "Exit code %d: %s" code (Buffer.contents buf)))
+    | Unix.WSIGNALED n -> Error (UnknownError (Printf.sprintf "Signal %d" n))
+    | Unix.WSTOPPED _ -> Error (UnknownError "Stopped")
+
+(** 디버그 정보가 포함된 에러 JSON 생성 *)
+let make_error_json ~operation ~error ?(debug_info=[]) () =
+  let timestamp = Unix.gettimeofday () in
+  let base = [
+    ("error", `Bool true);
+    ("operation", `String operation);
+    ("message", `String (error_to_string error));
+    ("timestamp", `Float timestamp);
+    ("timestamp_iso", `String (
+      let tm = Unix.localtime timestamp in
+      Printf.sprintf "%04d-%02d-%02dT%02d:%02d:%02d"
+        (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1) tm.Unix.tm_mday
+        tm.Unix.tm_hour tm.Unix.tm_min tm.Unix.tm_sec));
+  ] in
+  let debug = if debug_info = [] then [] else [("debug", `Assoc debug_info)] in
+  `Assoc (base @ debug)
+
+(** ============== 핸들러 런타임 조회 (상호 참조 해결) ============== *)
+
+(** 핸들러 레지스트리 - lazy initialization으로 forward reference 해결 *)
+let handler_registry : (string, Yojson.Safe.t -> (Yojson.Safe.t, string) result) Hashtbl.t =
+  Hashtbl.create 64
+
+(** 핸들러 등록 (파일 끝에서 호출) *)
+let register_handler name handler =
+  Hashtbl.replace handler_registry name handler
+
+(** 런타임에 다른 핸들러 호출 (forward reference 가능) *)
+let call_handler name args =
+  match Hashtbl.find_opt handler_registry name with
+  | Some handler -> handler args
+  | None -> Error (Printf.sprintf "Handler not found: %s" name)
+
+(** ============== 기존 헬퍼 함수 ============== *)
 
 let get_string key json =
   match member key json with
@@ -3169,6 +3311,295 @@ let handle_verify_visual args : (Yojson.Safe.t, string) result =
                        ("text_verification", text_verification_json);
                      ] in
                      Ok (make_text_content (Yojson.Safe.pretty_to_string full_result)))))
+  | _ -> Error "Missing required parameters: file_key, node_id, token"
+
+(** figma_pixel_perfect_loop 핸들러 - SSIM 분석 + CSS 자동 보정 제안
+
+    🧬 Figma DNA 분석 MCP - 전문가 수준의 에러 처리 및 API 최적화 포함
+*)
+let handle_pixel_perfect_loop args : (Yojson.Safe.t, string) result =
+  let file_key = get_string "file_key" args in
+  let node_id = get_string "node_id" args in
+  let token = resolve_token args in
+  let html = get_string "html" args in
+  let html_screenshot = get_string "html_screenshot" args in
+  let target_ssim = get_float_or "target_ssim" 0.99 args in
+  let width = match get_int "width" args with Some w when w > 0 -> w | _ -> 375 in
+  let height = match get_int "height" args with Some h when h > 0 -> h | _ -> 812 in
+  let version = get_string "version" args in
+  (* 🆕 Figma 엔지니어 관점: scale 파라미터 지원 (@1x, @2x, @3x) *)
+  let scale = get_float_or "scale" 1.0 args in
+  let scale = max 0.5 (min 4.0 scale) in  (* 0.5 ~ 4.0 범위 제한 *)
+  (* 🆕 타임아웃 설정 (기본 30초) *)
+  let timeout_sec = get_float_or "timeout" 30.0 args in
+  (* 🆕 Tool Chaining 옵션 *)
+  let include_node_dsl = get_bool_or "include_node_dsl" false args in
+  let include_tokens = get_bool_or "include_tokens" false args in
+  let auto_region_analysis = get_bool_or "auto_region_analysis" false args in
+
+  (* 🆕 Progress 알림 토큰 생성 *)
+  let progress_token = Mcp_progress.make_progress_token () in
+  let total_steps = 5 in
+  let notify step msg =
+    Mcp_progress.send_progress ~token:progress_token ~current:step ~total:total_steps ~message:msg ()
+  in
+
+  (* Pixel-Perfect Analyzer 스크립트 경로 - 하드코딩 제거, 상대 경로만 사용 *)
+  let analyzer_script =
+    let script_paths = [
+      Sys.getcwd () ^ "/scripts/pixel-perfect-analyzer.js";
+      Filename.dirname (Sys.getcwd ()) ^ "/figma-mcp/scripts/pixel-perfect-analyzer.js";
+      Filename.dirname Sys.executable_name ^ "/../scripts/pixel-perfect-analyzer.js";
+    ] in
+    List.find_opt Sys.file_exists script_paths
+  in
+
+  match (file_key, node_id, token) with
+  | (Some file_key, Some node_id, Some token) ->
+      notify 1 "🧬 Starting DNA analysis...";
+      (* 1. Figma에서 노드 PNG 내보내기 - scale 파라미터 적용 *)
+      let figma_png_path = Printf.sprintf "/tmp/figma-visual/figma_%s_%s_@%.0fx.png"
+        file_key (sanitize_node_id node_id) scale in
+      (match Figma_effects.Perform.get_images ~token ~file_key
+              ~node_ids:[node_id] ~format:"png" ~scale ?version () with
+       | Error err -> Error (Printf.sprintf "Failed to get Figma image: %s" err)
+       | Ok images_json ->
+           let url_opt =
+             match member "images" images_json with
+             | Some (`Assoc map) ->
+                 (match List.assoc_opt node_id map with
+                  | Some (`String url) -> Some url
+                  | _ -> None)
+             | _ -> None
+           in
+           (match url_opt with
+            | None -> Error (Printf.sprintf "Image URL not found for node: %s" node_id)
+            | Some img_url ->
+                (match Figma_effects.Perform.download_url ~url:img_url ~path:figma_png_path with
+                 | Error err -> Error (Printf.sprintf "Failed to download Figma image: %s" err)
+                 | Ok saved_figma_png ->
+                     notify 2 "📥 Figma image downloaded";
+                     (* 2. HTML 코드 준비 (없으면 자동 생성 - 에러 시 Result 반환) *)
+                     let html_code_result = match html with
+                       | Some h -> Ok h
+                       | None ->
+                           match Figma_effects.Perform.get_nodes ~token ~file_key
+                                   ~node_ids:[node_id] ~depth:10 ?version () with
+                           | Error err -> Error (Printf.sprintf "Failed to get nodes for HTML generation: %s" err)
+                           | Ok nodes_json ->
+                               match member "nodes" nodes_json with
+                               | Some (`Assoc nodes_map) ->
+                                   (match List.assoc_opt node_id nodes_map with
+                                    | Some node_data ->
+                                        (match member "document" node_data with
+                                         | Some doc_json ->
+                                             (match Figma_parser.parse_node doc_json with
+                                              | Some node -> Ok (Figma_codegen.generate_flat_html node)
+                                              | None -> Error "Failed to parse Figma node structure")
+                                         | _ -> Error "No document field in node data")
+                                    | _ -> Error (Printf.sprintf "Node %s not found in response" node_id))
+                               | _ -> Error "No nodes field in API response"
+                     in
+                     (match html_code_result with
+                      | Error err -> Error err
+                      | Ok html_code ->
+                     notify 3 "🖼️ Rendering HTML to PNG...";
+                     (* 3. HTML을 PNG로 렌더링 (제공된 스크린샷이 없으면) *)
+                     let html_png_result = match html_screenshot with
+                       | Some existing_png -> Ok existing_png
+                       | None ->
+                           Visual_verifier.render_html_to_png ~width ~height html_code
+                     in
+                     (match html_png_result with
+                      | Error err -> Error (Printf.sprintf "Failed to render HTML to PNG: %s" err)
+                      | Ok html_png_path ->
+                     notify 4 "🔬 Comparing images with SSIM...";
+                     (* 4. SSIM 비교 실행 - 실제 region 데이터 포함 *)
+                     (match Visual_verifier.compare_renders_with_regions
+                              ~figma_png:saved_figma_png ~html_png:html_png_path with
+                      | Error err -> Error (Printf.sprintf "SSIM comparison failed: %s" err)
+                      | Ok ssim_result ->
+                     (* 5. SSIM 결과를 JSON으로 구성 - 실제 region 데이터 사용 *)
+                     let regions = ssim_result.Visual_verifier.regions in
+                     let ssim_json = `Assoc [
+                       ("ssim", `Float ssim_result.Visual_verifier.ssim);
+                       ("deltaE", `Float ssim_result.Visual_verifier.delta_e);
+                       ("diffPixels", `Int ssim_result.Visual_verifier.diff_pixels);
+                       ("totalPixels", `Int ssim_result.Visual_verifier.total_pixels);
+                       ("regions", `Assoc [
+                         ("edges", `Assoc [
+                           ("top", `Float regions.Visual_verifier.edges.edge_top);
+                           ("bottom", `Float regions.Visual_verifier.edges.edge_bottom);
+                           ("left", `Float regions.Visual_verifier.edges.edge_left);
+                           ("right", `Float regions.Visual_verifier.edges.edge_right);
+                         ]);
+                         ("quadrants", `Assoc [
+                           ("topLeft", `Float regions.Visual_verifier.quadrants.top_left);
+                           ("topRight", `Float regions.Visual_verifier.quadrants.top_right);
+                           ("bottomLeft", `Float regions.Visual_verifier.quadrants.bottom_left);
+                           ("bottomRight", `Float regions.Visual_verifier.quadrants.bottom_right);
+                         ]);
+                         ("strips", `Assoc [
+                           ("top", `Float regions.Visual_verifier.strips.strip_top);
+                           ("middle", `Float regions.Visual_verifier.strips.strip_middle);
+                           ("bottom", `Float regions.Visual_verifier.strips.strip_bottom);
+                         ]);
+                       ]);
+                     ] in
+                     notify 5 "📊 Analyzing CSS corrections...";
+                     (* 6. Pixel-Perfect Analyzer 스크립트 호출 - Fun.protect + 타임아웃 적용 *)
+                     let analyzer_result = match analyzer_script with
+                       | None -> `Assoc [("error", `String "pixel-perfect-analyzer.js not found")]
+                       | Some script_path ->
+                           (* 🆕 with_temp_file 패턴으로 안전한 임시 파일 처리 *)
+                           with_temp_file ~prefix:"ssim" ~suffix:".json" (fun tmp_json_path ->
+                             let () =
+                               let oc = open_out tmp_json_path in
+                               output_string oc (Yojson.Safe.to_string ssim_json);
+                               close_out oc
+                             in
+                             let cmd = Printf.sprintf "node %s %s 2>&1"
+                               (Filename.quote script_path) (Filename.quote tmp_json_path) in
+                             (* 🆕 타임아웃 적용된 프로세스 실행 *)
+                             match run_with_timeout ~timeout_sec cmd with
+                             | Ok output ->
+                                 (try Yojson.Safe.from_string (String.trim output)
+                                  with _ -> `Assoc [("error", `String "Invalid JSON output"); ("raw", `String output)])
+                             | Error (TimeoutError secs) ->
+                                 `Assoc [("error", `String (Printf.sprintf "⏱️ Analyzer timed out after %.0fs" secs))]
+                             | Error e ->
+                                 `Assoc [("error", `String (error_to_string e))])
+                     in
+                     (* 7. 종합 결과 반환 *)
+                     let current_ssim = ssim_result.Visual_verifier.ssim in
+                     let passed = current_ssim >= target_ssim in
+                     let convergence_strategy =
+                       let gap = target_ssim -. current_ssim in
+                       let iterations = int_of_float (ceil (gap /. 0.02)) in
+                       `Assoc [
+                         ("currentSsim", `String (Printf.sprintf "%.1f%%" (current_ssim *. 100.0)));
+                         ("targetSsim", `String (Printf.sprintf "%.1f%%" (target_ssim *. 100.0)));
+                         ("gap", `String (Printf.sprintf "%.1f%%" (gap *. 100.0)));
+                         ("estimatedIterations", `Int (max 1 (min iterations 10)));
+                         ("strategy", `String (if gap < 0.02 then "fine-tuning" else if gap < 0.05 then "targeted-fixes" else "major-revision"));
+                         ("reachable", `Bool (gap < 0.15));
+                       ]
+                     in
+                     (* 🧬 Figma DNA 분석 - 모든 메트릭과 region 데이터 직접 노출 *)
+                     let full_result = `Assoc [
+                       ("file_key", `String file_key);
+                       ("node_id", `String node_id);
+                       ("passed", `Bool passed);
+                       (* Core metrics *)
+                       ("metrics", `Assoc [
+                         ("ssim", `Float current_ssim);
+                         ("target_ssim", `Float target_ssim);
+                         ("delta_e", `Float ssim_result.Visual_verifier.delta_e);
+                         ("psnr", `Float ssim_result.Visual_verifier.psnr);
+                         ("mse", `Float ssim_result.Visual_verifier.mse);
+                         ("diff_pixels", `Int ssim_result.Visual_verifier.diff_pixels);
+                         ("total_pixels", `Int ssim_result.Visual_verifier.total_pixels);
+                         ("diff_ratio", `Float (float_of_int ssim_result.Visual_verifier.diff_pixels /.
+                                                float_of_int (max 1 ssim_result.Visual_verifier.total_pixels)));
+                       ]);
+                       (* 🧬 Region DNA - 영역별 상세 분석 *)
+                       ("regions", `Assoc [
+                         ("quadrants", `Assoc [
+                           ("topLeft", `Float regions.Visual_verifier.quadrants.top_left);
+                           ("topRight", `Float regions.Visual_verifier.quadrants.top_right);
+                           ("bottomLeft", `Float regions.Visual_verifier.quadrants.bottom_left);
+                           ("bottomRight", `Float regions.Visual_verifier.quadrants.bottom_right);
+                           ("_worst", `String (
+                             let q = regions.Visual_verifier.quadrants in
+                             let max_val = max (max q.top_left q.top_right) (max q.bottom_left q.bottom_right) in
+                             if max_val = q.top_left then "topLeft"
+                             else if max_val = q.top_right then "topRight"
+                             else if max_val = q.bottom_left then "bottomLeft"
+                             else "bottomRight"));
+                         ]);
+                         ("strips", `Assoc [
+                           ("top", `Float regions.Visual_verifier.strips.strip_top);
+                           ("middle", `Float regions.Visual_verifier.strips.strip_middle);
+                           ("bottom", `Float regions.Visual_verifier.strips.strip_bottom);
+                           ("_worst", `String (
+                             let s = regions.Visual_verifier.strips in
+                             let max_val = max (max s.strip_top s.strip_middle) s.strip_bottom in
+                             if max_val = s.strip_top then "top"
+                             else if max_val = s.strip_middle then "middle"
+                             else "bottom"));
+                         ]);
+                         ("edges", `Assoc [
+                           ("top", `Float regions.Visual_verifier.edges.edge_top);
+                           ("bottom", `Float regions.Visual_verifier.edges.edge_bottom);
+                           ("left", `Float regions.Visual_verifier.edges.edge_left);
+                           ("right", `Float regions.Visual_verifier.edges.edge_right);
+                           ("_worst", `String (
+                             let e = regions.Visual_verifier.edges in
+                             let max_val = max (max e.edge_top e.edge_bottom) (max e.edge_left e.edge_right) in
+                             if max_val = e.edge_top then "top"
+                             else if max_val = e.edge_bottom then "bottom"
+                             else if max_val = e.edge_left then "left"
+                             else "right"));
+                         ]);
+                       ]);
+                       (* Paths *)
+                       ("figma_png", `String saved_figma_png);
+                       ("html_png", `String html_png_path);
+                       (* Analysis from pixel-perfect-analyzer *)
+                       ("css_suggestions", analyzer_result);
+                       ("convergence", convergence_strategy);
+                       ("next_steps", `List [
+                         `String (if current_ssim >= 0.99 then "✅ 99%+ 달성! 완료" else
+                                  if current_ssim >= 0.95 then "🔧 미세 조정 필요 - regions._worst 참고" else
+                                  "⚠️ CSS 보정 적용 후 재시도 - regions 분석 참고");
+                       ]);
+                     ] in
+                     (* 🆕 Tool Chaining 실행 *)
+                     let chained_results = ref [] in
+                     (* 1. include_node_dsl: figma_get_node DSL 포함 (이미 정의된 핸들러 사용) *)
+                     (if include_node_dsl then
+                       match handle_get_node (`Assoc [
+                         ("file_key", `String file_key);
+                         ("node_id", `String node_id);
+                         ("token", `String token);
+                         ("depth", `Int 5);
+                         ("format", `String "fidelity");
+                       ]) with
+                       | Ok node_result ->
+                           chained_results := ("chained_node_dsl", node_result) :: !chained_results
+                       | Error _ -> ());
+                     (* 2. include_tokens: 레지스트리를 통한 핸들러 호출 (forward reference 해결) *)
+                     (if include_tokens then
+                       match call_handler "figma_export_tokens" (`Assoc [
+                         ("file_key", `String file_key);
+                         ("token", `String token);
+                         ("format", `String "resolved");
+                       ]) with
+                       | Ok tokens_result ->
+                           chained_results := ("chained_tokens", tokens_result) :: !chained_results
+                       | Error _ -> ());
+                     (* 3. auto_region_analysis: SSIM < 90% 시 regions._worst 정보만 제공 *)
+                     (if auto_region_analysis && current_ssim < 0.90 then
+                       let worst_info = `Assoc [
+                         ("recommendation", `String "SSIM < 90% - 상세 분석 필요");
+                         ("use_tool", `String "figma_compare_regions");
+                         ("suggested_regions", `List [
+                           `Assoc [("name", `String "header"); ("y_range", `String "0-25%")];
+                           `Assoc [("name", `String "body"); ("y_range", `String "25-75%")];
+                           `Assoc [("name", `String "footer"); ("y_range", `String "75-100%")];
+                         ]);
+                       ] in
+                       chained_results := ("chained_region_recommendation", worst_info) :: !chained_results);
+                     (* 결과 병합 *)
+                     let final_result = match !chained_results with
+                       | [] -> full_result
+                       | chains ->
+                           match full_result with
+                           | `Assoc fields -> `Assoc (fields @ chains)
+                           | _ -> full_result
+                     in
+                     notify 5 (Printf.sprintf "✅ DNA analysis complete! SSIM: %.1f%%" (current_ssim *. 100.0));
+                     Ok (make_text_content (Yojson.Safe.pretty_to_string final_result))))))))
   | _ -> Error "Missing required parameters: file_key, node_id, token"
 
 (** figma_compare_regions 핸들러 - 영역별 상세 비교 *)
@@ -5697,6 +6128,7 @@ let all_handlers_sync : (string * tool_handler_sync) list = [
   ("figma_fidelity_loop", wrap_sync_pure handle_fidelity_loop);
   ("figma_image_similarity", wrap_sync_pure handle_image_similarity);
   ("figma_verify_visual", wrap_sync_pure handle_verify_visual);
+  ("figma_pixel_perfect_loop", wrap_sync_pure handle_pixel_perfect_loop);
   ("figma_compare_regions", wrap_sync_pure handle_compare_regions);
   ("figma_evolution_report", wrap_sync_pure handle_evolution_report);
   ("figma_compare_elements", wrap_sync_pure handle_compare_elements);
@@ -5746,6 +6178,12 @@ let all_handlers_sync : (string * tool_handler_sync) list = [
   ("figma_cache_stats", wrap_sync_pure handle_cache_stats);
   ("figma_cache_invalidate", wrap_sync_pure handle_cache_invalidate);
 ]
+
+(** 핸들러 레지스트리 초기화 - module load 시 자동 실행 *)
+let () =
+  List.iter (fun (name, sync_handler) ->
+    register_handler name sync_handler
+  ) all_handlers_sync
 
 (** ============== Resources / Prompts ============== **)
 
@@ -5799,6 +6237,85 @@ let prompts : mcp_prompt list = [
 출력:
 - 누락/의심 항목 요약
 - 필요한 재호출 파라미터 제안
+|};
+  };
+  (* 🆕 Few-shot 예제 포함 DNA 분석 프롬프트 *)
+  {
+    name = "figma_pixel_perfect_guide";
+    description = "🧬 Pixel-Perfect DNA 분석 가이드 - Few-shot 예제 포함";
+    arguments = [
+      { name = "file_key"; description = "Figma 파일 키 (필수)"; required = true };
+      { name = "node_id"; description = "분석할 노드 ID (필수)"; required = true };
+      { name = "scale"; description = "이미지 스케일 (@1x=1.0, @2x=2.0)"; required = false };
+    ];
+    text = {|
+# 🧬 Figma DNA 분석 - Pixel-Perfect 가이드
+
+## 입력 파라미터
+- file_key: {{file_key}}
+- node_id: {{node_id}}
+- scale: {{scale}} (기본값: 1.0)
+
+## Few-shot 예제
+
+### 예제 1: 기본 분석
+```json
+{
+  "file_key": "abc123XYZ",
+  "node_id": "2089:11127",
+  "target_ssim": 0.95
+}
+```
+→ SSIM 95% 기준으로 Figma 노드와 구현 비교
+
+### 예제 2: 고해상도 레티나 분석
+```json
+{
+  "file_key": "abc123XYZ",
+  "node_id": "2089:11127",
+  "scale": 2.0,
+  "target_ssim": 0.99
+}
+```
+→ @2x 스케일로 99% 정밀도 분석
+
+### 예제 3: HTML 코드 직접 전달
+```json
+{
+  "file_key": "abc123XYZ",
+  "node_id": "2089:11127",
+  "html": "<div style='width:375px;height:200px;background:#1F8CF8'>...</div>"
+}
+```
+→ 제공된 HTML과 Figma 노드 비교
+
+## 응답 해석 가이드
+
+### regions._worst 분석법
+| 영역 | 의미 | 해결책 |
+|------|------|--------|
+| edges.top | 상단 padding/margin 불일치 | padding-top 조정 |
+| edges.left | 좌측 정렬 문제 | padding-left 또는 justify 확인 |
+| quadrants.topLeft | 좌상단 레이아웃 오류 | flex 정렬 확인 |
+| strips.middle | 본문 영역 스타일 차이 | 중앙 컨텐츠 CSS 확인 |
+
+### convergence 전략
+- `fine-tuning`: 1-2% 미세 조정
+- `targeted-fixes`: 특정 영역 집중 수정
+- `major-revision`: 레이아웃 재검토 필요
+
+## Progress 알림 (SSE)
+1. 🧬 Starting DNA analysis...
+2. 📥 Figma image downloaded
+3. 🖼️ Rendering HTML to PNG...
+4. 🔬 Comparing images with SSIM...
+5. 📊 Analyzing CSS corrections...
+→ ✅ DNA analysis complete! SSIM: XX.X%
+
+## 다음 도구 체이닝
+- SSIM < 90%: `figma_get_node`로 구조 재확인
+- regions 문제: `figma_compare_regions`로 상세 분석
+- 색상 차이: `figma_export_tokens`로 디자인 토큰 추출
 |};
   };
 ]

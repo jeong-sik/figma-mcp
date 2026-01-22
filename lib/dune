@@ -17,6 +17,8 @@
    bigstringaf
    ;; gRPC (streaming for large responses)
    grpc-direct
-   grpc-direct-core)
+   grpc-direct-core
+   ;; Crypto RNG (for HTTPS/TLS)
+   mirage-crypto-rng.unix)
  (wrapped false)
  (ocamlopt_flags (:standard -w -50)))
