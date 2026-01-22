@@ -558,6 +558,7 @@ let save_png ~dir ~step ~src_png =
     @param width 뷰포트 너비
     @param height 뷰포트 높이
     @param save_evolution 진화 과정 저장 여부 (기본: true)
+    @param html_png_provided 외부에서 렌더링된 HTML PNG 경로 (Chrome MCP 등)
     @return 검증 결과
 *)
 let verify_visual
@@ -566,6 +567,7 @@ let verify_visual
     ?(width=375)
     ?(height=812)
     ?(save_evolution=true)
+    ?html_png_provided
     ~figma_png
     html
   =
@@ -578,7 +580,39 @@ let verify_visual
       (Filename.quote (Filename.concat evo_dir "figma_original.png"))) |> ignore
   in
 
-  let rec loop iteration current_html corrections history =
+  (* 외부 렌더링 이미지가 제공된 경우: Playwright 스킵, 단일 비교만 수행 *)
+  match html_png_provided with
+  | Some external_png when Sys.file_exists external_png ->
+    let saved_png = if save_evolution then save_png ~dir:evo_dir ~step:1 ~src_png:external_png else external_png in
+    let saved_html = if save_evolution then save_html ~dir:evo_dir ~step:1 html else "" in
+    (match compare_renders_with_regions ~figma_png ~html_png:external_png with
+     | Ok result ->
+       let hssim = calculate_human_ssim result.ssim result.delta_e in
+       let step = { step_num = 1; step_ssim = result.ssim;
+                    step_delta_e = result.delta_e; step_human_ssim = hssim;
+                    step_html_path = saved_html; step_png_path = saved_png;
+                    corrections_this_step = [] } in
+       { ssim = result.ssim; delta_e = result.delta_e; human_ssim = hssim;
+         passed = hssim >= target_ssim; iterations = 1;
+         figma_png; html_png = saved_png; corrections_applied = [];
+         final_html = Some html;
+         evolution_history = [step];
+         evolution_dir = evo_dir }
+     | Error _e ->
+       { ssim = 0.0; delta_e = 0.0; human_ssim = 0.0; passed = false; iterations = 0;
+         figma_png; html_png = external_png; corrections_applied = [];
+         final_html = Some html;
+         evolution_history = [];
+         evolution_dir = evo_dir })
+  | Some _missing_png ->
+    { ssim = 0.0; delta_e = 0.0; human_ssim = 0.0; passed = false; iterations = 0;
+      figma_png; html_png = ""; corrections_applied = [];
+      final_html = Some html;
+      evolution_history = [];
+      evolution_dir = evo_dir }
+  | None ->
+    (* 기본 모드: Playwright 렌더링 + 반복 개선 *)
+    let rec loop iteration current_html corrections history =
     if iteration > max_iterations then
       (* 최대 반복 도달 - 마지막 결과 반환 *)
       match render_html_to_png ~width ~height current_html with
@@ -648,8 +682,8 @@ let verify_visual
             let adjusted_html = apply_corrections hints current_html in
             let step_with_hints = { step with corrections_this_step = hints } in
             loop (iteration + 1) adjusted_html (corrections @ hints) (step_with_hints :: history)
-  in
-  loop 1 html [] []
+    in
+    loop 1 html [] []
 
 (** ============== Diff 시각화 ============== *)
 

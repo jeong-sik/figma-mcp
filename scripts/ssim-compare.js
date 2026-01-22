@@ -10,15 +10,56 @@
 
 const fs = require('fs');
 const { PNG } = require('pngjs');
+const { execSync } = require('child_process');
+const path = require('path');
 const pixelmatchModule = require('pixelmatch');
 const pixelmatch = pixelmatchModule.default || pixelmatchModule;
 
 /**
- * PNG 파일을 로드하고 디코드
+ * PNG 파일을 pngjs 호환 포맷으로 변환 (macOS sips 사용)
+ * Figma API에서 다운로드한 PNG는 pngjs가 읽지 못하는 경우가 있음
+ */
+function convertPNG(filePath) {
+  const tmpPath = path.join('/tmp', `ssim_converted_${Date.now()}_${path.basename(filePath)}`);
+  try {
+    // macOS sips로 PNG 재인코딩 (표준 포맷으로 변환)
+    execSync(`sips -s format png "${filePath}" --out "${tmpPath}" 2>/dev/null`, { stdio: 'pipe' });
+    return tmpPath;
+  } catch (e) {
+    // sips 실패 시 ImageMagick 시도
+    try {
+      execSync(`convert "${filePath}" "${tmpPath}" 2>/dev/null`, { stdio: 'pipe' });
+      return tmpPath;
+    } catch (e2) {
+      // 변환 실패 시 원본 반환
+      return filePath;
+    }
+  }
+}
+
+/**
+ * PNG 파일을 로드하고 디코드 (자동 변환 포함)
  */
 function loadPNG(filePath) {
-  const buffer = fs.readFileSync(filePath);
-  return PNG.sync.read(buffer);
+  let actualPath = filePath;
+  let converted = false;
+
+  try {
+    // 먼저 직접 로드 시도
+    const buffer = fs.readFileSync(filePath);
+    return PNG.sync.read(buffer);
+  } catch (e) {
+    // 실패 시 변환 후 재시도
+    actualPath = convertPNG(filePath);
+    converted = true;
+    const buffer = fs.readFileSync(actualPath);
+    const result = PNG.sync.read(buffer);
+    // 변환된 임시 파일 정리
+    if (converted && actualPath !== filePath) {
+      try { fs.unlinkSync(actualPath); } catch (_) {}
+    }
+    return result;
+  }
 }
 
 /**

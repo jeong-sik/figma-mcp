@@ -315,12 +315,13 @@ let tool_figma_image_similarity : tool_def = {
 (** Visual Feedback Loop - 코드 생성 및 시각적 검증 *)
 let tool_figma_verify_visual : tool_def = {
   name = "figma_verify_visual";
-  description = "코드를 생성하고 Figma 렌더와 비교하여 시각적 정확도(SSIM)와 텍스트 정확도를 검증합니다. SSIM과 TEXT 모두 통과해야 overall_passed=true. SSIM < target_ssim이면 자동으로 CSS를 조정합니다. 진화 과정은 자동으로 /tmp/figma-evolution/run_*에 저장됩니다.";
+  description = "코드를 생성하고 Figma 렌더와 비교하여 시각적 정확도(SSIM)와 텍스트 정확도를 검증합니다. SSIM과 TEXT 모두 통과해야 overall_passed=true. SSIM < target_ssim이면 자동으로 CSS를 조정합니다. 진화 과정은 자동으로 /tmp/figma-evolution/run_*에 저장됩니다. html_screenshot 제공 시 Playwright 대신 외부 렌더링 이미지를 사용합니다 (Chrome MCP 등).";
   input_schema = object_schema [
     ("file_key", string_prop "Figma 파일 키");
     ("node_id", string_prop "노드 ID (예: 123:456)");
     ("token", string_prop "Figma Personal Access Token (optional if FIGMA_TOKEN env var is set)");
     ("html", string_prop "검증할 HTML 코드 (없으면 자동 생성)");
+    ("html_screenshot", string_prop "외부 렌더링된 HTML 스크린샷 경로 (Chrome MCP 등). 제공 시 Playwright 스킵");
     ("target_ssim", number_prop "목표 SSIM (0-1, 기본값: 0.95)");
     ("max_iterations", number_prop "최대 반복 횟수 (기본값: 3)");
     ("width", number_prop "뷰포트 너비 (기본값: 375)");
@@ -381,6 +382,25 @@ let tool_figma_export_image : tool_def = {
     ("download", bool_prop "이미지 다운로드 여부 (기본값: false)");
     ("save_dir", string_prop "다운로드 저장 경로 (기본값: ~/me/download/figma-assets)");
   ] ["file_key"; "node_ids"];
+}
+
+(** Smart export - 자동 scale 조정 및 재귀 분할 지원 *)
+let tool_figma_export_smart : tool_def = {
+  name = "figma_export_smart";
+  description = "대형 노드를 자동으로 scale 조정하거나 자식 노드로 분할하여 내보냅니다. " ^
+                "max_pixels 초과 시 자동으로 scale을 낮추거나, split_children=true면 자식 노드로 분할합니다.";
+  input_schema = object_schema [
+    ("file_key", string_prop "Figma 파일 키");
+    ("node_id", string_prop "대상 노드 ID (단일)");
+    ("token", string_prop "Figma Personal Access Token (optional if FIGMA_TOKEN env var is set)");
+    ("format", enum_prop ["png"; "jpg"; "svg"; "pdf"] "이미지 포맷 (기본값: png)");
+    ("max_pixels", number_prop "최대 픽셀 수 (기본값: 16777216 = 4096x4096). 초과 시 scale 자동 조정");
+    ("split_children", bool_prop "true면 자식 노드별로 분할 내보내기 (기본값: false)");
+    ("max_depth", number_prop "split_children 시 최대 재귀 깊이 (기본값: 1)");
+    ("download", bool_prop "이미지 다운로드 여부 (기본값: false)");
+    ("save_dir", string_prop "다운로드 저장 경로");
+    ("debug", bool_prop "디버그 정보 포함 여부 (기본값: false)");
+  ] ["file_key"; "node_id"];
 }
 
 let tool_figma_get_image_fills : tool_def = {
@@ -880,6 +900,7 @@ let all_tools = [
   tool_figma_evolution_report;
   tool_figma_compare_elements;
   tool_figma_export_image;
+  tool_figma_export_smart;
   tool_figma_get_image_fills;
   tool_figma_get_nodes;
   tool_figma_get_file_versions;
@@ -1028,11 +1049,18 @@ let get_bool_or key default json =
   | Some b -> b
   | None -> default
 
-(** Token resolution with FIGMA_TOKEN environment variable fallback.
-    Priority: 1) explicit "token" parameter 2) FIGMA_TOKEN env var *)
+(** Token resolution with environment variable expansion.
+    Supports: "env:FIGMA_TOKEN" syntax to read from environment.
+    Priority: 1) explicit "token" (with env: expansion) 2) FIGMA_TOKEN env var *)
 let resolve_token args =
   match get_string "token" args with
-  | Some t when String.length t > 0 -> Some t
+  | Some t when String.length t > 0 ->
+    (* Handle "env:VAR_NAME" syntax *)
+    if String.length t > 4 && String.sub t 0 4 = "env:" then
+      let var_name = String.sub t 4 (String.length t - 4) in
+      Sys.getenv_opt var_name
+    else
+      Some t
   | _ -> Sys.getenv_opt "FIGMA_TOKEN"
 
 (** ============== Node selection helpers ============== *)
@@ -1154,9 +1182,14 @@ let eio_client : Figma_api_eio.client option ref = ref None
 type any_clock = Clock : _ Eio.Time.clock -> any_clock
 let eio_clock : any_clock option ref = ref None
 
+(** Existential wrapper for net to hide the type parameter *)
+type any_net = Net : _ Eio.Net.t -> any_net
+let eio_net : any_net option ref = ref None
+
 (** Set Eio context from server startup *)
-let set_eio_context ~sw ~clock ~client =
+let set_eio_context ~sw ~net ~clock ~client =
   eio_switch := Some sw;
+  eio_net := Some (Net net);
   eio_clock := Some (Clock clock);
   eio_client := Some client
 
@@ -1164,7 +1197,9 @@ let set_eio_context ~sw ~clock ~client =
 let call_llm_tool_eio ~(provider : Llm_provider_eio.provider) ~url ~name ~arguments =
   match !eio_switch, !eio_clock, !eio_client with
   | Some sw, Some (Clock clock), Some client ->
-      provider.call_tool ~sw ~clock ~client ~url ~name ~arguments
+      (* LLM provider는 Cohttp client를 사용 *)
+      let cohttp_client = Figma_api_eio.get_cohttp_client client in
+      provider.call_tool ~sw ~clock ~client:cohttp_client ~url ~name ~arguments
   | _ ->
       Error "Eio context not set - call set_eio_context first"
 
@@ -1782,7 +1817,7 @@ let handle_get_node_with_image args : (Yojson.Safe.t, string) result =
   let token = resolve_token args in
   let format = get_string_or "format" "fidelity" args in
   let image_format = get_string_or "image_format" "png" args in
-  let scale = get_float_or "scale" 1.0 args |> int_of_float in
+  let scale = get_float_or "scale" 1.0 args in
   let use_absolute_bounds = get_bool "use_absolute_bounds" args in
   let download = get_bool_or "download" false args in
   let save_dir = get_string_or "save_dir" (default_asset_dir ()) args in
@@ -1836,10 +1871,10 @@ let handle_get_node_with_image args : (Yojson.Safe.t, string) result =
                           in
                           let result =
                             if download_info = "" then
-                              sprintf "DSL:\n%s\n\nImage (%s, scale %d):\n%s"
+                              sprintf "DSL:\n%s\n\nImage (%s, scale %.2f):\n%s"
                                 dsl image_format scale image_url
                             else
-                              sprintf "DSL:\n%s\n\nImage (%s, scale %d):\n%s\n%s"
+                              sprintf "DSL:\n%s\n\nImage (%s, scale %.2f):\n%s\n%s"
                                 dsl image_format scale image_url download_info
                           in
                           Ok (make_text_content result)
@@ -1941,7 +1976,7 @@ let handle_get_node_bundle args : (Yojson.Safe.t, string) result =
                 let (image_url, image_download) =
                   match Figma_effects.Perform.get_images
                           ~token ~file_key ~node_ids:[node_id]
-                          ~format:image_format ~scale:(int_of_float scale)
+                          ~format:image_format ~scale
                           ?use_absolute_bounds ?version () with
                   | Ok img_json ->
                       let url =
@@ -2230,10 +2265,10 @@ let handle_select_nodes args : (Yojson.Safe.t, string) result =
   in
   let preview = get_bool_or "preview" true args in
   let preview_format = get_string_or "preview_format" "png" args in
-  let raw_preview_scale = match get_int "preview_scale" args with Some s -> s | _ -> 1 in
+  let raw_preview_scale = get_float_or "preview_scale" 1.0 args in
   let preview_scale =
-    if raw_preview_scale < 1 then 1
-    else if raw_preview_scale > 4 then 4
+    if raw_preview_scale < 0.01 then 0.01
+    else if raw_preview_scale > 4.0 then 4.0
     else raw_preview_scale
   in
   let layout_only = get_bool_or "layout_only" false args in
@@ -2282,7 +2317,7 @@ let handle_select_nodes args : (Yojson.Safe.t, string) result =
       if raw_summary_depth <> summary_depth then
         warnings := Printf.sprintf "summary_depth clamped to %d" summary_depth :: !warnings;
       if raw_preview_scale <> preview_scale then
-        warnings := "preview_scale clamped to 1-4" :: !warnings;
+        warnings := "preview_scale clamped to 0.01-4.0" :: !warnings;
 
       let preview_json =
         if not preview then `Null
@@ -2312,13 +2347,13 @@ let handle_select_nodes args : (Yojson.Safe.t, string) result =
                      ("status", `String "ok");
                      ("url", `String url);
                      ("format", `String preview_format);
-                     ("scale", `Int preview_scale);
+                     ("scale", `Float preview_scale);
                    ]
                | None ->
                    `Assoc [
                      ("status", `String "missing");
                      ("format", `String preview_format);
-                     ("scale", `Int preview_scale);
+                     ("scale", `Float preview_scale);
                    ])
       in
 
@@ -2918,15 +2953,15 @@ let handle_fidelity_loop args : (Yojson.Safe.t, string) result =
 (** figma_image_similarity 핸들러 *)
 let handle_image_similarity args : (Yojson.Safe.t, string) result =
   let format = get_string_or "format" "png" args in
-  let start_scale = match get_int "start_scale" args with Some s when s > 0 -> s | _ -> 1 in
-  let max_scale = match get_int "max_scale" args with Some s when s > 0 -> s | _ -> start_scale in
-  let scale_step = match get_int "scale_step" args with Some s when s > 0 -> s | _ -> 1 in
+  let start_scale = get_float_or "start_scale" 1.0 args in
+  let max_scale = get_float_or "max_scale" start_scale args in
+  let scale_step = get_float_or "scale_step" 1.0 args in
   let target_ssim = get_float "target_ssim" args in
   let use_absolute_bounds = get_bool "use_absolute_bounds" args in
   let version = get_string "version" args in
   let save_dir = get_string_or "save_dir" (default_compare_dir ()) args in
 
-  let clamp_scale s = max 1 (min 4 s) in
+  let clamp_scale s = max 0.01 (min 4.0 s) in
 
   match (get_string "file_key" args, get_string "node_a_id" args, get_string "node_b_id" args, resolve_token args) with
   | (Some file_key, Some node_a_id, Some node_b_id, Some token) ->
@@ -2947,9 +2982,9 @@ let handle_image_similarity args : (Yojson.Safe.t, string) result =
             in
             (match (url_for node_a_id, url_for node_b_id) with
              | (Ok url_a, Ok url_b) ->
-                 let path_a = Printf.sprintf "%s/%s/%s__%d.%s"
+                 let path_a = Printf.sprintf "%s/%s/%s__%.2f.%s"
                    save_dir file_key (sanitize_node_id node_a_id) scale format in
-                 let path_b = Printf.sprintf "%s/%s/%s__%d.%s"
+                 let path_b = Printf.sprintf "%s/%s/%s__%.2f.%s"
                    save_dir file_key (sanitize_node_id node_b_id) scale format in
                  (match Figma_effects.Perform.download_url ~url:url_a ~path:path_a with
                   | Error err -> Error err
@@ -2961,7 +2996,7 @@ let handle_image_similarity args : (Yojson.Safe.t, string) result =
                             | Error err -> Error err
                             | Ok metrics ->
                                 let result = `Assoc [
-                                  ("scale", `Int scale);
+                                  ("scale", `Float scale);
                                   ("format", `String format);
                                   ("image_a", `String saved_a);
                                   ("image_b", `String saved_b);
@@ -2990,7 +3025,7 @@ let handle_image_similarity args : (Yojson.Safe.t, string) result =
           let scale = clamp_scale scale in
           let result = compare_scale scale in
           let attempts = (match result with Ok r -> r | Error err ->
-            `Assoc [("scale", `Int scale); ("error", `String err)]) :: attempts
+            `Assoc [("scale", `Float scale); ("error", `String err)]) :: attempts
           in
           let best =
             match (best, result) with
@@ -3024,7 +3059,7 @@ let handle_image_similarity args : (Yojson.Safe.t, string) result =
           if should_stop then
             (best, attempts)
           else
-            loop (scale + scale_step) best attempts
+            loop (scale +. scale_step) best attempts
       in
       let (best, attempts) = loop start_scale None [] in
       let (best_score, best_payload) =
@@ -3032,7 +3067,7 @@ let handle_image_similarity args : (Yojson.Safe.t, string) result =
         | Some (score, payload) -> (score, payload)
         | None -> (0.0, `Null)
       in
-      let result = `Assoc [
+      let result : Yojson.Safe.t = `Assoc [
         ("file_key", `String file_key);
         ("node_a_id", `String node_a_id);
         ("node_b_id", `String node_b_id);
@@ -3050,6 +3085,7 @@ let handle_verify_visual args : (Yojson.Safe.t, string) result =
   let node_id = get_string "node_id" args in
   let token = resolve_token args in
   let html = get_string "html" args in
+  let html_screenshot = get_string "html_screenshot" args in
   let target_ssim = get_float_or "target_ssim" 0.95 args in
   let max_iterations = match get_int "max_iterations" args with Some i when i > 0 -> i | _ -> 3 in
   let width = match get_int "width" args with Some w when w > 0 -> w | _ -> 375 in
@@ -3062,7 +3098,7 @@ let handle_verify_visual args : (Yojson.Safe.t, string) result =
       let figma_png_path = Printf.sprintf "/tmp/figma-visual/figma_%s_%s.png"
         file_key (sanitize_node_id node_id) in
       (match Figma_effects.Perform.get_images ~token ~file_key
-              ~node_ids:[node_id] ~format:"png" ~scale:1 ?version () with
+              ~node_ids:[node_id] ~format:"png" ~scale:1.0 ?version () with
        | Error err -> Error (Printf.sprintf "Failed to get Figma image: %s" err)
        | Ok images_json ->
            let url_opt =
@@ -3104,6 +3140,7 @@ let handle_verify_visual args : (Yojson.Safe.t, string) result =
                      (* 3. Visual Feedback Loop 실행 (SSIM) *)
                      let result = Visual_verifier.verify_visual
                        ~target_ssim ~max_iterations ~width ~height
+                       ?html_png_provided:html_screenshot
                        ~figma_png:saved_figma_png html_code
                      in
                      let result_json = Visual_verifier.result_to_json result in
@@ -3496,7 +3533,7 @@ let handle_export_image args : (Yojson.Safe.t, string) result =
         |> List.filter (fun s -> s <> "")
         |> List.map normalize_node_id
       in
-      (match Figma_effects.Perform.get_images ~token ~file_key ~node_ids ~format ~scale:(int_of_float scale)
+      (match Figma_effects.Perform.get_images ~token ~file_key ~node_ids ~format ~scale
                ?use_absolute_bounds ?version () with
        | Ok json ->
            let images = member "images" json in
@@ -3524,6 +3561,182 @@ let handle_export_image args : (Yojson.Safe.t, string) result =
            Ok (make_text_content result)
        | Error err -> Error err)
   | _ -> Error "Missing required parameters: file_key, node_ids, token"
+
+(** figma_export_smart 핸들러 - 대형 노드 자동 scale 조정 및 재귀 분할 *)
+let handle_export_smart args : (Yojson.Safe.t, string) result =
+  let file_key = get_string "file_key" args in
+  let node_id = get_string "node_id" args in
+  let token = resolve_token args in
+  let format = get_string_or "format" "png" args in
+  let max_pixels = get_float_or "max_pixels" 16777216.0 args in  (* 4096x4096 default *)
+  let split_children = get_bool_or "split_children" false args in
+  let max_depth = Option.value ~default:1 (get_int "max_depth" args) in
+  let download = get_bool_or "download" false args in
+  let save_dir = get_string_or "save_dir" (default_asset_dir ()) args in
+  let include_debug = get_bool_or "debug" false args in
+
+  (* Calculate optimal scale to fit within max_pixels *)
+  let auto_scale ~width ~height =
+    let actual = float_of_int (width * height) in
+    if actual <= max_pixels then 1.0
+    else
+      let ratio = sqrt (max_pixels /. actual) in
+      max 0.01 (min 4.0 ratio)  (* Figma API: scale must be 0.01-4.0 *)
+  in
+
+  (* Get node dimensions from absoluteBoundingBox *)
+  let get_node_dims json =
+    match member "absoluteBoundingBox" json with
+    | Some box ->
+        let w = match member "width" box with Some (`Float f) -> int_of_float f | Some (`Int i) -> i | _ -> 0 in
+        let h = match member "height" box with Some (`Float f) -> int_of_float f | Some (`Int i) -> i | _ -> 0 in
+        (w, h)
+    | None -> (0, 0)
+  in
+
+  (* Get child node IDs *)
+  let get_child_ids json =
+    match member "children" json with
+    | Some (`List children) ->
+        List.filter_map (fun child ->
+          match member "id" child with
+          | Some (`String id) -> Some id
+          | _ -> None
+        ) children
+    | _ -> []
+  in
+
+  (* Export a single node with calculated scale *)
+  let export_node ~node_id ~scale =
+    match Figma_effects.Perform.get_images ~token:(Option.get token)
+            ~file_key:(Option.get file_key) ~node_ids:[node_id] ~format
+            ~scale () with
+    | Ok json ->
+        (match member "images" json with
+         | Some (`Assoc img_map) ->
+             List.filter_map (fun (id, url) ->
+               match url with
+               | `String url_str ->
+                   let final_path =
+                     if download && is_http_url url_str then
+                       let path = Printf.sprintf "%s/%s/%s.%s"
+                         save_dir (Option.get file_key) (sanitize_node_id id) format in
+                       match Figma_effects.Perform.download_url ~url:url_str ~path with
+                       | Ok saved -> Some saved
+                       | Error _ -> Some url_str
+                     else Some url_str
+                   in
+                   Option.map (fun p -> `Assoc [
+                     ("node_id", `String id);
+                     ("url", `String url_str);
+                     ("scale", `Float scale);
+                     ("path", `String p);
+                   ]) final_path
+               | _ -> None
+             ) img_map
+         | _ -> [])
+    | Error _ -> []
+  in
+
+  (* Debug info accumulator *)
+  let debug_info = ref [] in
+
+  (* Recursive export for split_children *)
+  let rec export_recursive ~node_id ~depth results =
+    if depth > max_depth then results
+    else
+      (* Get node info via get_nodes API *)
+      match Figma_effects.Perform.get_nodes ~token:(Option.get token)
+              ~file_key:(Option.get file_key) ~node_ids:[node_id] ~depth:1 () with
+      | Ok json ->
+          (* Extract node from "nodes" -> node_id -> "document" *)
+          let nodes_opt = member "nodes" json in
+          let node_json = match nodes_opt with
+            | Some (`Assoc nodes) ->
+                debug_info := !debug_info @ [Printf.sprintf "Found nodes with %d entries, looking for '%s'" (List.length nodes) node_id];
+                debug_info := !debug_info @ [Printf.sprintf "Available keys: %s" (String.concat ", " (List.map fst nodes))];
+                (match List.assoc_opt node_id nodes with
+                 | Some node_data ->
+                     let node_data_str = Yojson.Safe.to_string node_data in
+                     let truncated = if String.length node_data_str > 200 then String.sub node_data_str 0 200 ^ "..." else node_data_str in
+                     debug_info := !debug_info @ [Printf.sprintf "Found node_data: %s" truncated];
+                     let doc_opt = member "document" node_data in
+                     (match doc_opt with
+                      | Some doc -> debug_info := !debug_info @ ["document found!"]; Some doc
+                      | None ->
+                          let keys = match node_data with `Assoc lst -> List.map fst lst | _ -> [] in
+                          debug_info := !debug_info @ [Printf.sprintf "document NOT found. node_data keys: %s" (String.concat ", " keys)];
+                          None)
+                 | None ->
+                     debug_info := !debug_info @ ["Node ID not found in nodes"];
+                     None)
+            | Some other ->
+                let str = Yojson.Safe.to_string other in
+                let truncated = if String.length str > 100 then String.sub str 0 100 ^ "..." else str in
+                debug_info := !debug_info @ [Printf.sprintf "nodes is not Assoc: %s" truncated];
+                None
+            | None ->
+                debug_info := !debug_info @ ["No 'nodes' key in response"];
+                None
+          in
+          let (w, h) = match node_json with
+            | Some n ->
+                let dims = get_node_dims n in
+                debug_info := !debug_info @ [Printf.sprintf "Got dimensions: %dx%d" (fst dims) (snd dims)];
+                dims
+            | None ->
+                debug_info := !debug_info @ ["node_json is None"];
+                (0, 0)
+          in
+          let actual_pixels = w * h in
+          if actual_pixels = 0 then (debug_info := !debug_info @ ["actual_pixels=0, returning empty"]; results)
+          else if float_of_int actual_pixels <= max_pixels then
+            (* Node fits, export directly *)
+            let scale = auto_scale ~width:w ~height:h in
+            let exported = export_node ~node_id ~scale in
+            results @ exported
+          else if split_children && depth < max_depth then
+            (* Too big, try children *)
+            let child_ids = match node_json with Some n -> get_child_ids n | None -> [] in
+            if child_ids = [] then
+              (* No children, force scale down *)
+              let scale = auto_scale ~width:w ~height:h in
+              let exported = export_node ~node_id ~scale in
+              results @ exported
+            else
+              (* Recurse into children *)
+              List.fold_left (fun acc child_id ->
+                export_recursive ~node_id:child_id ~depth:(depth + 1) acc
+              ) results child_ids
+          else
+            (* Not splitting, just scale down *)
+            let scale = auto_scale ~width:w ~height:h in
+            let exported = export_node ~node_id ~scale in
+            results @ exported
+      | Error err ->
+          debug_info := !debug_info @ [Printf.sprintf "get_nodes returned Error: %s" err];
+          results
+  in
+
+  match (file_key, node_id, token) with
+  | (Some _file_key, Some node_id, Some _token) ->
+      let normalized = normalize_node_id node_id in
+      debug_info := !debug_info @ [Printf.sprintf "Starting with node_id='%s', normalized='%s'" node_id normalized];
+      let results = export_recursive ~node_id:normalized ~depth:0 [] in
+      let base_fields = [
+        ("total_exports", `Int (List.length results));
+        ("max_pixels", `Float max_pixels);
+        ("split_children", `Bool split_children);
+        ("exports", `List results);
+      ] in
+      let summary = `Assoc (
+        if include_debug then
+          base_fields @ [("debug", `List (List.map (fun s -> `String s) !debug_info))]
+        else
+          base_fields
+      ) in
+      Ok (make_text_content (Yojson.Safe.pretty_to_string summary))
+  | _ -> Error "Missing required parameters: file_key, node_id, token"
 
 (** figma_get_image_fills 핸들러 *)
 let handle_get_image_fills args : (Yojson.Safe.t, string) result =
@@ -5322,9 +5535,9 @@ let handle_cache_invalidate args : (Yojson.Safe.t, string) result =
 (** 동기 래퍼 - Pure Eio Effect 핸들러로 감싸서 실행 *)
 let wrap_sync_pure (f : Yojson.Safe.t -> (Yojson.Safe.t, string) result) : tool_handler_sync =
   fun args ->
-    match !eio_switch, !eio_clock, !eio_client with
-    | Some sw, Some (Clock clock), Some client ->
-        Figma_effects.run_with_pure_eio_api ~sw ~clock ~client (fun () -> f args)
+    match !eio_switch, !eio_net, !eio_clock, !eio_client with
+    | Some sw, Some (Net net), Some (Clock clock), Some client ->
+        Figma_effects.run_with_pure_eio_api ~sw ~net ~clock ~client (fun () -> f args)
     | _ ->
         Error "Eio context not set - server not properly initialized"
 
@@ -5459,6 +5672,7 @@ let all_handlers_sync : (string * tool_handler_sync) list = [
   ("figma_evolution_report", wrap_sync_pure handle_evolution_report);
   ("figma_compare_elements", wrap_sync_pure handle_compare_elements);
   ("figma_export_image", wrap_sync_pure handle_export_image);
+  ("figma_export_smart", wrap_sync_pure handle_export_smart);
   ("figma_get_image_fills", wrap_sync_pure handle_get_image_fills);
   ("figma_get_nodes", wrap_sync_pure handle_get_nodes);
   ("figma_get_file_versions", wrap_sync_pure handle_get_file_versions);
