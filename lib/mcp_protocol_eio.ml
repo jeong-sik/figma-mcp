@@ -209,6 +209,18 @@ let find_sse_client client_id =
        | Some client when client.connected -> Some (id, client)
        | _ -> None)
 
+(** ============== Progress Notifications ============== *)
+
+(** Generic SSE broadcast - sends data to all connected clients *)
+let broadcast_sse_data data =
+  Hashtbl.iter (fun _ client ->
+    if client.connected then
+      try send_sse_event client ~event:"notification" ~data with _ -> ()
+  ) sse_clients
+
+(** Initialize Mcp_progress with broadcast function *)
+let () = Mcp_progress.set_broadcast_fn broadcast_sse_data
+
 (** ============== HTTP Handlers ============== *)
 
 let health_handler _request reqd =
@@ -220,10 +232,12 @@ let health_handler _request reqd =
   Response.json json reqd
 
 (** MCP POST handler - async body reading with callback-based response *)
-let run_mcp_request ~domain_mgr server body_str =
-  match domain_mgr with
-  | Some mgr -> Eio.Domain_manager.run mgr (fun () -> process_mcp_request_sync server body_str)
-  | None -> process_mcp_request_sync server body_str
+let run_mcp_request ~domain_mgr:_ server body_str =
+  (* Note: domain_mgr disabled to avoid "Switch accessed from wrong domain!" error
+     when Figma API handlers use the stored Eio context (switch/net/clock) from refs.
+     Eio domains don't share switches, so running requests in separate domains
+     breaks the stored context references. *)
+  process_mcp_request_sync server body_str
 
 let mcp_post_handler ~sw ~domain_mgr server request reqd =
   let { Httpun.Request.headers; target = request_target; _ } = request in
@@ -572,7 +586,7 @@ let error_handler _client_addr ?request:_ error start_response =
 let run ~sw ~net ~clock ~domain_mgr config server =
   (* Set Eio context for pure Eio handlers (Lwt-free path) *)
   let eio_client = Figma_api_eio.make_client net in
-  Mcp_tools.set_eio_context ~sw ~clock ~client:eio_client;
+  Mcp_tools.set_eio_context ~sw ~net ~clock ~client:eio_client;
   let request_handler = make_request_handler ~clock ~domain_mgr ~sw server in
   let resolve_listen_ips host =
     match String.lowercase_ascii host with
@@ -659,6 +673,8 @@ exception Shutdown
 
 (** Start the server - entry point for main.ml (Pure Eio, no Lwt) *)
 let start_server ?(config = default_config) server =
+  (* Initialize crypto RNG for HTTPS/TLS *)
+  Mirage_crypto_rng_unix.use_default ();
   Eio_main.run @@ fun env ->
   let net = Eio.Stdenv.net env in
   let clock = Eio.Stdenv.clock env in
@@ -703,7 +719,7 @@ let start_server ?(config = default_config) server =
 let run_stdio ~sw ~env ~net ~clock server =
   (* Set Eio context for pure Eio handlers *)
   let eio_client = Figma_api_eio.make_client net in
-  Mcp_tools.set_eio_context ~sw ~clock ~client:eio_client;
+  Mcp_tools.set_eio_context ~sw ~net ~clock ~client:eio_client;
 
   eprintf "[%s] MCP Server started (protocol: %s, mode: stdio/Eio)\n%!"
     Mcp_protocol.server_name Mcp_protocol.protocol_version;
@@ -745,6 +761,8 @@ let run_stdio ~sw ~env ~net ~clock server =
 
 (** Start stdio server - entry point that sets up Eio runtime *)
 let start_stdio_server server =
+  (* Initialize crypto RNG for HTTPS/TLS *)
+  Mirage_crypto_rng_unix.use_default ();
   Eio_main.run @@ fun env ->
   let net = Eio.Stdenv.net env in
   let clock = Eio.Stdenv.clock env in

@@ -3512,7 +3512,7 @@ let handle_compare_elements args : (Yojson.Safe.t, string) result =
 
   | _ -> Error "Invalid type. Use 'color', 'box', or 'full'"
 
-(** figma_export_image 핸들러 *)
+(** figma_export_image 핸들러 - Streaming Progress 지원 *)
 let handle_export_image args : (Yojson.Safe.t, string) result =
   let file_key = get_string "file_key" args in
   let node_ids_str = get_string "node_ids" args in
@@ -3539,23 +3539,52 @@ let handle_export_image args : (Yojson.Safe.t, string) result =
            let images = member "images" json in
            let result = match images with
              | Some (`Assoc img_map) ->
-                 List.map (fun (id, url) ->
-                   match url with
-                   | `String url ->
-                       if download then
-                         if is_http_url url then
-                           let path = Printf.sprintf "%s/%s/%s.%s"
-                             save_dir file_key (sanitize_node_id id) format in
-                           (match Figma_effects.Perform.download_url ~url ~path with
-                            | Ok saved -> sprintf "%s: %s -> %s" id url saved
-                            | Error err -> sprintf "%s: %s (download error: %s)" id url err)
+                 let total = List.length img_map in
+                 (* 3개 이상 이미지 다운로드 시 Progress 알림 활성화 *)
+                 let progress_token =
+                   if download && total >= 3 then
+                     Some (Mcp_progress.make_progress_token ())
+                   else None
+                 in
+                 let _ = match progress_token with
+                   | Some pt ->
+                       Mcp_progress.update_progress ~token:pt ~current:0 ~total
+                         ~message:(sprintf "Starting export of %d images..." total) ()
+                   | None -> ()
+                 in
+                 let results = List.mapi (fun idx (id, url) ->
+                   let result_str = match url with
+                     | `String url ->
+                         if download then
+                           if is_http_url url then
+                             let path = Printf.sprintf "%s/%s/%s.%s"
+                               save_dir file_key (sanitize_node_id id) format in
+                             (match Figma_effects.Perform.download_url ~url ~path with
+                              | Ok saved -> sprintf "%s: %s -> %s" id url saved
+                              | Error err -> sprintf "%s: %s (download error: %s)" id url err)
+                           else
+                             sprintf "%s: %s (download skipped: no URL)" id url
                          else
-                           sprintf "%s: %s (download skipped: no URL)" id url
-                       else
-                         sprintf "%s: %s" id url
-                   | _ -> sprintf "%s: (error)" id
-                 ) img_map
-                 |> String.concat "\n"
+                           sprintf "%s: %s" id url
+                     | _ -> sprintf "%s: (error)" id
+                   in
+                   (* Progress 업데이트 *)
+                   let _ = match progress_token with
+                     | Some pt ->
+                         Mcp_progress.update_progress ~token:pt ~current:(idx + 1) ~total
+                           ~message:(sprintf "Downloaded %d/%d: %s" (idx + 1) total id) ()
+                     | None -> ()
+                   in
+                   result_str
+                 ) img_map in
+                 (* 완료 알림 *)
+                 let _ = match progress_token with
+                   | Some pt ->
+                       Mcp_progress.update_progress ~token:pt ~current:total ~total
+                         ~message:(sprintf "Export complete: %d images" total) ()
+                   | None -> ()
+                 in
+                 String.concat "\n" results
              | _ -> "No images returned"
            in
            Ok (make_text_content result)

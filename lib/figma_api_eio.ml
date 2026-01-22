@@ -17,11 +17,125 @@ type api_error =
   | Network_error of string      (** 네트워크 에러 *)
   | Timeout_error                (** 타임아웃 *)
 
+(** Smart Error Recovery: 에러 코드별 친화적 메시지와 해결 방법 *)
+type error_recovery = {
+  message: string;       (** 사용자 친화적 메시지 *)
+  suggestion: string;    (** 해결 방법 안내 *)
+  retryable: bool;       (** 재시도 가능 여부 *)
+  retry_after: float;    (** 재시도 대기 시간 (초) *)
+}
+
+(** HTTP 상태 코드별 에러 복구 정보 *)
+let get_http_error_recovery code body =
+  match code with
+  | 400 -> {
+      message = "Invalid request";
+      suggestion = "Check node_id format (should be like '123:456') and required parameters";
+      retryable = false;
+      retry_after = 0.0;
+    }
+  | 401 -> {
+      message = "Auth error: Invalid or expired token";
+      suggestion = "Verify FIGMA_TOKEN is set correctly. Get a new token from Figma Settings > Personal Access Tokens";
+      retryable = false;
+      retry_after = 0.0;
+    }
+  | 403 -> {
+      message = "Access denied";
+      suggestion = "You don't have permission to access this file. Ask the owner to share it with you";
+      retryable = false;
+      retry_after = 0.0;
+    }
+  | 404 -> {
+      message = "Not found";
+      suggestion = "File or node doesn't exist. Check file_key and node_id are correct";
+      retryable = false;
+      retry_after = 0.0;
+    }
+  | 429 ->
+      (* Rate limit - extract retry-after from body if available *)
+      let retry_sec =
+        try
+          let json = Yojson.Safe.from_string body in
+          match Yojson.Safe.Util.member "retry_after" json with
+          | `Int n -> float_of_int n
+          | `Float f -> f
+          | _ -> 60.0
+        with _ -> 60.0
+      in
+      {
+        message = "Rate limited";
+        suggestion = sprintf "Too many requests. Waiting %.0f seconds before retry" retry_sec;
+        retryable = true;
+        retry_after = retry_sec;
+      }
+  | 500 | 502 | 503 | 504 -> {
+      message = "Figma server error";
+      suggestion = "Temporary issue with Figma servers. Retry in a few seconds";
+      retryable = true;
+      retry_after = 2.0;
+    }
+  | _ -> {
+      message = sprintf "HTTP error %d" code;
+      suggestion = "Unexpected error. Check Figma status at status.figma.com";
+      retryable = false;
+      retry_after = 0.0;
+    }
+
+(** 네트워크 에러 복구 정보 *)
+let get_network_error_recovery msg =
+  if String.sub msg 0 (min 3 (String.length msg)) = "DNS" then
+    { message = "DNS resolution failed";
+      suggestion = "Check your internet connection and try again";
+      retryable = true;
+      retry_after = 1.0; }
+  else if String.sub msg 0 (min 7 (String.length msg)) = "connect" then
+    { message = "Connection failed";
+      suggestion = "Unable to reach Figma servers. Check your network";
+      retryable = true;
+      retry_after = 2.0; }
+  else if String.sub msg 0 (min 4 (String.length msg)) = "Unix" then
+    { message = "System error";
+      suggestion = "Temporary system issue. Retrying...";
+      retryable = true;
+      retry_after = 0.5; }
+  else
+    { message = "Network error";
+      suggestion = msg;
+      retryable = true;
+      retry_after = 1.0; }
+
+(** 에러를 친화적 문자열로 변환 (복구 정보 포함) *)
+let api_error_to_friendly_string = function
+  | Http_error (code, body) ->
+      let recovery = get_http_error_recovery code body in
+      sprintf "%s: %s" recovery.message recovery.suggestion
+  | Json_error msg -> sprintf "Invalid response from Figma: %s" msg
+  | Network_error msg ->
+      let recovery = get_network_error_recovery msg in
+      sprintf "%s: %s" recovery.message recovery.suggestion
+  | Timeout_error -> "Request timed out. The file might be too large or the network is slow"
+
+(** 에러를 기술적 문자열로 변환 (디버깅용) *)
 let api_error_to_string = function
   | Http_error (code, msg) -> sprintf "HTTP %d: %s" code msg
   | Json_error msg -> sprintf "JSON error: %s" msg
   | Network_error msg -> sprintf "Network error: %s" msg
   | Timeout_error -> "Request timeout"
+
+(** 에러가 재시도 가능한지 확인 *)
+let is_retryable_error = function
+  | Http_error (code, body) -> (get_http_error_recovery code body).retryable
+  | Network_error msg -> (get_network_error_recovery msg).retryable
+  | Timeout_error -> true  (* 타임아웃은 재시도 가능 *)
+  | Json_error _ -> false  (* JSON 파싱 에러는 재시도 불가 *)
+
+(** 재시도 대기 시간 반환 *)
+let get_retry_delay = function
+  | Http_error (code, body) -> (get_http_error_recovery code body).retry_after
+  | Network_error msg -> (get_network_error_recovery msg).retry_after
+  | Timeout_error -> 1.0
+  | Json_error _ -> 0.0
 
 (** ============== Configuration ============== *)
 
@@ -369,6 +483,49 @@ let download_url ~sw ~net ~clock ~client ~url ~path : (unit, api_error) result =
     let msg = Printexc.to_string exn in
     log_error "download_url" (sprintf "Failed: %s (url: %s, path: %s)" msg url path);
     Error (Network_error msg)
+
+(** ============== Smart Retry Wrapper ============== *)
+
+(** 재시도 가능한 에러에 대해 자동 재시도하는 래퍼
+    @param max_retries 최대 재시도 횟수 (기본 2)
+    @param clock Eio clock for sleep
+    @param f 실행할 함수 *)
+let with_smart_retry ~clock ?(max_retries=2) f =
+  let rec loop attempt =
+    match f () with
+    | Ok _ as result -> result
+    | Error err when is_retryable_error err && attempt < max_retries ->
+        let delay = get_retry_delay err in
+        log_warning "smart_retry" (sprintf "Attempt %d failed, retrying in %.1fs: %s"
+          (attempt + 1) delay (api_error_to_string err));
+        Eio.Time.sleep clock delay;
+        loop (attempt + 1)
+    | Error err ->
+        (* 재시도 불가하거나 최대 횟수 도달 *)
+        if attempt > 0 then
+          log_error "smart_retry" (sprintf "All %d attempts failed: %s"
+            (attempt + 1) (api_error_to_friendly_string err));
+        Error err
+  in
+  loop 0
+
+(** GET 요청 with smart retry *)
+let get_json_with_retry ~sw ~net ~clock ~client ~token ?(max_retries=2) url =
+  with_smart_retry ~clock ~max_retries (fun () ->
+    get_json ~sw ~net ~clock ~client ~token url
+  )
+
+(** POST 요청 with smart retry *)
+let post_json_with_retry ~sw ~net ~clock ~client ~token ?(max_retries=2) url body_json =
+  with_smart_retry ~clock ~max_retries (fun () ->
+    post_json ~sw ~net ~clock ~client ~token url body_json
+  )
+
+(** 다운로드 with smart retry *)
+let download_url_with_retry ~sw ~net ~clock ~client ~url ~path ?(max_retries=2) () =
+  with_smart_retry ~clock ~max_retries (fun () ->
+    download_url ~sw ~net ~clock ~client ~url ~path
+  )
 
 (** ============== JSON Utilities ============== *)
 

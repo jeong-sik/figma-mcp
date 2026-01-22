@@ -145,7 +145,78 @@ let cached_at_of_json ~fallback json =
   | `Int ts -> float_of_int ts
   | _ -> fallback
 
-(** 캐시 조회 (L1 → L2 순서) *)
+(** ============== Smart Context Caching (Early Declaration) ============== *)
+
+(** Hit rate tracking for cache effectiveness *)
+module Stats = struct
+  let hits = ref 0
+  let misses = ref 0
+  let l1_hits = ref 0
+  let l2_hits = ref 0
+  let prefetch_hits = ref 0
+  let bytes_saved = ref 0
+
+  let record_hit ?(level=`L1) ?(bytes=0) () =
+    incr hits;
+    bytes_saved := !bytes_saved + bytes;
+    match level with
+    | `L1 -> incr l1_hits
+    | `L2 -> incr l2_hits
+    | `Prefetch -> incr prefetch_hits
+
+  let record_miss () = incr misses
+
+  let hit_rate () =
+    let total = !hits + !misses in
+    if total = 0 then 0.0 else float_of_int !hits /. float_of_int total *. 100.0
+
+  let reset () =
+    hits := 0; misses := 0; l1_hits := 0; l2_hits := 0;
+    prefetch_hits := 0; bytes_saved := 0
+end
+
+(** Prefetch hint system - remember access patterns *)
+module PrefetchHints = struct
+  (* node_id -> list of frequently co-accessed node_ids *)
+  let patterns : (string, string list) Hashtbl.t = Hashtbl.create 64
+
+  (* Recent access chain for pattern detection *)
+  let recent_accesses = ref []
+  let max_recent = 10
+
+  let record_access ~node_id =
+    recent_accesses := node_id :: (List.filter ((<>) node_id) !recent_accesses);
+    if List.length !recent_accesses > max_recent then
+      recent_accesses := List.filteri (fun i _ -> i < max_recent) !recent_accesses
+
+  let learn_pattern ~from_node ~to_node =
+    let existing = Option.value ~default:[] (Hashtbl.find_opt patterns from_node) in
+    if not (List.mem to_node existing) then begin
+      let updated = to_node :: (List.filteri (fun i _ -> i < 5) existing) in
+      Hashtbl.replace patterns from_node updated
+    end
+
+  let analyze_chain () =
+    match !recent_accesses with
+    | [] | [_] -> ()
+    | current :: rest ->
+        List.iter (fun prev -> learn_pattern ~from_node:prev ~to_node:current) rest
+
+  let get_hints ~node_id =
+    analyze_chain ();
+    Option.value ~default:[] (Hashtbl.find_opt patterns node_id)
+
+  let get_top_patterns ?(limit=10) () =
+    Hashtbl.fold (fun k v acc -> (k, v) :: acc) patterns []
+    |> List.sort (fun (_, a) (_, b) -> compare (List.length b) (List.length a))
+    |> List.filteri (fun i _ -> i < limit)
+end
+
+(** File version tracking for smart invalidation - forward declaration *)
+(* Note: VersionTracker is defined after invalidate() to avoid forward reference *)
+let version_tracker_versions : (string, float) Hashtbl.t = Hashtbl.create 16
+
+(** 캐시 조회 (L1 → L2 순서, with Smart Stats tracking) *)
 let get ~file_key ~node_id ?(options=[]) ?(ttl_hours=Config.ttl_hours) () =
   let key = make_cache_key ~file_key ~node_id ~options in
 
@@ -154,19 +225,24 @@ let get ~file_key ~node_id ?(options=[]) ?(ttl_hours=Config.ttl_hours) () =
   | Some entry ->
     let age = (Unix.gettimeofday () -. entry.cached_at) /. 3600.0 in
     if age < ttl_hours then (
-      eprintf "[Cache] L1 HIT: %s (age: %.1fh)\n%!" node_id age;
+      let payload_size = String.length (Yojson.Safe.to_string entry.payload) in
+      Stats.record_hit ~level:`L1 ~bytes:payload_size ();
+      eprintf "[Cache] L1 HIT: %s (age: %.1fh, rate: %.1f%%)\n%!" node_id age (Stats.hit_rate ());
       let now = Unix.gettimeofday () in
       Hashtbl.replace memory_cache key { entry with last_access = now };
       Some entry.payload
     ) else (
       Hashtbl.remove memory_cache key;
+      Stats.record_miss ();
       None
     )
   | None ->
     (* L2: 파일 캐시 *)
     let cache_file = sprintf "%s/%s.json" Config.cache_dir key in
     match FS.read_file cache_file with
-    | None -> None
+    | None ->
+        Stats.record_miss ();
+        None
     | Some content ->
         let now = Unix.gettimeofday () in
         (match Yojson.Safe.from_string content with
@@ -177,6 +253,8 @@ let get ~file_key ~node_id ?(options=[]) ?(ttl_hours=Config.ttl_hours) () =
              let age = (now -. cached_at) /. 3600.0 in
              if age < ttl_hours then (
                let payload = Yojson.Safe.Util.member "payload" json in
+               let payload_size = String.length content in
+               Stats.record_hit ~level:`L2 ~bytes:payload_size ();
                let entry = {
                  payload;
                  cached_at;
@@ -188,17 +266,19 @@ let get ~file_key ~node_id ?(options=[]) ?(ttl_hours=Config.ttl_hours) () =
                Hashtbl.replace memory_cache key entry;
                enforce_l1_limit ();
                FS.touch_file cache_file;
-               eprintf "[Cache] L2 HIT → L1: %s (age: %.1fh)\n%!" node_id age;
+               eprintf "[Cache] L2 HIT → L1: %s (age: %.1fh, rate: %.1f%%)\n%!" node_id age (Stats.hit_rate ());
                Some payload
              ) else (
+               Stats.record_miss ();
                FS.delete_file cache_file;  (* 만료된 캐시 삭제 *)
                None
              )
          | exception _ ->
+             Stats.record_miss ();
              FS.delete_file cache_file;
              None)
 
-(** 캐시 저장 (L1 + L2 동시) *)
+(** 캐시 저장 (L1 + L2 동시, with Prefetch pattern learning) *)
 let set ~file_key ~node_id ?(options=[]) payload =
   let key = make_cache_key ~file_key ~node_id ~options in
   let now = Unix.gettimeofday () in
@@ -220,6 +300,10 @@ let set ~file_key ~node_id ?(options=[]) payload =
   FS.write_file cache_file (Yojson.Safe.to_string cache_json);
   enforce_l2_limit ();
   eprintf "[Cache] SET: %s → %s\n%!" node_id key
+
+(** Record access for prefetch pattern learning - call when accessing a node *)
+let record_access ~node_id =
+  PrefetchHints.record_access ~node_id
 
 (** 캐시 무효화 *)
 let should_invalidate_entry ~file_key ~node_id entry =
@@ -267,12 +351,41 @@ let invalidate ?file_key ?node_id () =
               | exception _ -> ()));
     eprintf "[Cache] INVALIDATE: %s/%s\n%!" fk (Option.value node_id ~default:"*")
 
-(** 캐시 통계 *)
+(** ============== Version Tracking (after invalidate is defined) ============== *)
+
+(** File version tracking for smart invalidation *)
+module VersionTracker = struct
+  let versions = version_tracker_versions
+
+  let update_version ~file_key ~version =
+    Hashtbl.replace versions file_key version;
+    eprintf "[Cache] Version updated: %s → %.0f\n%!" file_key version
+
+  let check_version ~file_key ~current_version =
+    match Hashtbl.find_opt versions file_key with
+    | Some cached_ver when cached_ver < current_version ->
+        (* File updated, invalidate all cache for this file *)
+        eprintf "[Cache] Version mismatch: %s (cached: %.0f, current: %.0f) → invalidating\n%!"
+          file_key cached_ver current_version;
+        invalidate ~file_key ();
+        Hashtbl.replace versions file_key current_version;
+        `Invalidated
+    | Some _ -> `Valid
+    | None ->
+        Hashtbl.replace versions file_key current_version;
+        `NewFile
+
+  let get_version ~file_key =
+    Hashtbl.find_opt versions file_key
+end
+
+(** 캐시 통계 (Enhanced with smart tracking) *)
 let stats () =
   let l1_count = Hashtbl.length memory_cache in
   let l2_files = FS.list_cache_files () in
   let l2_count = List.length l2_files in
   let l2_bytes = List.fold_left (fun acc (_, _, size) -> acc + size) 0 l2_files in
+  let top_patterns = PrefetchHints.get_top_patterns ~limit:5 () in
   `Assoc [
     ("l1_entries", `Int l1_count);
     ("l2_entries", `Int l2_count);
@@ -282,6 +395,19 @@ let stats () =
     ("cache_dir", `String Config.cache_dir);
     ("ttl_hours", `Float Config.ttl_hours);
     ("ttl_variables_hours", `Float Config.ttl_variables_hours);
+    (* Smart caching stats *)
+    ("hit_rate_percent", `Float (Stats.hit_rate ()));
+    ("total_hits", `Int !(Stats.hits));
+    ("total_misses", `Int !(Stats.misses));
+    ("l1_hits", `Int !(Stats.l1_hits));
+    ("l2_hits", `Int !(Stats.l2_hits));
+    ("prefetch_hits", `Int !(Stats.prefetch_hits));
+    ("bytes_saved", `Int !(Stats.bytes_saved));
+    ("tracked_versions", `Int (Hashtbl.length VersionTracker.versions));
+    ("learned_patterns", `Int (Hashtbl.length PrefetchHints.patterns));
+    ("top_patterns", `List (List.map (fun (k, v) ->
+        `Assoc [("node", `String k); ("hints", `List (List.map (fun s -> `String s) v))]
+      ) top_patterns));
   ]
 
 (** 캐시 래핑 함수 - API 호출을 캐시로 감싸기 *)
