@@ -1,8 +1,6 @@
 #!/bin/bash
-# Figma MCP Server
-# Usage:
-#   ./start-figma-mcp.sh              # stdio mode (for MCP clients)
-#   ./start-figma-mcp.sh --port 8940  # HTTP mode (for web clients)
+# Figma MCP Server (HTTP) - Start Script
+# Usage: ./start-figma-mcp-http.sh [--port PORT] [--grpc-port PORT]
 
 set -e
 
@@ -26,77 +24,78 @@ fi
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
-# Detect HTTP mode (--port or --http argument)
-HTTP_MODE=false
-for arg in "$@"; do
-  if [[ "$arg" == "--port" ]] || [[ "$arg" == "--http" ]] || [[ "$arg" =~ ^--port= ]]; then
-    HTTP_MODE=true
-    break
-  fi
+PORT="${FIGMA_MCP_PORT:-8940}"
+GRPC_PORT="${FIGMA_MCP_GRPC_PORT:-}"
+
+# Parse arguments
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    --port)
+      PORT="$2"
+      shift 2
+      ;;
+    --grpc-port)
+      GRPC_PORT="$2"
+      shift 2
+      ;;
+    --grpc-port=*)
+      GRPC_PORT="${1#*=}"
+      shift 1
+      ;;
+    -h|--help)
+      echo "Usage: $0 [--port PORT] [--grpc-port PORT]"
+      echo "  --port PORT  Server port (default: 8940)"
+      echo "  --grpc-port PORT  gRPC port (optional, enables streaming)"
+      exit 0
+      ;;
+    *)
+      echo "Unknown option: $1" >&2
+      exit 1
+      ;;
+  esac
 done
 
-# Resolve executable path
-# Priority: 1. Release binary  2. Workspace build  3. Local build  4. Installed  5. Auto-download
-RELEASE_BINARY="$SCRIPT_DIR/figma-mcp-macos-arm64"
-
-# Select binary based on mode
-if [ "$HTTP_MODE" = true ]; then
-  # HTTP mode: use main.exe (supports --port)
-  BINARY_NAME="main.exe"
-  WORKSPACE_EXE="$SCRIPT_DIR/../_build/default/figma-mcp/bin/main.exe"
-  LOCAL_EXE="$SCRIPT_DIR/_build/default/bin/main.exe"
-else
-  # stdio mode: use mcp_main.exe
-  BINARY_NAME="mcp_main.exe"
-  WORKSPACE_EXE="$SCRIPT_DIR/../_build/default/figma-mcp/bin/mcp_main.exe"
-  LOCAL_EXE="$SCRIPT_DIR/_build/default/bin/mcp_main.exe"
-fi
-
-INSTALLED_EXE="$(command -v figma-mcp-server || true)"
+# Resolve executable path (prefer workspace build dir)
+WORKSPACE_EXE="$SCRIPT_DIR/../_build/default/figma-mcp/bin/main.exe"
+LOCAL_EXE="$SCRIPT_DIR/_build/default/bin/main.exe"
+INSTALLED_EXE="$(command -v figma-mcp || true)"
 FIGMA_EXE=""
 
-# 1. Pre-downloaded release binary (HTTP mode only - release is HTTP server)
-if [ "$HTTP_MODE" = true ] && [ -x "$RELEASE_BINARY" ]; then
-  FIGMA_EXE="$RELEASE_BINARY"
-# 2. Workspace build
+if [ -n "${FIGMA_MCP_EXE:-}" ] && [ -x "$FIGMA_MCP_EXE" ]; then
+  FIGMA_EXE="$FIGMA_MCP_EXE"
 elif [ -x "$WORKSPACE_EXE" ]; then
   FIGMA_EXE="$WORKSPACE_EXE"
-# 3. Local build
 elif [ -x "$LOCAL_EXE" ]; then
   FIGMA_EXE="$LOCAL_EXE"
-# 4. System-installed (stdio only)
-elif [ -n "$INSTALLED_EXE" ] && [ "$HTTP_MODE" = false ]; then
+elif [ -n "$INSTALLED_EXE" ]; then
   FIGMA_EXE="$INSTALLED_EXE"
 fi
 
-# 5. Auto-download from GitHub releases if nothing found (HTTP mode only)
-if [ -z "$FIGMA_EXE" ] && [ "$HTTP_MODE" = true ]; then
-  echo "No binary found. Downloading from GitHub releases..." >&2
-  RELEASE_URL="https://github.com/jeong-sik/figma-mcp/releases/latest/download/figma-mcp-macos-arm64"
-  if curl -fsSL -o "$RELEASE_BINARY" "$RELEASE_URL" 2>/dev/null; then
-    chmod +x "$RELEASE_BINARY"
-    FIGMA_EXE="$RELEASE_BINARY"
-    echo "Downloaded: $RELEASE_BINARY" >&2
-  fi
-fi
-
-# Fallback: build from source
+# Build if needed (requires dune on PATH)
 if [ -z "$FIGMA_EXE" ]; then
-  echo "Building figma-mcp (bin/$BINARY_NAME)..." >&2
+  echo "Building figma-mcp (bin/main.exe only)..." >&2
   if ! command -v dune >/dev/null 2>&1; then
-    echo "Error: dune not found. Install dune or download binary manually." >&2
+    echo "Error: dune not found. Install dune or build figma-mcp binary first." >&2
     exit 1
   fi
-  dune build "./bin/$BINARY_NAME" >&2
+  dune build ./bin/main.exe >&2
 
   if [ -x "$WORKSPACE_EXE" ]; then
     FIGMA_EXE="$WORKSPACE_EXE"
   elif [ -x "$LOCAL_EXE" ]; then
     FIGMA_EXE="$LOCAL_EXE"
+  elif [ -n "$INSTALLED_EXE" ]; then
+    FIGMA_EXE="$INSTALLED_EXE"
   else
-    echo "Error: build failed." >&2
+    echo "Error: build succeeded but figma-mcp executable not found." >&2
     exit 1
   fi
 fi
 
-exec "$FIGMA_EXE" "$@"
+if [ -n "$GRPC_PORT" ]; then
+  echo "Using figma-mcp binary: $FIGMA_EXE" >&2
+  exec "$FIGMA_EXE" --port "$PORT" --grpc-port "$GRPC_PORT"
+else
+  echo "Using figma-mcp binary: $FIGMA_EXE" >&2
+  exec "$FIGMA_EXE" --port "$PORT"
+fi
