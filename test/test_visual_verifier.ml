@@ -14,12 +14,13 @@ let test_temp_file_generation () =
   check bool "html extension" true (Filename.check_suffix path1 ".html")
 
 let test_ensure_dir () =
-  (* 디렉토리 생성 테스트 *)
-  let test_dir = "/tmp/figma-visual-test-" ^ string_of_int (Random.int 10000) in
+  (* 디렉토리 생성 테스트 - PID + timestamp로 유니크 보장 *)
+  let test_dir = Printf.sprintf "/tmp/figma-visual-test-%d-%d"
+    (Unix.getpid ()) (int_of_float (Unix.gettimeofday () *. 1000.)) in
   Visual_verifier.ensure_dir test_dir;
   check bool "dir created" true (Sys.file_exists test_dir);
-  (* 정리 *)
-  Unix.rmdir test_dir
+  (* 정리 - 실패해도 무시 *)
+  (try Unix.rmdir test_dir with Unix.Unix_error _ -> ())
 
 (** ============== Correction Hint 테스트 ============== *)
 
@@ -150,10 +151,9 @@ let test_result_to_json () =
 let test_render_html_to_png_basic () =
   (* Playwright 존재 여부 확인 *)
   let playwright_check = Sys.command "which node > /dev/null 2>&1" in
-  if playwright_check <> 0 then begin
-    Printf.printf "Skipping Playwright test (node not found)\n";
-    check bool "skip" true true
-  end else begin
+  if playwright_check <> 0 then
+    Alcotest.skip ()
+  else begin
     let html = {|
       <!DOCTYPE html>
       <html>
@@ -164,12 +164,12 @@ let test_render_html_to_png_basic () =
     match Visual_verifier.render_html_to_png ~width:100 ~height:100 html with
     | Ok png_path ->
       check bool "png created" true (Sys.file_exists png_path);
-      (* 정리 *)
-      Unix.unlink png_path
+      (* 정리 - 실패해도 무시 *)
+      (try Unix.unlink png_path with Unix.Unix_error _ -> ())
     | Error e ->
-      (* Playwright 미설치 시 graceful fail *)
+      (* Playwright 미설치 시 skip *)
       Printf.printf "Playwright render skipped: %s\n" e;
-      check bool "graceful fail" true true
+      Alcotest.skip ()
   end
 
 (** ============== 테스트 그룹 ============== *)
@@ -246,10 +246,9 @@ let test_diff_image_result_to_json () =
 let test_quadrant_analysis_integration () =
   (* ImageMagick 존재 여부 확인 *)
   let magick_check = Sys.command "which magick > /dev/null 2>&1" in
-  if magick_check <> 0 then begin
-    Printf.printf "Skipping quadrant analysis test (ImageMagick not found)\n";
-    check bool "skip" true true
-  end else begin
+  if magick_check <> 0 then
+    Alcotest.skip ()
+  else begin
     (* 두 개의 테스트 이미지 생성 *)
     let img1 = Visual_verifier.temp_file ~prefix:"test_q1" ~ext:"png" in
     let img2 = Visual_verifier.temp_file ~prefix:"test_q2" ~ext:"png" in
@@ -263,24 +262,25 @@ let test_quadrant_analysis_integration () =
       | Ok result ->
           (* 동일 이미지이므로 높은 SSIM 예상 *)
           check bool "overall ssim high" true (fst result.overall >= 0.9);
-          Unix.unlink img1;
-          Unix.unlink img2
+          (try Unix.unlink img1 with Unix.Unix_error _ -> ());
+          (try Unix.unlink img2 with Unix.Unix_error _ -> ())
       | Error e ->
           Printf.printf "Quadrant analysis error: %s\n" e;
-          check bool "graceful" true true
+          (try Unix.unlink img1 with Unix.Unix_error _ -> ());
+          (try Unix.unlink img2 with Unix.Unix_error _ -> ());
+          Alcotest.skip ()
     end else begin
       Printf.printf "Failed to create test images\n";
-      check bool "skip" true true
+      Alcotest.skip ()
     end
   end
 
 let test_generate_diff_images_integration () =
   (* ImageMagick 존재 여부 확인 *)
   let magick_check = Sys.command "which magick > /dev/null 2>&1" in
-  if magick_check <> 0 then begin
-    Printf.printf "Skipping diff images test (ImageMagick not found)\n";
-    check bool "skip" true true
-  end else begin
+  if magick_check <> 0 then
+    Alcotest.skip ()
+  else begin
     (* 두 개의 약간 다른 테스트 이미지 생성 *)
     let img1 = Visual_verifier.temp_file ~prefix:"test_d1" ~ext:"png" in
     let img2 = Visual_verifier.temp_file ~prefix:"test_d2" ~ext:"png" in
@@ -288,6 +288,11 @@ let test_generate_diff_images_integration () =
     let cmd2 = Printf.sprintf "magick -size 100x100 xc:red %s 2>/dev/null" img2 in
     ignore (Sys.command cmd1);
     ignore (Sys.command cmd2);
+
+    let cleanup_imgs () =
+      (try Unix.unlink img1 with Unix.Unix_error _ -> ());
+      (try Unix.unlink img2 with Unix.Unix_error _ -> ())
+    in
 
     if Sys.file_exists img1 && Sys.file_exists img2 then begin
       match Visual_verifier.generate_diff_images ~figma_png:img1 ~html_png:img2 with
@@ -298,16 +303,17 @@ let test_generate_diff_images_integration () =
           (* 파란색과 빨간색은 100% 다름 *)
           check bool "diff_percent > 0" true (result.diff_percent > 0.0);
           (* 정리 *)
-          Unix.unlink img1;
-          Unix.unlink img2;
-          (try Unix.unlink result.side_by_side with _ -> ());
-          (try Unix.unlink result.diff_overlay with _ -> ())
+          cleanup_imgs ();
+          (try Unix.unlink result.side_by_side with Unix.Unix_error _ -> ());
+          (try Unix.unlink result.diff_overlay with Unix.Unix_error _ -> ())
       | Error e ->
           Printf.printf "Generate diff images error: %s\n" e;
-          check bool "graceful" true true
+          cleanup_imgs ();
+          Alcotest.skip ()
     end else begin
       Printf.printf "Failed to create test images\n";
-      check bool "skip" true true
+      cleanup_imgs ();
+      Alcotest.skip ()
     end
   end
 

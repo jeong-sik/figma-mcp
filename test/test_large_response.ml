@@ -28,8 +28,8 @@ let test_large_response_to_file () =
   (* 파일이 실제로 생성되었는지 확인 *)
   let path = Option.get file_path in
   check bool "file exists" true (Sys.file_exists path);
-  (* 정리 *)
-  Unix.unlink path
+  (* 정리 - 파일이 없어도 에러 무시 *)
+  (try Unix.unlink path with Unix.Unix_error _ -> ())
 
 let test_json_response_handler () =
   (* JSON 결과도 동일하게 처리 *)
@@ -48,9 +48,23 @@ let test_human_size_formatting () =
 
 let test_cleanup_old_files () =
   (* TTL 기반 정리 테스트 - 오래된 파일 정리 *)
+  (* 테스트용 임시 파일 생성 - storage_dir default: /tmp/figma-mcp *)
+  let test_dir = "/tmp/figma-mcp" in
+  (* 디렉토리가 없으면 생성 *)
+  if not (Sys.file_exists test_dir) then
+    Unix.mkdir test_dir 0o755;
+  let test_file = Filename.concat test_dir "test_cleanup_old_file.json" in
+  (* 파일 생성 *)
+  let oc = open_out test_file in
+  output_string oc "test";
+  close_out oc;
+  (* cleanup 실행 (TTL 기반이므로 새 파일은 삭제되지 않음) *)
   Large_response.cleanup_old_files ();
-  (* 실제 정리 로직은 TTL 기반이므로 단순히 에러 없이 실행되는지 확인 *)
-  check bool "cleanup runs without error" true true
+  (* 새로 만든 파일은 아직 존재해야 함 (TTL 미도달) *)
+  let still_exists = Sys.file_exists test_file in
+  check bool "new file not deleted by cleanup" true still_exists;
+  (* 수동 정리 *)
+  (try Unix.unlink test_file with Unix.Unix_error _ -> ())
 
 let large_response_tests = [
   "small response inline", `Quick, test_small_response_inline;

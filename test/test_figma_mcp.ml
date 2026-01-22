@@ -112,8 +112,8 @@ let test_parse_auto_layout_properties () =
   let node = Option.get node in
   (* primaryAxisAlignItems = MIN *)
   check bool "primary axis align is Min" true (node.primary_axis_align = Figma_types.Min);
-  (* counterAxisAlignItems = STRETCH 또는 다른 값 *)
-  check bool "counter axis has value" true true;
+  (* counterAxisAlignItems = STRETCH → Min으로 파싱됨 (STRETCH는 지원 안됨) *)
+  check bool "counter axis is Min (STRETCH fallback)" true (node.counter_axis_align = Figma_types.Min);
   (* rectangleCornerRadii = [12, 16, 12, 16] *)
   (match node.border_radii with
    | Some (tl, tr, br, bl) ->
@@ -171,8 +171,14 @@ let test_codegen_contains_text () =
   let node = Figma_parser.parse_json_string json_str in
   let node = Option.get node in
   let dsl = Figma_codegen.generate_compact node in
-  (* 텍스트 내용이 포함되어 있는지 *)
-  check bool "contains Hello World" true (String.length (Str.search_forward (Str.regexp "Hello") dsl 0 |> ignore; dsl) > 0 || true)
+  (* 텍스트 내용이 포함되어 있는지 - 예외를 적절히 처리 *)
+  let contains_hello =
+    try
+      ignore (Str.search_forward (Str.regexp "Hello") dsl 0);
+      true
+    with Not_found -> false
+  in
+  check bool "contains Hello World" true contains_hello
 
 let test_codegen_verbose () =
   let json_str = read_fixture "simple_frame.json" in
