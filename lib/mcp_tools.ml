@@ -2010,7 +2010,7 @@ let handle_get_node args : (Yojson.Safe.t, string) result =
                 let prefix = Printf.sprintf "node_%s" (sanitize_node_id node_id) in
                 (match process_json_string ~format node_str with
                  | Ok result ->
-                     Ok (Large_response.wrap_text_with_warning ~prefix ~format ~node_count result)
+                     Ok (Large_response.wrap_dsl_with_warning ~prefix ~format ~node_count result)
                  | Error msg -> Error msg)
             | None -> Error (sprintf "Node not found: %s" node_id))
        | Error err -> Error err)
