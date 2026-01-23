@@ -134,15 +134,17 @@ figma_get_node_summary
 
 2) Load depth ranges as needed.
 ```
-figma_get_node_chunk
+ figma_get_node_chunk
   file_key: "KEY"
   node_id: "123:456"
   token: "$FIGMA_TOKEN"
   depth_start: 0
   depth_end: 2
+  max_children: 50  # optional: trim children to avoid slow/huge nodes
 ```
 
 3) Repeat for deeper ranges.
+   - If a node is very large, use `max_children` or `figma_chunk_index → figma_chunk_get` to target subtrees.
 
 ### 3.1) gRPC Recursive Stream (Full Subtree)
 
