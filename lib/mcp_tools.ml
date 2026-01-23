@@ -249,6 +249,10 @@ let tool_figma_get_node_chunk : tool_def = {
     ("depth_end", number_prop "종료 깊이 (기본값: 2)");
     ("format", enum_prop ["fidelity"; "raw"; "html"] "출력 포맷 (기본값: fidelity)");
     ("max_children", number_prop "자식 노드 최대 개수 (옵션, 초과 시 잘라냄)");
+    ("warn_large", bool_prop "큰 노드 경고 활성화 (기본값: true)");
+    ("warn_threshold", number_prop "경고 기준 children 수 (기본값: 500)");
+    ("auto_trim_children", bool_prop "큰 노드 자동 자르기 (기본값: false)");
+    ("auto_trim_limit", number_prop "자동 자르기 최대 children 수 (기본값: 200)");
     ("include_styles", bool_prop "스타일 정의 포함 여부 (기본값: false)");
     ("version", string_prop "특정 파일 버전 ID");
   ] [];
@@ -2802,6 +2806,10 @@ let handle_get_node_chunk args : (Yojson.Safe.t, string) result =
   let depth_end = match get_int "depth_end" args with Some d when d >= 0 -> d | _ -> 2 in
   let format = get_string_or "format" "fidelity" args in
   let max_children = get_int "max_children" args in
+  let warn_large = get_bool_or "warn_large" true args in
+  let warn_threshold = get_int "warn_threshold" args |> Option.value ~default:500 in
+  let auto_trim_children = get_bool_or "auto_trim_children" false args in
+  let auto_trim_limit = get_int "auto_trim_limit" args |> Option.value ~default:200 in
   let include_styles = get_bool_or "include_styles" false args in
   let version = get_string "version" args in
 
@@ -2832,14 +2840,25 @@ let handle_get_node_chunk args : (Yojson.Safe.t, string) result =
                with _ -> 0
              in
 
-             let warning =
-               match max_children, root_children_count with
-               | None, count when count > 500 ->
-                   Some (Printf.sprintf
-                     "Large node: %d children at root. Consider max_children or figma_chunk_index + figma_chunk_get."
-                     count)
-               | _ -> None
+             let effective_max_children =
+               match max_children, auto_trim_children with
+               | Some limit, _ -> Some limit
+               | None, true -> Some (max 0 auto_trim_limit)
+               | None, false -> None
              in
+
+             let warnings = ref [] in
+             let add_warning msg = warnings := msg :: !warnings in
+             (match effective_max_children, auto_trim_children with
+              | Some limit, true when max_children = None ->
+                  add_warning (Printf.sprintf "auto_trim_children applied: max_children=%d" limit)
+              | _ -> ());
+             (match warn_large, root_children_count, effective_max_children with
+              | true, count, None when count > warn_threshold ->
+                  add_warning (Printf.sprintf
+                    "Large node: %d children at root. Consider max_children or figma_chunk_index + figma_chunk_get."
+                    count)
+              | _ -> ());
 
              let take_n n lst =
                let rec loop acc i = function
@@ -2851,7 +2870,7 @@ let handle_get_node_chunk args : (Yojson.Safe.t, string) result =
              in
 
              let trim_children children =
-               match max_children with
+               match effective_max_children with
                | Some limit when limit >= 0 ->
                    let total = List.length children in
                    if total > limit then
@@ -2931,6 +2950,11 @@ let handle_get_node_chunk args : (Yojson.Safe.t, string) result =
                    ]
              in
              let result =
+               let warning =
+                 match !warnings with
+                 | [] -> None
+                 | msgs -> Some (String.concat " | " (List.rev msgs))
+               in
                match warning with
                | Some msg ->
                    (match base with
