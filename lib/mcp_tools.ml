@@ -1398,29 +1398,15 @@ let resolve_channel_id args =
        | None -> Error "Missing channel_id. Run figma_plugin_connect or figma_plugin_use_channel.")
 
 let plugin_wait ~channel_id ~command_id ~timeout_ms =
-  let timeout_sec = float_of_int timeout_ms /. 1000.0 in
-  let wait_with_eio clock =
-    let start_time = Unix.gettimeofday () in
-    let rec poll attempt =
-      match Figma_plugin_bridge.take_result ~channel_id ~command_id with
-      | Some result -> Ok result
-      | None ->
-          let elapsed = Unix.gettimeofday () -. start_time in
-          if elapsed >= timeout_sec then Error "Plugin timeout waiting for response"
-          else
-            let backoff = min 0.5 (0.05 *. (2.0 ** float_of_int attempt)) in
-            let remaining = timeout_sec -. elapsed in
-            let sleep_time = min backoff remaining in
-            if sleep_time <= 0.0 then Error "Plugin timeout waiting for response"
-            else begin
-              Eio.Time.sleep clock sleep_time;
-              poll (attempt + 1)
-            end
-    in
-    poll 0
-  in
   match !eio_clock with
-  | Some (Clock clock) -> wait_with_eio clock
+  | Some (Clock clock) ->
+      (match Figma_plugin_bridge.wait_for_result_with_sleep
+               ~sleep:(Eio.Time.sleep clock)
+               ~channel_id
+               ~command_id
+               ~timeout_ms with
+       | Some result -> Ok result
+       | None -> Error "Plugin timeout waiting for response")
   | None ->
       (match Figma_plugin_bridge.wait_for_result ~channel_id ~command_id ~timeout_ms with
        | Some result -> Ok result
