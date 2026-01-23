@@ -5597,7 +5597,13 @@ let handle_chunk_get args : (Yojson.Safe.t, string) result =
              let chunks =
                match member "chunks" json with
                | Some (`List items) -> items
-               | _ -> []
+               | _ ->
+                   (match member "chunked" json with
+                    | Some (`Assoc fields) ->
+                        (match List.assoc_opt "chunks" fields with
+                         | Some (`List items) -> items
+                         | _ -> [])
+                    | _ -> [])
              in
              let chunk_total = List.length chunks in
              if index <= 0 || index > chunk_total then
