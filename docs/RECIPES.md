@@ -143,6 +143,8 @@ figma_get_node_chunk
   max_children: 50  # optional: trim children to avoid slow/huge nodes
   auto_trim_children: true
   auto_trim_limit: 200
+  error_on_large: false
+  warn_threshold: 500
 ```
 
 3) Repeat for deeper ranges.
