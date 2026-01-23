@@ -232,14 +232,16 @@ let health_handler _request reqd =
   Response.json json reqd
 
 (** MCP POST handler - async body reading with callback-based response *)
-let run_mcp_request ~domain_mgr server body_str =
+let run_mcp_request ~domain_mgr ~eio_ctx server body_str =
+  let run () =
+    Mcp_tools.install_eio_context eio_ctx;
+    process_mcp_request_sync server body_str
+  in
   match domain_mgr with
-  | None -> process_mcp_request_sync server body_str
-  | Some mgr ->
-      Eio.Domain_manager.run mgr (fun () ->
-        process_mcp_request_sync server body_str)
+  | None -> run ()
+  | Some mgr -> Eio.Domain_manager.run mgr run
 
-let mcp_post_handler ~sw ~domain_mgr server request reqd =
+let mcp_post_handler ~sw ~domain_mgr ~eio_ctx server request reqd =
   let { Httpun.Request.headers; target = request_target; _ } = request in
   let header_first keys =
     let rec loop = function
@@ -289,7 +291,7 @@ let mcp_post_handler ~sw ~domain_mgr server request reqd =
     | `Notification ->
         Eio.Fiber.fork ~sw (fun () ->
           try
-            ignore (run_mcp_request ~domain_mgr server body_str)
+            ignore (run_mcp_request ~domain_mgr ~eio_ctx server body_str)
           with exn ->
             eprintf "[MCP] notification failed: %s\n%!" (Printexc.to_string exn));
         Response.accepted reqd
@@ -301,14 +303,14 @@ let mcp_post_handler ~sw ~domain_mgr server request reqd =
              Response.accepted reqd;
              Eio.Fiber.fork ~sw (fun () ->
                try
-                 let response_str = run_mcp_request ~domain_mgr server body_str in
+                 let response_str = run_mcp_request ~domain_mgr ~eio_ctx server body_str in
                  send_sse_event client ~event:"message" ~data:response_str
                with exn ->
                  eprintf "[MCP] SSE request failed (client=%d): %s\n%!" id (Printexc.to_string exn);
                  unregister_sse_client id)
          | None ->
              (try
-               let response_str = run_mcp_request ~domain_mgr server body_str in
+               let response_str = run_mcp_request ~domain_mgr ~eio_ctx server body_str in
                Response.json response_str reqd
              with exn ->
                eprintf "[MCP] request failed: %s\n%!" (Printexc.to_string exn);
@@ -527,7 +529,7 @@ let plugin_status_handler _request reqd =
 
 (** ============== Router ============== *)
 
-let route_request ~clock ~domain_mgr ~sw server request reqd =
+let route_request ~clock ~domain_mgr ~sw ~eio_ctx server request reqd =
   let path = Request.path request in
   let meth = Request.method_ request in
 
@@ -549,7 +551,7 @@ let route_request ~clock ~domain_mgr ~sw server request reqd =
       plugin_status_handler request reqd
 
   | `POST, "/" | `POST, "/mcp" ->
-      mcp_post_handler ~sw ~domain_mgr server request reqd
+      mcp_post_handler ~sw ~domain_mgr ~eio_ctx server request reqd
 
   | `POST, "/plugin/connect" ->
       plugin_connect_handler request reqd
@@ -565,11 +567,11 @@ let route_request ~clock ~domain_mgr ~sw server request reqd =
 
 (** ============== httpun-eio Server ============== *)
 
-let make_request_handler ~clock ~domain_mgr ~sw server =
+let make_request_handler ~clock ~domain_mgr ~sw ~eio_ctx server =
   fun _client_addr gluten_reqd ->
     let reqd = gluten_reqd.Gluten.Reqd.reqd in
     let request = Httpun.Reqd.request reqd in
-    route_request ~clock ~domain_mgr ~sw server request reqd
+    route_request ~clock ~domain_mgr ~sw ~eio_ctx server request reqd
 
 let error_handler _client_addr ?request:_ error start_response =
   let response_body = start_response Httpun.Headers.empty in
@@ -586,8 +588,8 @@ let error_handler _client_addr ?request:_ error start_response =
 let run ~sw ~net ~clock ~domain_mgr config server =
   (* Set Eio context for pure Eio handlers (Lwt-free path) *)
   let eio_client = Figma_api_eio.make_client net in
-  Mcp_tools.set_eio_context ~sw ~net ~clock ~client:eio_client;
-  let request_handler = make_request_handler ~clock ~domain_mgr ~sw server in
+  let eio_ctx = Mcp_tools.set_eio_context ~sw ~net ~clock ~client:eio_client in
+  let request_handler = make_request_handler ~clock ~domain_mgr ~sw ~eio_ctx server in
   let resolve_listen_ips host =
     match String.lowercase_ascii host with
     | "localhost" ->
@@ -719,7 +721,7 @@ let start_server ?(config = default_config) server =
 let run_stdio ~sw ~env ~net ~clock server =
   (* Set Eio context for pure Eio handlers *)
   let eio_client = Figma_api_eio.make_client net in
-  Mcp_tools.set_eio_context ~sw ~net ~clock ~client:eio_client;
+  ignore (Mcp_tools.set_eio_context ~sw ~net ~clock ~client:eio_client);
 
   eprintf "[%s] MCP Server started (protocol: %s, mode: stdio/Eio)\n%!"
     Mcp_protocol.server_name Mcp_protocol.protocol_version;

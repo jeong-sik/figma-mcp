@@ -1343,50 +1343,55 @@ let node_duplicate_key node =
   String.concat "|" [type_str; name; size]
 
 (** Eio context for pure Eio handlers (set by mcp_protocol_eio at startup) *)
-let eio_switch : Eio.Switch.t option ref = ref None
-let eio_client : Figma_api_eio.client option ref = ref None
 
 (** Existential wrapper for clock to hide the type parameter *)
 type any_clock = Clock : _ Eio.Time.clock -> any_clock
-let eio_clock : any_clock option ref = ref None
 
 (** Existential wrapper for net to hide the type parameter *)
 type any_net = Net : _ Eio.Net.t -> any_net
-let eio_net : any_net option ref = ref None
-let eio_domain : Domain.id option ref = ref None
 
-let current_domain () =
-  try Some (Domain.self ())
-  with _ -> None
+type eio_context = {
+  sw: Eio.Switch.t;
+  net: any_net;
+  clock: any_clock;
+  client: Figma_api_eio.client;
+  domain: Domain.id;
+}
+
+let eio_context_key : eio_context option Domain.DLS.key =
+  Domain.DLS.new_key (fun () -> None)
+
+let get_eio_context () = Domain.DLS.get eio_context_key
+
+let install_eio_context ctx = Domain.DLS.set eio_context_key (Some ctx)
 
 (** Set Eio context from server startup *)
 let set_eio_context ~sw ~net ~clock ~client =
-  eio_switch := Some sw;
-  eio_net := Some (Net net);
-  eio_clock := Some (Clock clock);
-  eio_client := Some client;
-  eio_domain := current_domain ()
+  let ctx = {
+    sw;
+    net = Net net;
+    clock = Clock clock;
+    client;
+    domain = Domain.self ();
+  } in
+  install_eio_context ctx;
+  ctx
 
 (** Call LLM tool - requires Eio context *)
 let call_llm_tool_eio ~(provider : Llm_provider_eio.provider) ~url ~name ~arguments =
-  match !eio_clock, !eio_client with
-  | Some (Clock clock), Some client ->
-      let cohttp_client = Figma_api_eio.get_cohttp_client client in
-      let same_domain =
-        match !eio_domain with
-        | Some d -> d = Domain.self ()
-        | None -> false
-      in
+  match get_eio_context () with
+  | Some ctx ->
+      let (Clock clock) = ctx.clock in
+      let cohttp_client = Figma_api_eio.get_cohttp_client ctx.client in
+      let same_domain = ctx.domain = Domain.self () in
       let run_with sw =
         provider.call_tool ~sw ~clock ~client:cohttp_client ~url ~name ~arguments
       in
       if same_domain then
-        match !eio_switch with
-        | Some sw -> run_with sw
-        | None -> Eio.Switch.run run_with
+        run_with ctx.sw
       else
         Eio.Switch.run run_with
-  | _ ->
+  | None ->
       Error "Eio context not set - call set_eio_context first"
 
 let resolve_channel_id args =
@@ -1398,8 +1403,9 @@ let resolve_channel_id args =
        | None -> Error "Missing channel_id. Run figma_plugin_connect or figma_plugin_use_channel.")
 
 let plugin_wait ~channel_id ~command_id ~timeout_ms =
-  match !eio_clock with
-  | Some (Clock clock) ->
+  match get_eio_context () with
+  | Some ctx ->
+      let (Clock clock) = ctx.clock in
       (match Figma_plugin_bridge.wait_for_result_with_sleep
                ~sleep:(Eio.Time.sleep clock)
                ~channel_id
@@ -6265,23 +6271,19 @@ let handle_cache_invalidate args : (Yojson.Safe.t, string) result =
 (** 동기 래퍼 - Pure Eio Effect 핸들러로 감싸서 실행 *)
 let wrap_sync_pure (f : Yojson.Safe.t -> (Yojson.Safe.t, string) result) : tool_handler_sync =
   fun args ->
-    match !eio_net, !eio_clock, !eio_client with
-    | Some (Net net), Some (Clock clock), Some client ->
-        let same_domain =
-          match !eio_domain with
-          | Some d -> d = Domain.self ()
-          | None -> false
-        in
+    match get_eio_context () with
+    | Some ctx ->
+        let (Net net) = ctx.net in
+        let (Clock clock) = ctx.clock in
+        let same_domain = ctx.domain = Domain.self () in
         let run_with sw =
-          Figma_effects.run_with_pure_eio_api ~sw ~net ~clock ~client (fun () -> f args)
+          Figma_effects.run_with_pure_eio_api ~sw ~net ~clock ~client:ctx.client (fun () -> f args)
         in
         if same_domain then
-          match !eio_switch with
-          | Some sw -> run_with sw
-          | None -> Eio.Switch.run run_with
+          run_with ctx.sw
         else
           Eio.Switch.run run_with
-    | _ ->
+    | None ->
         Error "Eio context not set - server not properly initialized"
 
 (** 순수 함수 핸들러들 *)
