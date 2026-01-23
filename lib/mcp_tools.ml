@@ -251,6 +251,7 @@ let tool_figma_get_node_chunk : tool_def = {
     ("max_children", number_prop "자식 노드 최대 개수 (옵션, 초과 시 잘라냄)");
     ("warn_large", bool_prop "큰 노드 경고 활성화 (기본값: true)");
     ("warn_threshold", number_prop "경고 기준 children 수 (기본값: 500)");
+    ("error_on_large", bool_prop "큰 노드면 에러 반환 (기본값: false)");
     ("auto_trim_children", bool_prop "큰 노드 자동 자르기 (기본값: false)");
     ("auto_trim_limit", number_prop "자동 자르기 최대 children 수 (기본값: 200)");
     ("include_styles", bool_prop "스타일 정의 포함 여부 (기본값: false)");
@@ -2808,6 +2809,7 @@ let handle_get_node_chunk args : (Yojson.Safe.t, string) result =
   let max_children = get_int "max_children" args in
   let warn_large = get_bool_or "warn_large" true args in
   let warn_threshold = get_int "warn_threshold" args |> Option.value ~default:500 in
+  let error_on_large = get_bool_or "error_on_large" false args in
   let auto_trim_children = get_bool_or "auto_trim_children" false args in
   let auto_trim_limit = get_int "auto_trim_limit" args |> Option.value ~default:200 in
   let include_styles = get_bool_or "include_styles" false args in
@@ -2849,11 +2851,22 @@ let handle_get_node_chunk args : (Yojson.Safe.t, string) result =
 
              let warnings = ref [] in
              let add_warning msg = warnings := msg :: !warnings in
+             let is_large =
+               warn_large && effective_max_children = None && root_children_count > warn_threshold
+             in
+             let large_error =
+               if error_on_large && is_large then
+                 Some (Printf.sprintf
+                   "Large node %s: %d children at root (warn_threshold=%d). Set max_children/auto_trim_children or use figma_chunk_index + figma_chunk_get."
+                   node_id root_children_count warn_threshold)
+               else
+                 None
+             in
              (match effective_max_children, auto_trim_children with
               | Some limit, true when max_children = None ->
                   add_warning (Printf.sprintf "auto_trim_children applied: max_children=%d" limit)
               | _ -> ());
-              (match warn_large, root_children_count, effective_max_children with
+             (match warn_large, root_children_count, effective_max_children with
               | true, count, None when count > warn_threshold ->
                   add_warning (Printf.sprintf
                     "Large node %s: %d children at root (warn_threshold=%d). Consider max_children/auto_trim_children or figma_chunk_index + figma_chunk_get."
@@ -2920,53 +2933,55 @@ let handle_get_node_chunk args : (Yojson.Safe.t, string) result =
                  `Assoc (append_truncated assoc truncated)
              in
 
-             let filtered = filter_by_depth 0 node_data in
+             match large_error with
+             | Some msg -> Error msg
+             | None ->
+                 let filtered = filter_by_depth 0 node_data in
+                 let base =
+                   let styles =
+                     if include_styles then
+                       match Figma_effects.Perform.get_file_styles ~token ~file_key with
+                       | Ok json -> json
+                       | Error err -> `Assoc [("error", `String err)]
+                     else
+                       `Null
+                   in
+                   let filtered_str = Yojson.Safe.to_string filtered in
+                   match process_json_string ~format filtered_str with
+                   | Ok dsl ->
+                       `Assoc [
+                         ("type", `String "text");
+                         ("text", `String dsl);
+                         ("depth_range", `String (Printf.sprintf "%d-%d" depth_start depth_end));
+                         ("format", `String format);
+                         ("styles", styles);
+                       ]
+                   | Error msg ->
+                       `Assoc [
+                         ("error", `String msg);
+                         ("node", filtered);
+                         ("depth_range", `String (Printf.sprintf "%d-%d" depth_start depth_end));
+                         ("styles", styles);
+                       ]
+                 in
+                 let result =
+                   let warning =
+                     match !warnings with
+                     | [] -> None
+                     | msgs -> Some (String.concat " | " (List.rev msgs))
+                   in
+                   match warning with
+                   | Some msg ->
+                       (match base with
+                        | `Assoc fields -> `Assoc (fields @ [("warning", `String msg)])
+                        | _ -> base)
+                   | None -> base
+                 in
 
-             let base =
-               let styles =
-                 if include_styles then
-                   match Figma_effects.Perform.get_file_styles ~token ~file_key with
-                   | Ok json -> json
-                   | Error err -> `Assoc [("error", `String err)]
-                 else
-                   `Null
-               in
-               let filtered_str = Yojson.Safe.to_string filtered in
-               match process_json_string ~format filtered_str with
-               | Ok dsl ->
-                   `Assoc [
-                     ("type", `String "text");
-                     ("text", `String dsl);
-                     ("depth_range", `String (Printf.sprintf "%d-%d" depth_start depth_end));
-                     ("format", `String format);
-                     ("styles", styles);
-                   ]
-               | Error msg ->
-                   `Assoc [
-                     ("error", `String msg);
-                     ("node", filtered);
-                     ("depth_range", `String (Printf.sprintf "%d-%d" depth_start depth_end));
-                     ("styles", styles);
-                   ]
-             in
-             let result =
-               let warning =
-                 match !warnings with
-                 | [] -> None
-                 | msgs -> Some (String.concat " | " (List.rev msgs))
-               in
-               match warning with
-               | Some msg ->
-                   (match base with
-                    | `Assoc fields -> `Assoc (fields @ [("warning", `String msg)])
-                    | _ -> base)
-               | None -> base
-             in
-
-             (* Large Response Handler 적용 *)
-             let result_str = Yojson.Safe.pretty_to_string result in
-             let prefix = Printf.sprintf "chunk_%s_%d_%d" (sanitize_node_id node_id) depth_start depth_end in
-             Ok (Large_response.wrap_string_result ~prefix ~format result_str))))
+                 (* Large Response Handler 적용 *)
+                 let result_str = Yojson.Safe.pretty_to_string result in
+                 let prefix = Printf.sprintf "chunk_%s_%d_%d" (sanitize_node_id node_id) depth_start depth_end in
+                 Ok (Large_response.wrap_string_result ~prefix ~format result_str))))
   | _ -> Error "Missing required parameters: file_key/node_id or url, token"
 
 (** figma_fidelity_loop 핸들러 *)
