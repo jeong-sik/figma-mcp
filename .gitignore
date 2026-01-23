@@ -1,0 +1,37 @@
+# OCaml build artifacts
+_build/
+*.install
+*.merlin
+.merlin
+_opam/
+
+# Node.js
+node_modules/
+
+# Editor
+.vscode/
+*.swp
+*~
+.idea/
+
+# Git worktrees
+.worktrees/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Plugin build
+plugin/dist/
+
+# Test artifacts
+*.log
+*.png
+*.jpg
+*.svg
+
+# Downloaded release binary
+figma-mcp-macos-arm64
+figma-mcp-linux-x64
+# Track the local release artifact
+!figma-mcp-macos-arm64

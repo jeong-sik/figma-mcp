@@ -1,0 +1,696 @@
+// Figma gRPC Service - Streaming API for large file handling
+//
+// Solves: "7MB JSON crashing Claude Code" problem
+// Uses: grpc-direct (our OCaml 5.x gRPC library)
+// Reference: https://developers.figma.com/docs/rest-api/files/
+
+syntax = "proto3";
+
+package figma.v1;
+
+option go_package = "figma/v1;figmav1";
+
+// ============================================================
+// Enums - Match Figma REST API exactly
+// ============================================================
+
+// Node types as defined by Figma API
+// Reference: https://developers.figma.com/docs/rest-api/files/#global-properties
+enum NodeType {
+  NODE_TYPE_UNSPECIFIED = 0;
+  DOCUMENT = 1;
+  CANVAS = 2;
+  FRAME = 3;
+  GROUP = 4;
+  VECTOR = 5;
+  BOOLEAN_OPERATION = 6;
+  STAR = 7;
+  LINE = 8;
+  ELLIPSE = 9;
+  REGULAR_POLYGON = 10;
+  RECTANGLE = 11;
+  TEXT = 12;
+  SLICE = 13;
+  COMPONENT = 14;
+  COMPONENT_SET = 15;
+  INSTANCE = 16;
+  STICKY = 17;
+  SECTION = 18;
+  TABLE = 19;
+  TABLE_CELL = 20;
+  SHAPE_WITH_TEXT = 21;
+  CONNECTOR = 22;
+  WASHI_TAPE = 23;
+  WIDGET = 24;
+  EMBED = 25;
+  LINK_UNFURL = 26;
+}
+
+// Paint types for fills and strokes
+enum PaintType {
+  PAINT_TYPE_UNSPECIFIED = 0;
+  SOLID = 1;
+  GRADIENT_LINEAR = 2;
+  GRADIENT_RADIAL = 3;
+  GRADIENT_ANGULAR = 4;
+  GRADIENT_DIAMOND = 5;
+  IMAGE = 6;
+  EMOJI = 7;
+  VIDEO = 8;
+}
+
+// Effect types
+enum EffectType {
+  EFFECT_TYPE_UNSPECIFIED = 0;
+  INNER_SHADOW = 1;
+  DROP_SHADOW = 2;
+  LAYER_BLUR = 3;
+  BACKGROUND_BLUR = 4;
+}
+
+// Layout mode for auto-layout frames
+enum LayoutMode {
+  LAYOUT_MODE_NONE = 0;
+  HORIZONTAL = 1;
+  VERTICAL = 2;
+}
+
+// Layout alignment
+enum LayoutAlign {
+  LAYOUT_ALIGN_MIN = 0;    // flex-start
+  LAYOUT_ALIGN_CENTER = 1;
+  LAYOUT_ALIGN_MAX = 2;    // flex-end
+  LAYOUT_ALIGN_STRETCH = 3;
+  LAYOUT_ALIGN_SPACE_BETWEEN = 4;
+  LAYOUT_ALIGN_BASELINE = 5;
+}
+
+// Sizing behavior
+enum LayoutSizing {
+  SIZING_FIXED = 0;
+  SIZING_HUG = 1;   // fit-content
+  SIZING_FILL = 2;  // flex: 1
+}
+
+// Text alignment
+enum TextAlignHorizontal {
+  TEXT_ALIGN_LEFT = 0;
+  TEXT_ALIGN_CENTER = 1;
+  TEXT_ALIGN_RIGHT = 2;
+  TEXT_ALIGN_JUSTIFIED = 3;
+}
+
+enum TextAlignVertical {
+  TEXT_VALIGN_TOP = 0;
+  TEXT_VALIGN_CENTER = 1;
+  TEXT_VALIGN_BOTTOM = 2;
+}
+
+// Constraint types
+enum ConstraintHorizontal {
+  CONSTRAINT_H_LEFT = 0;
+  CONSTRAINT_H_RIGHT = 1;
+  CONSTRAINT_H_CENTER = 2;
+  CONSTRAINT_H_LEFT_RIGHT = 3;
+  CONSTRAINT_H_SCALE = 4;
+}
+
+enum ConstraintVertical {
+  CONSTRAINT_V_TOP = 0;
+  CONSTRAINT_V_BOTTOM = 1;
+  CONSTRAINT_V_CENTER = 2;
+  CONSTRAINT_V_TOP_BOTTOM = 3;
+  CONSTRAINT_V_SCALE = 4;
+}
+
+// Image scale modes
+enum ScaleMode {
+  SCALE_MODE_FILL = 0;
+  SCALE_MODE_FIT = 1;
+  SCALE_MODE_TILE = 2;
+  SCALE_MODE_STRETCH = 3;
+}
+
+// ============================================================
+// Value Types - Primitive structures
+// ============================================================
+
+// RGBA color (Figma uses 0.0-1.0 range)
+message Color {
+  float r = 1;  // 0.0 ~ 1.0
+  float g = 2;
+  float b = 3;
+  float a = 4;
+}
+
+// 2D Vector
+message Vector2D {
+  float x = 1;
+  float y = 2;
+}
+
+// Bounding box (absoluteBoundingBox in Figma API)
+message BoundingBox {
+  float x = 1;
+  float y = 2;
+  float width = 3;
+  float height = 4;
+}
+
+// Rectangle with individual corner radii
+message CornerRadii {
+  float top_left = 1;
+  float top_right = 2;
+  float bottom_right = 3;
+  float bottom_left = 4;
+}
+
+// Padding (top, right, bottom, left)
+message Padding {
+  float top = 1;
+  float right = 2;
+  float bottom = 3;
+  float left = 4;
+}
+
+// ============================================================
+// Style Types - Paints, Effects, Typography
+// ============================================================
+
+// Gradient color stop
+message ColorStop {
+  float position = 1;  // 0.0 ~ 1.0
+  Color color = 2;
+}
+
+// Paint (fill or stroke)
+message Paint {
+  PaintType type = 1;
+  bool visible = 2;
+  float opacity = 3;
+
+  // Type-specific fields
+  Color color = 10;                      // SOLID
+  repeated ColorStop gradient_stops = 11; // GRADIENT_*
+  Vector2D gradient_handle_positions_start = 12;
+  Vector2D gradient_handle_positions_end = 13;
+  string image_ref = 14;                 // IMAGE
+  ScaleMode scale_mode = 15;             // IMAGE
+  string gif_ref = 16;                   // for animated images
+}
+
+// Effect (shadow, blur)
+message Effect {
+  EffectType type = 1;
+  bool visible = 2;
+  float radius = 3;
+  Color color = 4;
+  Vector2D offset = 5;
+  float spread = 6;
+  bool show_shadow_behind_node = 7;  // for drop shadows
+}
+
+// Stroke properties
+message StrokeProperties {
+  float weight = 1;
+  string stroke_align = 2;  // INSIDE, OUTSIDE, CENTER
+  repeated float stroke_dashes = 3;
+  string stroke_cap = 4;    // NONE, ROUND, SQUARE, etc.
+  string stroke_join = 5;   // MITER, BEVEL, ROUND
+  float stroke_miter_limit = 6;
+}
+
+// Typography style
+message TypeStyle {
+  string font_family = 1;
+  string font_postscript_name = 2;
+  float font_size = 3;
+  int32 font_weight = 4;  // 100-900
+  string font_style = 5;  // normal, italic
+  TextAlignHorizontal text_align_horizontal = 6;
+  TextAlignVertical text_align_vertical = 7;
+  float letter_spacing = 8;
+  float line_height_px = 9;
+  float line_height_percent = 10;
+  string text_decoration = 11;  // NONE, UNDERLINE, STRIKETHROUGH
+  string text_case = 12;        // ORIGINAL, UPPER, LOWER, TITLE
+  repeated Paint fills = 13;    // text color
+}
+
+// Layout constraints
+message Constraints {
+  ConstraintHorizontal horizontal = 1;
+  ConstraintVertical vertical = 2;
+}
+
+// Auto-layout properties
+message LayoutProperties {
+  LayoutMode layout_mode = 1;
+  float item_spacing = 2;        // gap
+  Padding padding = 3;
+  LayoutAlign primary_axis_align = 4;
+  LayoutAlign counter_axis_align = 5;
+  LayoutSizing primary_axis_sizing = 6;
+  LayoutSizing counter_axis_sizing = 7;
+  bool layout_wrap = 8;          // wrap mode
+  float counter_axis_spacing = 9; // row gap when wrapped
+}
+
+// ============================================================
+// Node Message - Core structure
+// ============================================================
+
+// Complete Figma node representation
+// Matches Figma REST API response structure
+message Node {
+  // Global properties (all nodes have these)
+  string id = 1;
+  string name = 2;
+  NodeType type = 3;
+  bool visible = 4;
+  bool locked = 5;
+  float rotation = 6;
+
+  // Position and size
+  BoundingBox absolute_bounding_box = 10;
+  BoundingBox relative_bounding_box = 11;
+  Constraints constraints = 12;
+
+  // Visual properties
+  repeated Paint fills = 20;
+  repeated Paint strokes = 21;
+  StrokeProperties stroke_properties = 22;
+  repeated Effect effects = 23;
+  float opacity = 24;
+  string blend_mode = 25;
+  bool clips_content = 26;
+
+  // Corner radius
+  float corner_radius = 30;
+  CornerRadii rectangle_corner_radii = 31;
+
+  // Layout (auto-layout)
+  LayoutProperties layout = 40;
+  LayoutSizing layout_grow = 41;  // child sizing
+
+  // Text-specific
+  string characters = 50;
+  TypeStyle style = 51;
+  repeated TypeStyle character_style_overrides = 52;
+
+  // Component-specific
+  string component_id = 60;
+  string component_set_id = 61;
+  map<string, string> component_properties = 62;
+
+  // Instance-specific (overrides from main component)
+  bool is_mask = 70;
+  bool is_mask_outline = 71;
+
+  // Hierarchy
+  repeated Node children = 100;
+
+  // Plugin data
+  map<string, string> plugin_data = 110;
+  map<string, string> shared_plugin_data = 111;
+
+  // Export settings
+  repeated ExportSetting export_settings = 120;
+}
+
+// Export setting
+message ExportSetting {
+  string format = 1;  // PNG, JPG, SVG, PDF
+  string suffix = 2;
+  float scale = 3;    // 0.5, 1, 2, 3, 4
+  Constraints constraint = 4;
+}
+
+// ============================================================
+// Request/Response Messages
+// ============================================================
+
+// Node request - can specify depth range for chunked loading
+message GetNodeRequest {
+  string file_key = 1;
+  string node_id = 2;
+  string token = 3;  // Figma Personal Access Token
+
+  // Depth control for progressive loading (Outside-In / Matryoshka)
+  int32 depth_start = 4;  // Default: 0
+  int32 depth_end = 5;    // Default: unlimited (-1)
+
+  // Output format
+  string format = 6;  // "fidelity" | "raw" | "html"
+
+  // Include options (match Figma API params)
+  bool geometry = 7;          // geometry=paths
+  bool plugin_data = 8;       // plugin_data=shared
+  bool branch_data = 9;
+  string version = 10;        // specific file version
+
+  // Recursive mode (fetch subtree by expanding children IDs)
+  bool recursive = 11;                 // default: false
+  optional int32 recursive_max_depth = 12;       // default: 20 (server env override)
+  optional int32 recursive_max_nodes = 13;       // default: 5000 (server env override)
+  optional int32 recursive_depth_per_call = 14;  // default: 1 (server env override)
+}
+
+// Streamed node - one per node in the tree
+// Designed for progressive rendering
+message FigmaNode {
+  // Node content (may be full or partial depending on depth)
+  Node node = 1;
+
+  // Position in tree (for progressive loading)
+  int32 depth = 10;
+  string parent_id = 11;
+  int32 child_count = 12;
+
+  // DSL representation (compressed)
+  bytes dsl = 20;  // Fidelity DSL (raw bytes, uncompressed by default)
+
+  // Progress info
+  int32 node_index = 30;
+  int32 total_nodes = 31;
+  int32 bytes_so_far = 32;
+  int32 total_bytes_estimate = 33;
+}
+
+// Image request
+message ImageRequest {
+  string file_key = 1;
+  string node_id = 2;
+  string token = 3;
+
+  string format = 4;  // "png" | "jpg" | "svg" | "pdf"
+  float scale = 5;    // 1-4, default 1
+  bool use_absolute_bounds = 6;
+  bool svg_include_id = 7;
+  bool svg_include_node_id = 8;
+  bool svg_simplify_stroke = 9;
+}
+
+// Image response (streamed in chunks)
+message ImageData {
+  string node_id = 1;
+  bytes chunk = 2;      // Image data chunk
+  int32 chunk_index = 3;
+  int32 total_chunks = 4;
+  bool is_last = 5;
+
+  // Metadata (only in first chunk)
+  string mime_type = 10;
+  int64 total_size = 11;
+  string url = 12;      // Original Figma URL
+  string error = 13;    // Error message if failed
+}
+
+// Fidelity loop request - automatic depth iteration
+message FidelityLoopRequest {
+  string file_key = 1;
+  string node_id = 2;
+  string token = 3;
+
+  float target_score = 4;  // 0-1, default 0.92
+  int32 start_depth = 5;   // Default: 4
+  int32 max_depth = 6;     // Default: 20
+  int32 depth_step = 7;    // Default: 4
+
+  bool include_meta = 10;
+  bool include_variables = 11;
+  bool include_image_fills = 12;
+}
+
+// Fidelity progress (streamed)
+message FidelityProgress {
+  int32 attempt = 1;
+  int32 current_depth = 2;
+  float current_score = 3;
+
+  // DSL at current depth (allows early termination)
+  bytes dsl = 10;  // raw bytes (uncompressed by default)
+
+  // Result (only when done or failed)
+  bool done = 20;
+  bool success = 21;
+  bytes final_dsl = 22;  // raw bytes (uncompressed by default)
+  string error = 23;
+
+  // Stats
+  int32 node_count = 30;
+  int64 raw_size = 31;
+  int64 compressed_size = 32;
+}
+
+// Batch node request (for parallel fetching)
+message BatchNodeRequest {
+  string file_key = 1;
+  repeated string node_ids = 2;
+  string token = 3;
+  string format = 4;
+  int32 depth = 5;
+}
+
+// File metadata (without full node tree)
+message FileMetaRequest {
+  string file_key = 1;
+  string token = 2;
+  string version = 3;
+}
+
+message FileMetaResponse {
+  string name = 1;
+  string last_modified = 2;
+  string thumbnail_url = 3;
+  string version = 4;
+  string role = 5;  // owner, editor, viewer
+
+  // Components and styles summary
+  int32 component_count = 10;
+  int32 style_count = 11;
+
+  // Document structure (shallow)
+  repeated PageInfo pages = 20;
+}
+
+message PageInfo {
+  string id = 1;
+  string name = 2;
+  int32 frame_count = 3;
+  BoundingBox bounds = 4;
+}
+
+// ============================================================
+// Split Stream - Style/Layout/Content 분리 스트리밍
+// ============================================================
+
+// 스타일 청크 - CSS 변수로 변환 가능
+message StyleChunk {
+  string id = 1;                    // 스타일 고유 ID (node_id + "-style")
+  string node_id = 2;               // 원본 노드 ID
+
+  // Colors
+  repeated Color fill_colors = 10;
+  repeated Color stroke_colors = 11;
+  optional Color background_color = 12;
+
+  // Typography
+  optional string font_family = 20;
+  optional double font_size = 21;
+  optional int32 font_weight = 22;
+  optional double line_height = 23;
+  optional double letter_spacing = 24;
+  optional string text_align = 25;   // LEFT, CENTER, RIGHT, JUSTIFIED
+
+  // Effects
+  repeated Effect effects = 30;      // 그림자, 블러 등
+  optional double opacity = 31;
+  optional double corner_radius = 32;
+  repeated double corner_radii = 33; // [TL, TR, BR, BL]
+
+  // Border
+  optional double stroke_weight = 40;
+  optional string stroke_align = 41; // INSIDE, OUTSIDE, CENTER
+}
+
+// 레이아웃 청크 - Flexbox/Grid로 변환 가능
+message LayoutChunk {
+  string id = 1;                    // 레이아웃 고유 ID (node_id + "-layout")
+  string node_id = 2;               // 원본 노드 ID
+  optional string parent_id = 3;    // 부모 노드 ID
+
+  // Position & Size
+  double x = 10;
+  double y = 11;
+  double width = 12;
+  double height = 13;
+
+  // Constraints (반응형)
+  optional string horizontal_constraint = 20; // LEFT, RIGHT, CENTER, STRETCH, SCALE
+  optional string vertical_constraint = 21;
+
+  // Auto Layout (Flexbox)
+  optional string layout_mode = 30;           // HORIZONTAL, VERTICAL, NONE
+  optional string primary_axis_align = 31;    // MIN, CENTER, MAX, SPACE_BETWEEN
+  optional string counter_axis_align = 32;    // MIN, CENTER, MAX, BASELINE
+  optional double item_spacing = 33;
+  optional double padding_left = 34;
+  optional double padding_right = 35;
+  optional double padding_top = 36;
+  optional double padding_bottom = 37;
+
+  // Sizing
+  optional string layout_sizing_horizontal = 40; // FIXED, HUG, FILL
+  optional string layout_sizing_vertical = 41;
+
+  // Stacking
+  int32 z_index = 50;
+  bool clips_content = 51;
+}
+
+// 컨텐츠 청크 - 실제 내용물
+message ContentChunk {
+  string id = 1;                    // 컨텐츠 고유 ID (node_id + "-content")
+  string node_id = 2;               // 원본 노드 ID
+  string node_type = 3;             // FRAME, TEXT, RECTANGLE, etc.
+  string name = 4;                  // 노드 이름
+
+  // Text content
+  optional string text_content = 10;
+  repeated TextRange text_ranges = 11; // 스타일 범위
+
+  // Image content
+  optional string image_ref = 20;   // 이미지 해시 (fills에서 추출)
+  optional string image_url = 21;   // 다운로드 URL
+
+  // Vector content
+  optional string svg_path = 30;    // SVG path data
+
+  // Component info
+  optional string component_id = 40;
+  optional bool is_component = 41;
+  optional bool is_instance = 42;
+  map<string, string> component_properties = 43;
+}
+
+// 텍스트 스타일 범위
+message TextRange {
+  int32 start = 1;
+  int32 end = 2;
+  string style_id = 3;  // StyleChunk ID 참조
+}
+
+// 통합 스트림 청크 (oneof로 3종류 중 하나)
+message SplitChunk {
+  int32 sequence = 1;               // 전체 순서 번호
+  int32 total_chunks = 2;           // 예상 총 청크 수
+  string node_id = 3;               // 원본 노드 ID
+
+  oneof chunk {
+    StyleChunk style = 10;
+    LayoutChunk layout = 11;
+    ContentChunk content = 12;
+  }
+}
+
+// Split Stream 요청
+message SplitStreamRequest {
+  string file_key = 1;
+  string node_id = 2;
+  string token = 3;
+  optional int32 depth = 4;
+
+  // 필터: 어떤 청크 타입을 받을지
+  bool include_styles = 10;   // default: true
+  bool include_layouts = 11;  // default: true
+  bool include_contents = 12; // default: true
+}
+
+// ============================================================
+// Task Planning (ROI-based priority)
+// ============================================================
+
+// Priority levels based on SSIM contribution
+enum TaskPriority {
+  P1_LAYOUT = 0;     // 80% SSIM contribution (row/col, size, gap, bg, radius)
+  P2_STYLE = 1;      // +10% SSIM (align, text, shadow, border)
+  P3_TEXT = 2;       // +5% SSIM (font-weight, letter-spacing, line-height)
+  P4_SPECIALIST = 3; // Domain-specific (vectors, interactions, components)
+}
+
+// A single task representing a node to be processed
+message Task {
+  string id = 1;                    // Unique task ID (e.g., "task-001")
+  string node_id = 2;               // Figma node ID
+  string node_name = 3;             // Human-readable node name
+  string node_type = 4;             // Node type (FRAME, TEXT, COMPONENT, etc.)
+  TaskPriority priority = 5;        // ROI-based priority
+  repeated string dependencies = 6; // IDs of tasks that must complete first
+  int32 estimated_tokens = 7;       // Estimated token cost for this task
+  string semantic_dsl = 8;          // Semantic DSL representation
+  repeated string hints = 9;        // Implementation hints
+}
+
+// Request to generate task plan for a node tree
+message PlanTasksRequest {
+  string file_key = 1;
+  string node_id = 2;
+  string token = 3;
+  optional int32 depth = 4;         // Max depth to traverse (default: unlimited)
+  optional int32 max_tasks = 5;     // Max tasks to return (default: 100)
+
+  // Recursive mode (expand subtree via per-node fetch)
+  bool recursive = 10;              // default: false
+  optional int32 recursive_max_depth = 11;       // default: 20 (server env override)
+  optional int32 recursive_max_nodes = 12;       // default: 5000 (server env override)
+  optional int32 recursive_depth_per_call = 13;  // default: 1 (server env override)
+}
+
+// Response containing the ordered task list
+message PlanTasksResponse {
+  repeated Task tasks = 1;          // Tasks in execution order
+  int32 total_estimated_tokens = 2; // Sum of all task token estimates
+  string root_node_id = 3;          // Starting node ID
+  string summary = 4;               // Human-readable summary
+  string requirements_json = 5;     // JSON-encoded requirements breakdown
+}
+
+// ============================================================
+// Service
+// ============================================================
+
+service FigmaService {
+  // Stream nodes progressively (Outside-In / Matryoshka pattern)
+  // Client receives nodes as they're processed, can start rendering immediately
+  // Solves: 7MB JSON causing Claude Code timeout
+  rpc GetNodeStream(GetNodeRequest) returns (stream FigmaNode);
+
+  // Download multiple images in parallel
+  // Bidirectional: client streams requests, server streams responses (out of order)
+  // Use case: Download all image fills in a design
+  rpc DownloadImages(stream ImageRequest) returns (stream ImageData);
+
+  // Fidelity loop with real-time progress
+  // Automatically increases depth until target score reached
+  // Streams intermediate results for early termination
+  rpc FidelityLoop(FidelityLoopRequest) returns (stream FidelityProgress);
+
+  // Batch fetch multiple nodes (unary request, streaming response)
+  // Use case: Fetch selected frames in parallel
+  rpc GetNodes(BatchNodeRequest) returns (stream FigmaNode);
+
+  // Get file metadata only (no node tree)
+  // Use case: Check if file changed, get page list
+  rpc GetFileMeta(FileMetaRequest) returns (FileMetaResponse);
+
+  // 🆕 Split Stream - Style/Layout/Content 분리 스트리밍
+  // 노드를 3가지 타입으로 분리하여 병렬 처리 가능
+  // Use case: CSS 변수 먼저 생성, 레이아웃 계산, 컨텐츠 채우기
+  rpc GetSplitStream(SplitStreamRequest) returns (stream SplitChunk);
+
+  // 🆕 Task Planning - ROI-based priority ordering
+  // Returns an ordered list of tasks for Outside-In implementation
+  // Use case: Agent generates code in optimal order (high SSIM impact first)
+  rpc PlanTasks(PlanTasksRequest) returns (PlanTasksResponse);
+}

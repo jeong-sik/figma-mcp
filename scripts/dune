@@ -1,0 +1,4 @@
+; 유사도 계산 CLI 도구
+(executable
+ (name calc_similarity)
+ (libraries figma_mcp str))

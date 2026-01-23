@@ -1,0 +1,23 @@
+{
+  "name": "Figma MCP Bridge",
+  "id": "000000000000000000000000",
+  "api": "1.0.0",
+  "main": "code.js",
+  "ui": "ui.html",
+  "editorType": ["figma", "dev"],
+  "capabilities": ["inspect", "codegen"],
+  "codegenLanguages": [
+    { "label": "CSS", "value": "css" }
+  ],
+  "documentAccess": "dynamic-page",
+  "enableProposedApi": true,
+  "networkAccess": {
+    "allowedDomains": [
+      "https://www.figma.com"
+    ],
+    "devAllowedDomains": [
+      "http://localhost:8940"
+    ],
+    "reasoning": "Connect to local MCP server for high-fidelity extraction"
+  }
+}

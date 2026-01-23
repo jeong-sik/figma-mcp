@@ -1,0 +1,71 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: macos-14  # Apple Silicon
+            arch: macos-arm64
+          - os: ubuntu-latest
+            arch: linux-x64
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup OCaml
+        uses: ocaml/setup-ocaml@v3
+        with:
+          ocaml-compiler: 5.2.x
+
+      - name: Pin private dependencies
+        run: |
+          opam pin add compact-protocol https://github.com/jeong-sik/compact-protocol.git#main -n -y
+          opam pin add mcp_protocol https://github.com/jeong-sik/mcp-protocol-ocaml.git#main -n -y
+          opam pin add grpc-direct-core https://github.com/jeong-sik/grpc-direct.git#main -n -y
+
+      - name: Install dependencies
+        run: |
+          opam install . --deps-only -y
+
+      - name: Build
+        run: opam exec -- dune build --release
+
+      - name: Package binary
+        run: |
+          mkdir -p dist
+          cp _build/default/bin/main.exe dist/figma-mcp-${{ matrix.arch }}
+          chmod +x dist/figma-mcp-${{ matrix.arch }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: figma-mcp-${{ matrix.arch }}
+          path: dist/figma-mcp-${{ matrix.arch }}
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true

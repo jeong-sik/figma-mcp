@@ -1,0 +1,10 @@
+{
+  "name": "figma-mcp-scripts",
+  "version": "1.0.0",
+  "description": "Node.js scripts for Figma MCP visual comparison",
+  "dependencies": {
+    "pixelmatch": "^6.0.0",
+    "pngjs": "^7.0.0",
+    "ssim.js": "^3.5.0"
+  }
+}

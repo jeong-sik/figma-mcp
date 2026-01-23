@@ -1,0 +1,67 @@
+(test
+ (name test_figma_mcp)
+ (libraries figma_mcp alcotest yojson str)
+ (deps
+  (glob_files fixtures/*.json)))
+
+; Semantic Style DSL Mapper 테스트 (Phase 1 - Tier 1)
+(test
+ (name test_semantic_mapper)
+ (libraries figma_mcp alcotest str))
+
+; CIEDE2000 검증 테스트 (CIE TR 142-2001 테스트 데이터)
+(test
+ (name test_ciede2000)
+ (libraries figma_mcp))
+
+; Large Response & Progressive Loading 테스트
+(test
+ (name test_large_response)
+ (libraries figma_mcp alcotest yojson unix))
+
+; Memoization 벤치마크 (수동 실행)
+(executable
+ (name bench_memo)
+ (libraries figma_mcp))
+
+; P0 CSS Fidelity 벤치마크 (수동 실행)
+(executable
+ (name bench_p0)
+ (libraries figma_mcp unix))
+
+; Visual Verifier 테스트 (95%+ accuracy feedback loop)
+(test
+ (name test_visual_verifier)
+ (libraries figma_mcp alcotest yojson unix str))
+
+; CSS 조정 디버그
+(executable
+ (name debug_css)
+ (libraries figma_mcp))
+
+; Cache & Early Stop 테스트
+(test
+ (name test_cache_early_stop)
+ (libraries figma_mcp alcotest yojson str unix))
+
+; OKLab 검증 테스트 (Björn Ottosson 2020 참조값)
+(test
+ (name test_oklab)
+ (libraries figma_mcp))
+
+; P0 CSS Fidelity Gap 테스트 (gradient, effects, justify/align)
+(test
+ (name test_codegen_p0)
+ (libraries figma_mcp alcotest str)
+ (deps
+  (glob_files fixtures/*.json)))
+
+; Task Planner 테스트 (ROI-based priority, Outside-In order)
+(test
+ (name test_task_planner)
+ (libraries figma_mcp alcotest fmt))
+
+; PlanTasks RPC 통합 테스트 (Handler 응답 구조 검증)
+(test
+ (name test_plan_tasks_rpc)
+ (libraries figma_mcp alcotest yojson fmt))

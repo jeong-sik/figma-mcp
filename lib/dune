@@ -1,0 +1,24 @@
+(library
+ (name figma_mcp)
+ (public_name figma_mcp)
+ (libraries
+   yojson
+   uri
+   str
+   ipaddr
+   ;; Eio (Pure: HTTP server + gRPC server + Figma API client)
+   eio
+   eio_main
+   httpun-eio
+   gluten-eio
+   cohttp-eio
+   tls-eio
+   ca-certs
+   bigstringaf
+   ;; gRPC (streaming for large responses)
+   grpc-direct
+   grpc-direct-core
+   ;; Crypto RNG (for HTTPS/TLS)
+   mirage-crypto-rng.unix)
+ (wrapped false)
+ (ocamlopt_flags (:standard -w -50)))

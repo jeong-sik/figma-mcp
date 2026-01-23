@@ -1,0 +1,11 @@
+(executable
+ (name main)
+ (public_name figma-mcp)
+ (package figma_mcp)
+ (libraries figma_mcp cmdliner yojson))
+
+(executable
+ (name mcp_main)
+ (public_name figma-mcp-server)
+ (package figma_mcp)
+ (libraries figma_mcp))
