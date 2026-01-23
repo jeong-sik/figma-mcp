@@ -2853,11 +2853,11 @@ let handle_get_node_chunk args : (Yojson.Safe.t, string) result =
               | Some limit, true when max_children = None ->
                   add_warning (Printf.sprintf "auto_trim_children applied: max_children=%d" limit)
               | _ -> ());
-             (match warn_large, root_children_count, effective_max_children with
+              (match warn_large, root_children_count, effective_max_children with
               | true, count, None when count > warn_threshold ->
                   add_warning (Printf.sprintf
-                    "Large node: %d children at root. Consider max_children or figma_chunk_index + figma_chunk_get."
-                    count)
+                    "Large node %s: %d children at root (warn_threshold=%d). Consider max_children/auto_trim_children or figma_chunk_index + figma_chunk_get."
+                    node_id count warn_threshold)
               | _ -> ());
 
              let take_n n lst =
