@@ -248,6 +248,7 @@ let tool_figma_get_node_chunk : tool_def = {
     ("depth_start", number_prop "시작 깊이 (기본값: 0)");
     ("depth_end", number_prop "종료 깊이 (기본값: 2)");
     ("format", enum_prop ["fidelity"; "raw"; "html"] "출력 포맷 (기본값: fidelity)");
+    ("max_children", number_prop "자식 노드 최대 개수 (옵션, 초과 시 잘라냄)");
     ("include_styles", bool_prop "스타일 정의 포함 여부 (기본값: false)");
     ("version", string_prop "특정 파일 버전 ID");
   ] [];
@@ -2800,6 +2801,7 @@ let handle_get_node_chunk args : (Yojson.Safe.t, string) result =
   let depth_start = match get_int "depth_start" args with Some d when d >= 0 -> d | _ -> 0 in
   let depth_end = match get_int "depth_end" args with Some d when d >= 0 -> d | _ -> 2 in
   let format = get_string_or "format" "fidelity" args in
+  let max_children = get_int "max_children" args in
   let include_styles = get_bool_or "include_styles" false args in
   let version = get_string "version" args in
 
@@ -2825,11 +2827,52 @@ let handle_get_node_chunk args : (Yojson.Safe.t, string) result =
                    | `Null -> Error (Printf.sprintf "Document not found for node %s" node_id)
                    | _ ->
 
+             let root_children_count =
+               try (node_data |> member "children" |> to_list |> List.length)
+               with _ -> 0
+             in
+
+             let warning =
+               match max_children, root_children_count with
+               | None, count when count > 500 ->
+                   Some (Printf.sprintf
+                     "Large node: %d children at root. Consider max_children or figma_chunk_index + figma_chunk_get."
+                     count)
+               | _ -> None
+             in
+
+             let take_n n lst =
+               let rec loop acc i = function
+                 | [] -> List.rev acc
+                 | _ when i >= n -> List.rev acc
+                 | x :: xs -> loop (x :: acc) (i + 1) xs
+               in
+               loop [] 0 lst
+             in
+
+             let trim_children children =
+               match max_children with
+               | Some limit when limit >= 0 ->
+                   let total = List.length children in
+                   if total > limit then
+                     (take_n limit children, Some (total - limit))
+                   else
+                     (children, None)
+               | _ -> (children, None)
+             in
+
+             let append_truncated assoc truncated =
+               match truncated with
+               | Some n -> assoc @ [("_truncated_children", `Int n)]
+               | None -> assoc
+             in
+
              (* 깊이 범위에 따라 필터링하는 재귀 함수 *)
              let rec filter_by_depth current_depth json =
                if current_depth < depth_start then
                  (* 시작 깊이 미만: 자식만 재귀 처리 *)
                  let children = json |> member "children" |> to_list in
+                 let children, truncated = trim_children children in
                  let filtered_children = List.filter_map (fun c ->
                      let result = filter_by_depth (current_depth + 1) c in
                      if result = `Null then None else Some result
@@ -2839,7 +2882,8 @@ let handle_get_node_chunk args : (Yojson.Safe.t, string) result =
                  else
                    let assoc = to_assoc json in
                    let without_children = List.filter (fun (k, _) -> k <> "children") assoc in
-                   `Assoc (without_children @ [("children", `List filtered_children)])
+                   let assoc = without_children @ [("children", `List filtered_children)] in
+                   `Assoc (append_truncated assoc truncated)
                else if current_depth > depth_end then
                  (* 종료 깊이 초과: 자식 제거 *)
                  let assoc = to_assoc json in
@@ -2849,15 +2893,17 @@ let handle_get_node_chunk args : (Yojson.Safe.t, string) result =
                else
                  (* 범위 내: 자식 재귀 처리 *)
                  let children = json |> member "children" |> to_list in
+                 let children, truncated = trim_children children in
                  let filtered_children = List.map (fun c -> filter_by_depth (current_depth + 1) c) children in
                  let assoc = to_assoc json in
                  let without_children = List.filter (fun (k, _) -> k <> "children") assoc in
-                 `Assoc (without_children @ [("children", `List filtered_children)])
+                 let assoc = without_children @ [("children", `List filtered_children)] in
+                 `Assoc (append_truncated assoc truncated)
              in
 
              let filtered = filter_by_depth 0 node_data in
 
-             let result =
+             let base =
                let styles =
                  if include_styles then
                    match Figma_effects.Perform.get_file_styles ~token ~file_key with
@@ -2883,6 +2929,14 @@ let handle_get_node_chunk args : (Yojson.Safe.t, string) result =
                      ("depth_range", `String (Printf.sprintf "%d-%d" depth_start depth_end));
                      ("styles", styles);
                    ]
+             in
+             let result =
+               match warning with
+               | Some msg ->
+                   (match base with
+                    | `Assoc fields -> `Assoc (fields @ [("warning", `String msg)])
+                    | _ -> base)
+               | None -> base
              in
 
              (* Large Response Handler 적용 *)
