@@ -214,10 +214,19 @@ let with_query base_url params =
 
 (** ============== Eio HTTP Client (Direct TLS) ============== *)
 
+(** Raw TLS connection (for DNS fallback path) *)
+type raw_conn = {
+  flow : [ `Close | `Flow | `R | `Shutdown | `Tls | `W ] Eio.Resource.t;
+  buf : Eio.Buf_read.t;
+  mutable last_used : float;
+}
+
 (** HTTP 클라이언트 타입 - Direct TLS + Cohttp 호환 *)
 type client = {
   tls_config : Tls.Config.client;
   cohttp_client : Cohttp_eio.Client.t;  (** LLM provider 등 호환용 *)
+  raw_pool : (string, raw_conn) Hashtbl.t;
+  raw_pool_lock : Mutex.t;
 }
 
 (** TLS 설정 생성 *)
@@ -246,7 +255,12 @@ let make_client (net : _ Eio.Net.t) : client =
   let tls_config = make_tls_config () in
   let https = make_cohttp_https_handler tls_config in
   let cohttp_client = Cohttp_eio.Client.make ~https net in
-  { tls_config; cohttp_client }
+  {
+    tls_config;
+    cohttp_client;
+    raw_pool = Hashtbl.create 4;
+    raw_pool_lock = Mutex.create ();
+  }
 
 (** Cohttp 클라이언트 추출 (LLM provider 등 호환용) *)
 let get_cohttp_client (client : client) : Cohttp_eio.Client.t =
@@ -313,6 +327,108 @@ let parse_http_response response =
     let body = if is_chunked then decode_chunked raw_body else raw_body in
     (status, body)
 
+let with_raw_pool (client : client) f =
+  Mutex.lock client.raw_pool_lock;
+  Fun.protect ~finally:(fun () -> Mutex.unlock client.raw_pool_lock) f
+
+let take_raw_conn (client : client) key =
+  with_raw_pool client (fun () ->
+    match Hashtbl.find_opt client.raw_pool key with
+    | None -> None
+    | Some conn ->
+        Hashtbl.remove client.raw_pool key;
+        Some conn)
+
+let return_raw_conn (client : client) key conn =
+  with_raw_pool client (fun () -> Hashtbl.replace client.raw_pool key conn)
+
+let close_raw_conn conn =
+  try Eio.Flow.close conn.flow with _ -> ()
+
+let read_headers br =
+  let rec loop acc =
+    let line = Eio.Buf_read.line br |> String.trim in
+    if line = "" then List.rev acc
+    else
+      match String.index_opt line ':' with
+      | None -> loop acc
+      | Some idx ->
+          let key = String.sub line 0 idx |> String.trim |> String.lowercase_ascii in
+          let value =
+            String.sub line (idx + 1) (String.length line - idx - 1)
+            |> String.trim
+          in
+          loop ((key, value) :: acc)
+  in
+  loop []
+
+let header_value headers key =
+  List.find_opt (fun (k, _) -> k = key) headers
+  |> Option.map snd
+
+let read_chunked_body br =
+  let buf = Buffer.create 256 in
+  let rec read_chunks () =
+    let line = Eio.Buf_read.line br |> String.trim in
+    let size_str =
+      match String.split_on_char ';' line with
+      | [] -> "0"
+      | hd :: _ -> String.trim hd
+    in
+    let size =
+      try int_of_string ("0x" ^ size_str) with _ -> 0
+    in
+    if size = 0 then begin
+      let rec skip_trailers () =
+        let tline = Eio.Buf_read.line br |> String.trim in
+        if tline = "" then () else skip_trailers ()
+      in
+      skip_trailers ();
+      Buffer.contents buf
+    end else begin
+      let chunk = Eio.Buf_read.take size br in
+      Buffer.add_string buf chunk;
+      ignore (Eio.Buf_read.take 2 br);
+      read_chunks ()
+    end
+  in
+  read_chunks ()
+
+let read_http_response_from_flow br =
+  let status_line = Eio.Buf_read.line br |> String.trim in
+  let status =
+    try
+      let parts = String.split_on_char ' ' status_line in
+      match parts with
+      | _ :: code :: _ -> int_of_string code
+      | _ -> 500
+    with _ -> 500
+  in
+  let headers = read_headers br in
+  let connection_close =
+    match header_value headers "connection" with
+    | Some value -> string_contains (String.lowercase_ascii value) "close"
+    | None -> false
+  in
+  let is_chunked =
+    match header_value headers "transfer-encoding" with
+    | Some value -> string_contains (String.lowercase_ascii value) "chunked"
+    | None -> false
+  in
+  let content_length =
+    match header_value headers "content-length" with
+    | Some value -> int_of_string_opt (String.trim value)
+    | None -> None
+  in
+  let body =
+    match content_length with
+    | Some len -> Eio.Buf_read.take len br
+    | None when is_chunked -> read_chunked_body br
+    | None -> Eio.Buf_read.take_all br
+  in
+  let should_close = connection_close || (content_length = None && not is_chunked) in
+  (status, headers, body, should_close)
+
 (** DNS fallback via DoH (Cloudflare) - used only when system resolver fails *)
 let ipaddr_of_string ip =
   try
@@ -371,8 +487,23 @@ let resolve_host_with_fallback ~sw ~net ~tls_config ~hostname ~port =
        | Some ip ->
            (match ipaddr_of_string ip with
             | Some ipaddr -> Some (`Tcp (ipaddr, port))
-            | None -> None)
        | None -> None)
+       | None -> None)
+
+let open_raw_connection ~sw ~net ~client ~hostname ~port =
+  let addr =
+    match resolve_host_with_fallback ~sw ~net ~tls_config:client.tls_config ~hostname ~port with
+    | Some addr ->
+        (match addr with
+         | `Tcp (ip, _) -> `Tcp (ip, port)
+         | _ -> failwith "Expected TCP address")
+    | None -> failwith (sprintf "DNS resolution failed for %s" hostname)
+  in
+  let tcp_flow = Eio.Net.connect ~sw net addr in
+  let host_domain = Domain_name.(host_exn (of_string_exn hostname)) in
+  let tls_flow = Tls_eio.client_of_flow client.tls_config ~host:host_domain tcp_flow in
+  let buf = Eio.Buf_read.of_flow ~max_size:max_body_size tls_flow in
+  { flow = tls_flow; buf; last_used = Unix.gettimeofday () }
 
 (** Direct HTTPS GET 요청 - TCP 연결 + TLS + HTTP/1.1 *)
 let https_get_raw ~sw ~net ~client ~headers url =
@@ -386,34 +517,44 @@ let https_get_raw ~sw ~net ~client ~headers url =
     else sprintf "%s?%s" (if p = "" then "/" else p) (Uri.encoded_of_query q)
   in
 
-  (* 1. DNS 해석 + TCP 연결 (DoH fallback) *)
-  let addr =
-    match resolve_host_with_fallback ~sw ~net ~tls_config:client.tls_config ~hostname ~port with
-    | Some addr ->
-        (match addr with
-         | `Tcp (ip, _) -> `Tcp (ip, port)
-         | _ -> failwith "Expected TCP address")
-    | None -> failwith (sprintf "DNS resolution failed for %s" hostname)
-  in
-  let tcp_flow = Eio.Net.connect ~sw net addr in
-
-  (* 2. TLS 래핑 (SNI 포함) *)
-  let host_domain = Domain_name.(host_exn (of_string_exn hostname)) in
-  let tls_flow = Tls_eio.client_of_flow client.tls_config ~host:host_domain tcp_flow in
-
-  (* 3. HTTP/1.1 요청 전송 *)
-  let request =
+  let key = sprintf "%s:%d" hostname port in
+  let send_request conn =
     let header_lines = List.map (fun (k, v) -> sprintf "%s: %s" k v) headers in
-    sprintf "GET %s HTTP/1.1\r\nHost: %s\r\n%s\r\nConnection: close\r\n\r\n"
-      path hostname (String.concat "\r\n" header_lines)
+    let request =
+      sprintf "GET %s HTTP/1.1\r\nHost: %s\r\n%s\r\nConnection: keep-alive\r\n\r\n"
+        path hostname (String.concat "\r\n" header_lines)
+    in
+    Eio.Flow.copy_string request conn.flow;
+    let status, _resp_headers, body, should_close = read_http_response_from_flow conn.buf in
+    conn.last_used <- Unix.gettimeofday ();
+    (status, body, should_close)
   in
-  Eio.Flow.copy_string request tls_flow;
-
-  (* 4. 응답 읽기 *)
-  let response = Eio.Buf_read.(of_flow ~max_size:max_body_size tls_flow |> take_all) in
-
-  (* 5. 응답 파싱 *)
-  parse_http_response response
+  let use_conn conn =
+    try
+      let status, body, should_close = send_request conn in
+      Ok (conn, status, body, should_close)
+    with exn ->
+      close_raw_conn conn;
+      Error exn
+  in
+  let conn, status, body, should_close =
+    match take_raw_conn client key with
+    | Some conn ->
+        (match use_conn conn with
+         | Ok res -> res
+         | Error _ ->
+             let fresh = open_raw_connection ~sw ~net ~client ~hostname ~port in
+             (match use_conn fresh with
+              | Ok res -> res
+              | Error exn -> raise exn))
+    | None ->
+        let fresh = open_raw_connection ~sw ~net ~client ~hostname ~port in
+        (match use_conn fresh with
+         | Ok res -> res
+         | Error exn -> raise exn)
+  in
+  if should_close then close_raw_conn conn else return_raw_conn client key conn;
+  (status, body)
 
 (** Direct HTTPS POST 요청 *)
 let https_post_raw ~sw ~net ~client ~headers url body_content =
@@ -427,34 +568,44 @@ let https_post_raw ~sw ~net ~client ~headers url body_content =
     else sprintf "%s?%s" (if p = "" then "/" else p) (Uri.encoded_of_query q)
   in
 
-  (* 1. DNS 해석 + TCP 연결 (DoH fallback) *)
-  let addr =
-    match resolve_host_with_fallback ~sw ~net ~tls_config:client.tls_config ~hostname ~port with
-    | Some addr ->
-        (match addr with
-         | `Tcp (ip, _) -> `Tcp (ip, port)
-         | _ -> failwith "Expected TCP address")
-    | None -> failwith (sprintf "DNS resolution failed for %s" hostname)
-  in
-  let tcp_flow = Eio.Net.connect ~sw net addr in
-
-  (* 2. TLS 래핑 (SNI 포함) *)
-  let host_domain = Domain_name.(host_exn (of_string_exn hostname)) in
-  let tls_flow = Tls_eio.client_of_flow client.tls_config ~host:host_domain tcp_flow in
-
-  (* 3. HTTP/1.1 POST 요청 전송 *)
-  let request =
+  let key = sprintf "%s:%d" hostname port in
+  let send_request conn =
     let header_lines = List.map (fun (k, v) -> sprintf "%s: %s" k v) headers in
-    sprintf "POST %s HTTP/1.1\r\nHost: %s\r\nContent-Length: %d\r\n%s\r\nConnection: close\r\n\r\n%s"
-      path hostname (String.length body_content) (String.concat "\r\n" header_lines) body_content
+    let request =
+      sprintf "POST %s HTTP/1.1\r\nHost: %s\r\nContent-Length: %d\r\n%s\r\nConnection: keep-alive\r\n\r\n%s"
+        path hostname (String.length body_content) (String.concat "\r\n" header_lines) body_content
+    in
+    Eio.Flow.copy_string request conn.flow;
+    let status, _resp_headers, body, should_close = read_http_response_from_flow conn.buf in
+    conn.last_used <- Unix.gettimeofday ();
+    (status, body, should_close)
   in
-  Eio.Flow.copy_string request tls_flow;
-
-  (* 4. 응답 읽기 *)
-  let response = Eio.Buf_read.(of_flow ~max_size:max_body_size tls_flow |> take_all) in
-
-  (* 5. 응답 파싱 *)
-  parse_http_response response
+  let use_conn conn =
+    try
+      let status, body, should_close = send_request conn in
+      Ok (conn, status, body, should_close)
+    with exn ->
+      close_raw_conn conn;
+      Error exn
+  in
+  let conn, status, body, should_close =
+    match take_raw_conn client key with
+    | Some conn ->
+        (match use_conn conn with
+         | Ok res -> res
+         | Error _ ->
+             let fresh = open_raw_connection ~sw ~net ~client ~hostname ~port in
+             (match use_conn fresh with
+              | Ok res -> res
+              | Error exn -> raise exn))
+    | None ->
+        let fresh = open_raw_connection ~sw ~net ~client ~hostname ~port in
+        (match use_conn fresh with
+         | Ok res -> res
+         | Error exn -> raise exn)
+  in
+  if should_close then close_raw_conn conn else return_raw_conn client key conn;
+  (status, body)
 
 (** Unix.EINVAL 에러 체크 (macOS select 버그 우회용) *)
 let is_einval_error exn =
