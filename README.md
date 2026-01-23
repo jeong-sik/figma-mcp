@@ -47,7 +47,7 @@ echo '{"jsonrpc":"2.0","id":5,"method":"prompts/get","params":{"name":"figma_fid
 
 - `docs/RECIPES.md` - end-to-end usage patterns (quickstart, high fidelity, large nodes)
 
-## 도구 목록 (52개)
+## 도구 목록 (60개)
 
 ### Phase 1: Core
 | Tool | 설명 | 테스트 |

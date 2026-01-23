@@ -12,7 +12,7 @@ open Printf
 exception Request_timeout
 
 type api_error =
-  | Http_error of int * string   (** HTTP 상태 코드 + 메시지 *)
+  | Http_error of int * string * float option  (** HTTP 상태 코드 + 메시지 + Retry-After *)
   | Json_error of string         (** JSON 파싱 에러 *)
   | Network_error of string      (** 네트워크 에러 *)
   | Timeout_error                (** 타임아웃 *)
@@ -26,7 +26,7 @@ type error_recovery = {
 }
 
 (** HTTP 상태 코드별 에러 복구 정보 *)
-let get_http_error_recovery code body =
+let get_http_error_recovery code body retry_after =
   match code with
   | 400 -> {
       message = "Invalid request";
@@ -53,15 +53,18 @@ let get_http_error_recovery code body =
       retry_after = 0.0;
     }
   | 429 ->
-      (* Rate limit - extract retry-after from body if available *)
+      (* Rate limit - prefer Retry-After header, fallback to body *)
       let retry_sec =
-        try
-          let json = Yojson.Safe.from_string body in
-          match Yojson.Safe.Util.member "retry_after" json with
-          | `Int n -> float_of_int n
-          | `Float f -> f
-          | _ -> 60.0
-        with _ -> 60.0
+        match retry_after with
+        | Some s when s > 0.0 -> s
+        | _ ->
+            (try
+               let json = Yojson.Safe.from_string body in
+               match Yojson.Safe.Util.member "retry_after" json with
+               | `Int n -> float_of_int n
+               | `Float f -> f
+               | _ -> 60.0
+             with _ -> 60.0)
       in
       {
         message = "Rate limited";
@@ -107,8 +110,8 @@ let get_network_error_recovery msg =
 
 (** 에러를 친화적 문자열로 변환 (복구 정보 포함) *)
 let api_error_to_friendly_string = function
-  | Http_error (code, body) ->
-      let recovery = get_http_error_recovery code body in
+  | Http_error (code, body, retry_after) ->
+      let recovery = get_http_error_recovery code body retry_after in
       sprintf "%s: %s" recovery.message recovery.suggestion
   | Json_error msg -> sprintf "Invalid response from Figma: %s" msg
   | Network_error msg ->
@@ -118,21 +121,21 @@ let api_error_to_friendly_string = function
 
 (** 에러를 기술적 문자열로 변환 (디버깅용) *)
 let api_error_to_string = function
-  | Http_error (code, msg) -> sprintf "HTTP %d: %s" code msg
+  | Http_error (code, msg, _) -> sprintf "HTTP %d: %s" code msg
   | Json_error msg -> sprintf "JSON error: %s" msg
   | Network_error msg -> sprintf "Network error: %s" msg
   | Timeout_error -> "Request timeout"
 
 (** 에러가 재시도 가능한지 확인 *)
 let is_retryable_error = function
-  | Http_error (code, body) -> (get_http_error_recovery code body).retryable
+  | Http_error (code, body, retry_after) -> (get_http_error_recovery code body retry_after).retryable
   | Network_error msg -> (get_network_error_recovery msg).retryable
   | Timeout_error -> true  (* 타임아웃은 재시도 가능 *)
   | Json_error _ -> false  (* JSON 파싱 에러는 재시도 불가 *)
 
 (** 재시도 대기 시간 반환 *)
 let get_retry_delay = function
-  | Http_error (code, body) -> (get_http_error_recovery code body).retry_after
+  | Http_error (code, body, retry_after) -> (get_http_error_recovery code body retry_after).retry_after
   | Network_error msg -> (get_network_error_recovery msg).retry_after
   | Timeout_error -> 1.0
   | Json_error _ -> 0.0
@@ -142,6 +145,33 @@ let get_retry_delay = function
 let api_base = "https://api.figma.com/v1"
 let default_timeout = 30.0  (* seconds *)
 let max_body_size = 100 * 1024 * 1024  (* 100MB - Figma files can be very large *)
+
+let string_contains s sub =
+  let len_s = String.length s in
+  let len_sub = String.length sub in
+  let rec loop i =
+    if i + len_sub > len_s then false
+    else if String.sub s i len_sub = sub then true
+    else loop (i + 1)
+  in
+  if len_sub = 0 then true else loop 0
+
+let is_dns_failure exn =
+  let msg = Printexc.to_string exn |> String.lowercase_ascii in
+  string_contains msg "resolve" || string_contains msg "dns"
+
+let is_html_response body =
+  let trimmed = String.trim body in
+  string_contains (String.lowercase_ascii trimmed) "<html"
+
+let retry_after_of_headers headers =
+  match Cohttp.Header.get headers "retry-after" with
+  | None -> None
+  | Some value ->
+      let trimmed = String.trim value in
+      (match int_of_string_opt trimmed with
+       | Some secs -> Some (float_of_int secs)
+       | None -> None)
 
 (** ============== Logging ============== *)
 
@@ -197,15 +227,19 @@ let make_tls_config () =
   | Ok config -> config
   | Error (`Msg msg) -> failwith (sprintf "TLS config error: %s" msg)
 
-(** Cohttp용 HTTPS 핸들러 - LLM provider 호환용 (HTTP만 사용) *)
-let make_cohttp_https_handler () =
-  (* LLM provider는 보통 localhost HTTP를 사용하므로 HTTPS 핸들러는 None *)
-  None
+(** Cohttp용 HTTPS 핸들러 *)
+let make_cohttp_https_handler tls_config =
+  Some (fun uri tcp_flow ->
+    let host_str = Uri.host uri |> Option.value ~default:"" in
+    let host_domain =
+      Domain_name.host_exn (Domain_name.of_string_exn host_str)
+    in
+    Tls_eio.client_of_flow tls_config ~host:host_domain tcp_flow)
 
 (** HTTP 클라이언트 생성 *)
 let make_client (net : _ Eio.Net.t) : client =
   let tls_config = make_tls_config () in
-  let https = make_cohttp_https_handler () in
+  let https = make_cohttp_https_handler tls_config in
   let cohttp_client = Cohttp_eio.Client.make ~https net in
   { tls_config; cohttp_client }
 
@@ -274,6 +308,67 @@ let parse_http_response response =
     let body = if is_chunked then decode_chunked raw_body else raw_body in
     (status, body)
 
+(** DNS fallback via DoH (Cloudflare) - used only when system resolver fails *)
+let ipaddr_of_string ip =
+  try
+    let ipaddr = Ipaddr.of_string_exn ip in
+    let raw = Ipaddr.to_octets ipaddr in
+    Some (Eio.Net.Ipaddr.of_raw raw)
+  with _ -> None
+
+let resolve_via_doh ~sw ~net ~tls_config hostname =
+  match ipaddr_of_string "1.1.1.1" with
+  | None -> None
+  | Some ip ->
+      let addr = `Tcp (ip, 443) in
+      let tcp_flow = Eio.Net.connect ~sw net addr in
+      let host_domain = Domain_name.(host_exn (of_string_exn "cloudflare-dns.com")) in
+      let tls_flow = Tls_eio.client_of_flow tls_config ~host:host_domain tcp_flow in
+      let path = sprintf "/dns-query?name=%s&type=A" hostname in
+      let request =
+        sprintf "GET %s HTTP/1.1\r\nHost: cloudflare-dns.com\r\naccept: application/dns-json\r\nconnection: close\r\n\r\n"
+          path
+      in
+      Eio.Flow.copy_string request tls_flow;
+      let response = Eio.Buf_read.(of_flow ~max_size:(128 * 1024) tls_flow |> take_all) in
+      let status, body = parse_http_response response in
+      if status <> 200 then None
+      else
+        (try
+           let json = Yojson.Safe.from_string body in
+           match Yojson.Safe.Util.member "Answer" json with
+           | `List answers ->
+               let ips =
+                 List.filter_map (fun ans ->
+                     match Yojson.Safe.Util.member "data" ans with
+                     | `String ip -> Some ip
+                     | _ -> None
+                   ) answers
+               in
+               (match ips with
+                | hd :: _ -> Some hd
+                | [] -> None)
+           | _ -> None
+         with _ -> None)
+
+let resolve_host_with_fallback ~sw ~net ~tls_config ~hostname ~port =
+  match Eio.Net.getaddrinfo_stream net hostname with
+  | addr :: _ -> Some addr
+  | [] ->
+      (match resolve_via_doh ~sw ~net ~tls_config hostname with
+       | Some ip ->
+           (match ipaddr_of_string ip with
+            | Some ipaddr -> Some (`Tcp (ipaddr, port))
+            | None -> None)
+       | None -> None)
+  | exception _ ->
+      (match resolve_via_doh ~sw ~net ~tls_config hostname with
+       | Some ip ->
+           (match ipaddr_of_string ip with
+            | Some ipaddr -> Some (`Tcp (ipaddr, port))
+            | None -> None)
+       | None -> None)
+
 (** Direct HTTPS GET 요청 - TCP 연결 + TLS + HTTP/1.1 *)
 let https_get_raw ~sw ~net ~client ~headers url =
   let uri = Uri.of_string url in
@@ -286,15 +381,14 @@ let https_get_raw ~sw ~net ~client ~headers url =
     else sprintf "%s?%s" (if p = "" then "/" else p) (Uri.encoded_of_query q)
   in
 
-  (* 1. DNS 해석 + TCP 연결 *)
+  (* 1. DNS 해석 + TCP 연결 (DoH fallback) *)
   let addr =
-    let addrs = Eio.Net.getaddrinfo_stream net hostname in
-    match addrs with
-    | [] -> failwith (sprintf "DNS resolution failed for %s" hostname)
-    | addr :: _ ->
-      match addr with
-      | `Tcp (ip, _) -> `Tcp (ip, port)
-      | _ -> failwith "Expected TCP address"
+    match resolve_host_with_fallback ~sw ~net ~tls_config:client.tls_config ~hostname ~port with
+    | Some addr ->
+        (match addr with
+         | `Tcp (ip, _) -> `Tcp (ip, port)
+         | _ -> failwith "Expected TCP address")
+    | None -> failwith (sprintf "DNS resolution failed for %s" hostname)
   in
   let tcp_flow = Eio.Net.connect ~sw net addr in
 
@@ -328,15 +422,14 @@ let https_post_raw ~sw ~net ~client ~headers url body_content =
     else sprintf "%s?%s" (if p = "" then "/" else p) (Uri.encoded_of_query q)
   in
 
-  (* 1. DNS 해석 + TCP 연결 *)
+  (* 1. DNS 해석 + TCP 연결 (DoH fallback) *)
   let addr =
-    let addrs = Eio.Net.getaddrinfo_stream net hostname in
-    match addrs with
-    | [] -> failwith (sprintf "DNS resolution failed for %s" hostname)
-    | addr :: _ ->
-      match addr with
-      | `Tcp (ip, _) -> `Tcp (ip, port)
-      | _ -> failwith "Expected TCP address"
+    match resolve_host_with_fallback ~sw ~net ~tls_config:client.tls_config ~hostname ~port with
+    | Some addr ->
+        (match addr with
+         | `Tcp (ip, _) -> `Tcp (ip, port)
+         | _ -> failwith "Expected TCP address")
+    | None -> failwith (sprintf "DNS resolution failed for %s" hostname)
   in
   let tcp_flow = Eio.Net.connect ~sw net addr in
 
@@ -366,39 +459,80 @@ let is_einval_error exn =
 
 (** GET 요청 with timeout + 재시도 (macOS select 버그 우회) *)
 let http_get ~sw ~net ~clock ~client ~headers ?(timeout=default_timeout) ?(max_retries=3) url =
+  let headers = Cohttp.Header.of_list headers in
+  let headers_list = Cohttp.Header.to_list headers in
+  let uri = Uri.of_string url in
   let rec retry n =
     try
       match Eio.Time.with_timeout clock timeout (fun () ->
-        Ok (https_get_raw ~sw ~net ~client ~headers url)
+        let resp, body = Cohttp_eio.Client.get client.cohttp_client ~sw ~headers uri in
+        let body_str = Eio.Buf_read.(parse_exn take_all) body ~max_size:max_body_size in
+        Ok (resp, body_str)
       ) with
-      | Ok result -> result
+      | Ok result -> Ok result
       | Error `Timeout ->
         log_error "http_get" (sprintf "Timeout after %.1fs: %s" timeout url);
-        raise Request_timeout
+        Error `Timeout
     with exn when is_einval_error exn && n < max_retries ->
       log_warning "http_get" (sprintf "Unix.EINVAL retry %d/%d: %s" (n + 1) max_retries url);
       Eio.Time.sleep clock 0.1;  (* 100ms 대기 *)
       retry (n + 1)
+    | exn -> Error (`Exn exn)
   in
-  retry 0
+  match retry 0 with
+  | Ok (resp, body_str) ->
+      let status = Cohttp.Response.status resp |> Cohttp.Code.code_of_status in
+      let resp_headers = Cohttp.Response.headers resp in
+      if status = 400 && is_html_response body_str then
+        (try
+           let status2, body2 = https_get_raw ~sw ~net ~client ~headers:headers_list url in
+           if status2 >= 200 && status2 < 300 then
+             (status2, Cohttp.Header.init (), body2)
+           else
+             (status, resp_headers, body_str)
+         with _ ->
+           (status, resp_headers, body_str))
+      else
+        (status, resp_headers, body_str)
+  | Error `Timeout -> raise Request_timeout
+  | Error (`Exn exn) when is_dns_failure exn ->
+      let status, body_str = https_get_raw ~sw ~net ~client ~headers:headers_list url in
+      (status, Cohttp.Header.init (), body_str)
+  | Error (`Exn exn) -> raise exn
 
 (** POST 요청 with timeout + 재시도 (macOS select 버그 우회) *)
 let http_post ~sw ~net ~clock ~client ~headers ?(timeout=default_timeout) ?(max_retries=3) url body_str =
+  let headers = Cohttp.Header.of_list headers in
+  let headers_list = Cohttp.Header.to_list headers in
+  let uri = Uri.of_string url in
+  let body = Cohttp_eio.Body.of_string body_str in
   let rec retry n =
     try
       match Eio.Time.with_timeout clock timeout (fun () ->
-        Ok (https_post_raw ~sw ~net ~client ~headers url body_str)
+        let resp, resp_body = Cohttp_eio.Client.post client.cohttp_client ~sw ~headers ~body uri in
+        let resp_str = Eio.Buf_read.(parse_exn take_all) resp_body ~max_size:max_body_size in
+        Ok (resp, resp_str)
       ) with
-      | Ok result -> result
+      | Ok result -> Ok result
       | Error `Timeout ->
         log_error "http_post" (sprintf "Timeout after %.1fs: %s" timeout url);
-        raise Request_timeout
+        Error `Timeout
     with exn when is_einval_error exn && n < max_retries ->
       log_warning "http_post" (sprintf "Unix.EINVAL retry %d/%d: %s" (n + 1) max_retries url);
       Eio.Time.sleep clock 0.1;  (* 100ms 대기 *)
       retry (n + 1)
+    | exn -> Error (`Exn exn)
   in
-  retry 0
+  match retry 0 with
+  | Ok (resp, resp_str) ->
+      let status = Cohttp.Response.status resp |> Cohttp.Code.code_of_status in
+      let resp_headers = Cohttp.Response.headers resp in
+      (status, resp_headers, resp_str)
+  | Error `Timeout -> raise Request_timeout
+  | Error (`Exn exn) when is_dns_failure exn ->
+      let status, body_str = https_post_raw ~sw ~net ~client ~headers:headers_list url body_str in
+      (status, Cohttp.Header.init (), body_str)
+  | Error (`Exn exn) -> raise exn
 
 (** ============== Figma API Core ============== *)
 
@@ -409,7 +543,7 @@ let get_json ~sw ~net ~clock ~client ~token url : (Yojson.Safe.t, api_error) res
     ("Accept", "application/json");
   ] in
   try
-    let status, body = http_get ~sw ~net ~clock ~client ~headers url in
+    let status, resp_headers, body = http_get ~sw ~net ~clock ~client ~headers url in
     if status >= 200 && status < 300 then
       try Ok (Yojson.Safe.from_string body)
       with Yojson.Json_error msg ->
@@ -417,7 +551,8 @@ let get_json ~sw ~net ~clock ~client ~token url : (Yojson.Safe.t, api_error) res
         Error (Json_error msg)
     else begin
       log_error "get_json" (sprintf "HTTP %d: %s (url: %s)" status (String.sub body 0 (min 200 (String.length body))) url);
-      Error (Http_error (status, body))
+      let retry_after = retry_after_of_headers resp_headers in
+      Error (Http_error (status, body, retry_after))
     end
   with
   | Request_timeout ->
@@ -437,7 +572,7 @@ let post_json ~sw ~net ~clock ~client ~token url body_json : (Yojson.Safe.t, api
   ] in
   let body_str = Yojson.Safe.to_string body_json in
   try
-    let status, body = http_post ~sw ~net ~clock ~client ~headers url body_str in
+    let status, resp_headers, body = http_post ~sw ~net ~clock ~client ~headers url body_str in
     if status >= 200 && status < 300 then
       try Ok (Yojson.Safe.from_string body)
       with Yojson.Json_error msg ->
@@ -445,7 +580,8 @@ let post_json ~sw ~net ~clock ~client ~token url body_json : (Yojson.Safe.t, api
         Error (Json_error msg)
     else begin
       log_error "post_json" (sprintf "HTTP %d: %s (url: %s)" status (String.sub body 0 (min 200 (String.length body))) url);
-      Error (Http_error (status, body))
+      let retry_after = retry_after_of_headers resp_headers in
+      Error (Http_error (status, body, retry_after))
     end
   with
   | Request_timeout ->
@@ -460,7 +596,7 @@ let post_json ~sw ~net ~clock ~client ~token url body_json : (Yojson.Safe.t, api
 let download_url ~sw ~net ~clock ~client ~url ~path : (unit, api_error) result =
   let headers = [] in
   try
-    let status, body = http_get ~sw ~net ~clock ~client ~headers url in
+    let status, resp_headers, body = http_get ~sw ~net ~clock ~client ~headers url in
     if status >= 200 && status < 300 then begin
       (* 디렉토리 생성 *)
       let dir = Filename.dirname path in
@@ -473,7 +609,8 @@ let download_url ~sw ~net ~clock ~client ~url ~path : (unit, api_error) result =
       Ok ()
     end else begin
       log_error "download_url" (sprintf "HTTP %d (url: %s, path: %s)" status url path);
-      Error (Http_error (status, body))
+      let retry_after = retry_after_of_headers resp_headers in
+      Error (Http_error (status, body, retry_after))
     end
   with
   | Request_timeout ->

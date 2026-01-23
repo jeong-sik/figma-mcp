@@ -253,8 +253,27 @@ let tool_figma_get_node_chunk : tool_def = {
   ] [];
 }
 
-(* NOTE: figma_chunk_index was removed - not implemented.
-   Use figma_get_node + figma_codegen separately for chunked processing. *)
+let tool_figma_chunk_index : tool_def = {
+  name = "figma_chunk_index";
+  description = "노드 children을 청크로 나눠 인덱스/요약/선택 결과를 생성합니다.";
+  input_schema = object_schema [
+    ("file_key", string_prop "Figma 파일 키");
+    ("node_id", string_prop "노드 ID (예: 123:456)");
+    ("url", string_prop "Figma URL (file_key/node_id 자동 추출)");
+    ("token", string_prop "Figma Personal Access Token (optional if FIGMA_TOKEN env var is set)");
+    ("chunk_size", number_prop "청크당 children 수 (기본값: 60)");
+    ("depth", number_prop "Figma API depth (기본값: 2)");
+    ("selection_mode", enum_prop ["none"; "heuristic"; "llm"] "청크 선택 전략 (기본값: none)");
+    ("selection_limit", number_prop "선택할 청크 수 (기본값: 4)");
+    ("selection_task", string_prop "LLM 선택 기준 설명 (옵션)");
+    ("selection_llm_tool", enum_prop ["codex"; "claude-cli"; "gemini"; "ollama"] "청크 선택용 LLM 도구 (기본값: codex)");
+    ("selection_llm_args", object_prop "청크 선택용 LLM 인자 (model/timeout/...)");
+    ("selection_provider", enum_prop ["mcp-http"; "stub"] "청크 선택 LLM provider (기본값: mcp-http)");
+    ("selection_mcp_url", string_prop "청크 선택 MCP endpoint URL override");
+    ("sample_size", number_prop "청크 인덱스 샘플 수 (기본값: 6)");
+    ("version", string_prop "특정 파일 버전 ID");
+  ] [];
+}
 
 let tool_figma_chunk_get : tool_def = {
   name = "figma_chunk_get";
@@ -915,6 +934,7 @@ let all_tools = [
   tool_figma_get_node_summary;
   tool_figma_select_nodes;
   tool_figma_get_node_chunk;
+  tool_figma_chunk_index;
   tool_figma_chunk_get;
   tool_figma_fidelity_loop;
   tool_figma_image_similarity;
@@ -1327,21 +1347,39 @@ let eio_clock : any_clock option ref = ref None
 (** Existential wrapper for net to hide the type parameter *)
 type any_net = Net : _ Eio.Net.t -> any_net
 let eio_net : any_net option ref = ref None
+let eio_domain : Domain.id option ref = ref None
+
+let current_domain () =
+  try Some (Domain.self ())
+  with _ -> None
 
 (** Set Eio context from server startup *)
 let set_eio_context ~sw ~net ~clock ~client =
   eio_switch := Some sw;
   eio_net := Some (Net net);
   eio_clock := Some (Clock clock);
-  eio_client := Some client
+  eio_client := Some client;
+  eio_domain := current_domain ()
 
 (** Call LLM tool - requires Eio context *)
 let call_llm_tool_eio ~(provider : Llm_provider_eio.provider) ~url ~name ~arguments =
-  match !eio_switch, !eio_clock, !eio_client with
-  | Some sw, Some (Clock clock), Some client ->
-      (* LLM provider는 Cohttp client를 사용 *)
+  match !eio_clock, !eio_client with
+  | Some (Clock clock), Some client ->
       let cohttp_client = Figma_api_eio.get_cohttp_client client in
-      provider.call_tool ~sw ~clock ~client:cohttp_client ~url ~name ~arguments
+      let same_domain =
+        match !eio_domain with
+        | Some d -> d = Domain.self ()
+        | None -> false
+      in
+      let run_with sw =
+        provider.call_tool ~sw ~clock ~client:cohttp_client ~url ~name ~arguments
+      in
+      if same_domain then
+        match !eio_switch with
+        | Some sw -> run_with sw
+        | None -> Eio.Switch.run run_with
+      else
+        Eio.Switch.run run_with
   | _ ->
       Error "Eio context not set - call set_eio_context first"
 
@@ -1354,9 +1392,33 @@ let resolve_channel_id args =
        | None -> Error "Missing channel_id. Run figma_plugin_connect or figma_plugin_use_channel.")
 
 let plugin_wait ~channel_id ~command_id ~timeout_ms =
-  match Figma_plugin_bridge.wait_for_result ~channel_id ~command_id ~timeout_ms with
-  | Some result -> Ok result
-  | None -> Error "Plugin timeout waiting for response"
+  let timeout_sec = float_of_int timeout_ms /. 1000.0 in
+  let wait_with_eio clock =
+    let start_time = Unix.gettimeofday () in
+    let rec poll attempt =
+      match Figma_plugin_bridge.take_result ~channel_id ~command_id with
+      | Some result -> Ok result
+      | None ->
+          let elapsed = Unix.gettimeofday () -. start_time in
+          if elapsed >= timeout_sec then Error "Plugin timeout waiting for response"
+          else
+            let backoff = min 0.5 (0.05 *. (2.0 ** float_of_int attempt)) in
+            let remaining = timeout_sec -. elapsed in
+            let sleep_time = min backoff remaining in
+            if sleep_time <= 0.0 then Error "Plugin timeout waiting for response"
+            else begin
+              Eio.Time.sleep clock sleep_time;
+              poll (attempt + 1)
+            end
+    in
+    poll 0
+  in
+  match !eio_clock with
+  | Some (Clock clock) -> wait_with_eio clock
+  | None ->
+      (match Figma_plugin_bridge.wait_for_result ~channel_id ~command_id ~timeout_ms with
+       | Some result -> Ok result
+       | None -> Error "Plugin timeout waiting for response")
 
 let assoc_or_empty json =
   match json with
@@ -1944,10 +2006,13 @@ let handle_get_node args : (Yojson.Safe.t, string) result =
              | _ -> None
            in
            (match node_data with
-            | Some node ->
+           | Some node ->
                 let node_str = Yojson.Safe.to_string node in
+                let node_count = Large_response.count_nodes_json node in
+                let prefix = Printf.sprintf "node_%s" (sanitize_node_id node_id) in
                 (match process_json_string ~format node_str with
-                 | Ok result -> Ok (make_text_content result)
+                 | Ok result ->
+                     Ok (Large_response.wrap_text_with_warning ~prefix ~format ~node_count result)
                  | Error msg -> Error msg)
             | None -> Error (sprintf "Node not found: %s" node_id))
        | Error err -> Error err)
@@ -1983,6 +2048,8 @@ let handle_get_node_with_image args : (Yojson.Safe.t, string) result =
            (match node_data with
             | Some node ->
                 let node_str = Yojson.Safe.to_string node in
+                let node_count = Large_response.count_nodes_json node in
+                let prefix = Printf.sprintf "node_%s" (sanitize_node_id node_id) in
                 (match process_json_string ~format node_str with
                  | Ok dsl ->
                      (match Figma_effects.Perform.get_images
@@ -2019,7 +2086,7 @@ let handle_get_node_with_image args : (Yojson.Safe.t, string) result =
                               sprintf "DSL:\n%s\n\nImage (%s, scale %.2f):\n%s\n%s"
                                 dsl image_format scale image_url download_info
                           in
-                          Ok (make_text_content result)
+                          Ok (Large_response.wrap_text_with_warning ~prefix ~format ~node_count result)
                       | Error err -> Error err)
                  | Error msg -> Error msg)
             | None -> Error (sprintf "Node not found: %s" node_id))
@@ -2791,7 +2858,14 @@ let handle_get_node_chunk args : (Yojson.Safe.t, string) result =
              let filtered = filter_by_depth 0 node_data in
 
              let result =
-               let _ = include_styles in (* TODO: 스타일 추출 기능 추가 *)
+               let styles =
+                 if include_styles then
+                   match Figma_effects.Perform.get_file_styles ~token ~file_key with
+                   | Ok json -> json
+                   | Error err -> `Assoc [("error", `String err)]
+                 else
+                   `Null
+               in
                let filtered_str = Yojson.Safe.to_string filtered in
                match process_json_string ~format filtered_str with
                | Ok dsl ->
@@ -2800,12 +2874,14 @@ let handle_get_node_chunk args : (Yojson.Safe.t, string) result =
                      ("text", `String dsl);
                      ("depth_range", `String (Printf.sprintf "%d-%d" depth_start depth_end));
                      ("format", `String format);
+                     ("styles", styles);
                    ]
                | Error msg ->
                    `Assoc [
                      ("error", `String msg);
                      ("node", filtered);
                      ("depth_range", `String (Printf.sprintf "%d-%d" depth_start depth_end));
+                     ("styles", styles);
                    ]
              in
 
@@ -5396,6 +5472,115 @@ let resolve_llm_task_preset name =
   | _ -> None
 
 
+let handle_chunk_index args : (Yojson.Safe.t, string) result =
+  let (file_key, node_id) = resolve_file_key_node_id args in
+  let token = resolve_token args in
+  let chunk_size = get_int "chunk_size" args |> Option.value ~default:60 in
+  let depth = get_int "depth" args |> Option.value ~default:2 in
+  let selection_mode = get_string_or "selection_mode" "none" args |> String.lowercase_ascii in
+  let selection_limit = get_int "selection_limit" args |> Option.value ~default:4 in
+  let selection_task = get_string "selection_task" args in
+  let selection_llm_tool = get_string_or "selection_llm_tool" "codex" args in
+  let selection_llm_args = get_json "selection_llm_args" args in
+  let selection_provider = get_string "selection_provider" args in
+  let selection_mcp_url = get_string "selection_mcp_url" args in
+  let sample_size = get_int "sample_size" args |> Option.value ~default:6 in
+  let version = get_string "version" args in
+
+  let llm_select_chunks ~entries ~chunk_total =
+    match Llm_provider_eio.resolve ?provider:selection_provider () with
+    | Error msg -> Error msg
+    | Ok provider ->
+        let url = Option.value ~default:provider.default_url selection_mcp_url in
+        let entries_json = `List (List.map chunk_entry_to_json entries) in
+        let task =
+          match selection_task with
+          | Some t when String.trim t <> "" -> t
+          | _ -> "Select the most relevant chunks for accurate UI reconstruction."
+        in
+        let prompt = Printf.sprintf
+          "You are selecting Figma chunks.\nTask: %s\nReturn ONLY a JSON array of integers between 1 and %d.\nChunk entries JSON:\n%s"
+          task chunk_total (Yojson.Safe.pretty_to_string entries_json)
+        in
+        let arguments =
+          match selection_llm_args with
+          | Some (`Assoc fields) ->
+              `Assoc (add_if_missing "prompt" (`String prompt) fields)
+          | _ ->
+              `Assoc [("prompt", `String prompt)]
+        in
+        (match call_llm_tool_eio ~provider ~url ~name:selection_llm_tool ~arguments with
+         | Error err -> Error err
+         | Ok resp ->
+             let selected = parse_chunk_indices ~chunk_total resp.text in
+             Ok selected)
+  in
+
+  match (file_key, node_id, token) with
+  | (Some file_key, Some node_id, Some token) ->
+      let node_id = Figma_api.normalize_node_id node_id in
+      (match Figma_effects.Perform.get_nodes ~token ~file_key ~node_ids:[node_id] ~depth ?version () with
+       | Error err -> Error (Printf.sprintf "Figma API error: %s" err)
+       | Ok nodes_json ->
+           let open Yojson.Safe.Util in
+           let nodes = nodes_json |> member "nodes" in
+           let node_entry = nodes |> member node_id in
+           (match node_entry with
+            | `Null -> Error (Printf.sprintf "Node %s not found in file %s" node_id file_key)
+            | _ ->
+                let node_data = node_entry |> member "document" in
+                (match node_data with
+                 | `Null -> Error (Printf.sprintf "Document not found for node %s" node_id)
+                 | _ ->
+                     let (chunked_json, entries) =
+                       build_chunk_entries ~chunk_size ~sample_size node_data
+                     in
+                     let chunk_total = List.length entries in
+                     let selected =
+                       if chunk_total = 0 then Ok []
+                       else
+                         match selection_mode with
+                         | "none" -> Ok []
+                         | "heuristic" -> Ok (select_chunks_heuristic entries selection_limit)
+                         | "llm" -> llm_select_chunks ~entries ~chunk_total
+                         | _ -> Ok []
+                     in
+                     (match selected with
+                      | Error msg -> Error msg
+                      | Ok selected ->
+                          let selected_json = `List (List.map (fun i -> `Int i) selected) in
+                          let selection_info = `Assoc [
+                            ("mode", `String selection_mode);
+                            ("selected", selected_json);
+                            ("selected_count", `Int (List.length selected));
+                            ("selection_limit", `Int selection_limit);
+                          ] in
+                          let payload =
+                            `Assoc [
+                              ("status", `String "chunk_index");
+                              ("file_key", `String file_key);
+                              ("node_id", `String node_id);
+                              ("chunk_size", `Int chunk_size);
+                              ("chunk_total", `Int chunk_total);
+                              ("selection", selection_info);
+                              ("chunked", chunked_json);
+                              ("entries", `List (List.map chunk_entry_to_json entries));
+                            ]
+                          in
+                          let payload_str = Yojson.Safe.pretty_to_string payload in
+                          let prefix = Printf.sprintf "chunk_index_%s" (sanitize_node_id node_id) in
+                          let file_path = Large_response.save_to_file ~prefix payload_str in
+                          let result = `Assoc [
+                            ("status", `String "chunk_index");
+                            ("file_path", `String file_path);
+                            ("chunk_total", `Int chunk_total);
+                            ("selected", selected_json);
+                            ("selection_mode", `String selection_mode);
+                          ] in
+                          Ok result))))
+  | _ -> Error "Missing required parameters: file_key/node_id or url, token"
+
+
 let handle_chunk_get args : (Yojson.Safe.t, string) result =
   let file_path = get_string "file_path" args in
   let chunk_index = get_int "chunk_index" args in
@@ -5995,9 +6180,22 @@ let handle_cache_invalidate args : (Yojson.Safe.t, string) result =
 (** 동기 래퍼 - Pure Eio Effect 핸들러로 감싸서 실행 *)
 let wrap_sync_pure (f : Yojson.Safe.t -> (Yojson.Safe.t, string) result) : tool_handler_sync =
   fun args ->
-    match !eio_switch, !eio_net, !eio_clock, !eio_client with
-    | Some sw, Some (Net net), Some (Clock clock), Some client ->
-        Figma_effects.run_with_pure_eio_api ~sw ~net ~clock ~client (fun () -> f args)
+    match !eio_net, !eio_clock, !eio_client with
+    | Some (Net net), Some (Clock clock), Some client ->
+        let same_domain =
+          match !eio_domain with
+          | Some d -> d = Domain.self ()
+          | None -> false
+        in
+        let run_with sw =
+          Figma_effects.run_with_pure_eio_api ~sw ~net ~clock ~client (fun () -> f args)
+        in
+        if same_domain then
+          match !eio_switch with
+          | Some sw -> run_with sw
+          | None -> Eio.Switch.run run_with
+        else
+          Eio.Switch.run run_with
     | _ ->
         Error "Eio context not set - server not properly initialized"
 
@@ -6124,6 +6322,7 @@ let all_handlers_sync : (string * tool_handler_sync) list = [
   ("figma_get_node_summary", wrap_sync_pure handle_get_node_summary);
   ("figma_select_nodes", wrap_sync_pure handle_select_nodes);
   ("figma_get_node_chunk", wrap_sync_pure handle_get_node_chunk);
+  ("figma_chunk_index", wrap_sync_pure handle_chunk_index);
   ("figma_chunk_get", wrap_sync_pure handle_chunk_get);
   ("figma_fidelity_loop", wrap_sync_pure handle_fidelity_loop);
   ("figma_image_similarity", wrap_sync_pure handle_image_similarity);

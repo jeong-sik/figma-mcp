@@ -184,6 +184,7 @@ figma_chunk_index
   selection_mode: "heuristic"
   selection_limit: 4
 ```
+Output includes `file_path` (stored under `/tmp/figma-mcp` by default).
 
 2) Chunk index (LLM selection, local 포함).
 ```

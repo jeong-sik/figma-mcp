@@ -232,12 +232,12 @@ let health_handler _request reqd =
   Response.json json reqd
 
 (** MCP POST handler - async body reading with callback-based response *)
-let run_mcp_request ~domain_mgr:_ server body_str =
-  (* Note: domain_mgr disabled to avoid "Switch accessed from wrong domain!" error
-     when Figma API handlers use the stored Eio context (switch/net/clock) from refs.
-     Eio domains don't share switches, so running requests in separate domains
-     breaks the stored context references. *)
-  process_mcp_request_sync server body_str
+let run_mcp_request ~domain_mgr server body_str =
+  match domain_mgr with
+  | None -> process_mcp_request_sync server body_str
+  | Some mgr ->
+      Eio.Domain_manager.run mgr (fun () ->
+        process_mcp_request_sync server body_str)
 
 let mcp_post_handler ~sw ~domain_mgr server request reqd =
   let { Httpun.Request.headers; target = request_target; _ } = request in

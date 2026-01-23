@@ -470,13 +470,40 @@ let apply_color_adjustment selector rgba html =
     (int_of_float (rgba.Figma_types.g *. 255.0))
     (int_of_float (rgba.Figma_types.b *. 255.0))
   in
+  let escape_regex s =
+    let buf = Buffer.create (String.length s * 2) in
+    String.iter (fun c ->
+      match c with
+      | '\\' | '.' | '+' | '*' | '?' | '[' | ']' | '^' | '$' | '(' | ')' | '{' | '}' | '|' ->
+          Buffer.add_char buf '\\';
+          Buffer.add_char buf c
+      | _ -> Buffer.add_char buf c
+    ) s;
+    Buffer.contents buf
+  in
+  let replace_color_in_rule rule =
+    let bg_re = Str.regexp "background-color:[ \t]*#[0-9a-fA-F]+" in
+    let fg_re = Str.regexp "color:[ \t]*#[0-9a-fA-F]+" in
+    try Str.replace_first bg_re (sprintf "background-color: %s" color_hex) rule
+    with Not_found ->
+      (try Str.replace_first fg_re (sprintf "color: %s" color_hex) rule
+       with Not_found -> rule)
+  in
   (* 간단 구현: selector가 없으면 첫 번째 color 속성 교체 *)
   if selector = "" then
     let re = Str.regexp "\\(background-\\)?color:[ \t]*#[0-9a-fA-F]+" in
     Str.replace_first re (sprintf "color: %s" color_hex) html
   else
-    (* TODO: 복잡한 selector 매칭 구현 *)
-    html
+    (* 제한적 구현: selector 블록 내 color 또는 background-color 교체 *)
+    let sel = escape_regex selector in
+    let rule_re = Str.regexp (sprintf "%s[^{]*{[^}]*}" sel) in
+    try
+      let _ = Str.search_forward rule_re html 0 in
+      let rule = Str.matched_string html in
+      let updated = replace_color_in_rule rule in
+      Str.replace_first rule_re updated html
+    with Not_found ->
+      html
 
 (** 단일 힌트를 HTML에 적용 *)
 let apply_single_hint hint html =
