@@ -6,6 +6,16 @@
 
 open Printf
 
+let string_contains s sub =
+  let len_s = String.length s in
+  let len_sub = String.length sub in
+  let rec loop i =
+    if i + len_sub > len_s then false
+    else if String.sub s i len_sub = sub then true
+    else loop (i + 1)
+  in
+  if len_sub = 0 then true else loop 0
+
 (** ============== Types ============== *)
 
 (** 타임아웃 예외 - 내부에서만 사용 *)
@@ -42,7 +52,12 @@ let get_http_error_recovery code body retry_after =
     }
   | 403 -> {
       message = "Access denied";
-      suggestion = "You don't have permission to access this file. Ask the owner to share it with you";
+      suggestion =
+        (let body_lower = String.lowercase_ascii body in
+         if string_contains body_lower "file_variables:read" || string_contains body_lower "invalid scope" then
+           "Token missing scope: file_variables:read. Create a token with this scope in Figma Settings > Personal Access Tokens."
+         else
+           "You don't have permission to access this file. Ask the owner to share it with you");
       retryable = false;
       retry_after = 0.0;
     }
@@ -145,16 +160,6 @@ let get_retry_delay = function
 let api_base = "https://api.figma.com/v1"
 let default_timeout = 30.0  (* seconds *)
 let max_body_size = 100 * 1024 * 1024  (* 100MB - Figma files can be very large *)
-
-let string_contains s sub =
-  let len_s = String.length s in
-  let len_sub = String.length sub in
-  let rec loop i =
-    if i + len_sub > len_s then false
-    else if String.sub s i len_sub = sub then true
-    else loop (i + 1)
-  in
-  if len_sub = 0 then true else loop 0
 
 let is_dns_failure exn =
   let msg = Printexc.to_string exn |> String.lowercase_ascii in
