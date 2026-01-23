@@ -151,17 +151,17 @@ figma_evolution_report
 ```
 
 ### node_id 형식 (중요)
-- Figma URL에서는 `node-id=2089-11127`(하이픈)처럼 보이지만, API는 `2089:11127`(콜론) 형식만 받습니다.
+- Figma URL에서는 `node-id=123-456`(하이픈)처럼 보이지만, API는 `123:456`(콜론) 형식만 받습니다.
 - MCP 도구(`figma_get_node`, `figma_get_node_with_image`)의 `node_id`는 콜론 형식이 권장입니다.
-- 변환 규칙: `2089-11127` -> `2089:11127`
+- 변환 규칙: `123-456` -> `123:456`
 - MCP 도구/gRPC는 하이픈 형식도 자동 정규화합니다.
 - 팁: `figma_parse_url`로 URL에서 `node_id`를 추출하면 바로 사용할 수 있습니다.
 
 예시:
 ```
 figma_get_node_with_image
-  file_key: "UIDrBAaJoKMjL2uhl2R8CE"
-  node_id: "2089:11127"
+  file_key: "FILE_KEY"
+  node_id: "123:456"
   format: "html"
   depth: 15
   download: true
@@ -178,8 +178,8 @@ figma_get_node_with_image
 예시:
 ```
 figma_fidelity_loop
-  file_key: "UIDrBAaJoKMjL2uhl2R8CE"
-  node_id: "2089:11127"
+  file_key: "FILE_KEY"
+  node_id: "123:456"
   target_score: 0.95
   include_variables: true
   include_image_fills: true
