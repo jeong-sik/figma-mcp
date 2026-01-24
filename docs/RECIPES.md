@@ -35,15 +35,16 @@ figma_parse_url
   url: "https://www.figma.com/file/KEY/NAME?node-id=123-456"
 ```
 
-2) Fetch a single node with image (low friction).
+2) Fetch a single node bundle (DSL + render + fills).
 ```
-figma_get_node_with_image
+figma_get_node_bundle
   file_key: "KEY"
   node_id: "123:456"
   token: "$FIGMA_TOKEN"
   format: "fidelity"
   image_format: "png"
   scale: 2
+  use_absolute_bounds: true
 ```
 
 If you get `status: large_result`, use the progressive recipes below.
@@ -148,28 +149,21 @@ figma_get_node_chunk
 ```
 
 3) Repeat for deeper ranges.
-   - If a node is very large, use `max_children` or `figma_chunk_index → figma_chunk_get` to target subtrees.
+   - If a node is very large, use `max_children`/`auto_trim_children` and then narrow with `figma_select_nodes`.
 
-### 3.0) Chunk Index → Chunk Get → Targeted Node
+### 3.0) Targeted Subtree (Select Nodes → Chunk)
 
-Use this when a large node has many children. It lets you pick specific chunks and drill down.
+Use when a large node has many children. Select candidate parents, then load a shallow chunk.
 ```
-figma_chunk_index
+figma_select_nodes
   file_key: "KEY"
   node_id: "123:456"
   token: "$FIGMA_TOKEN"
-  depth: 1
-  chunk_size: 50
-  selection_mode: "none"
+  summary_depth: 1
+  layout_only: true
+  score_threshold: 2.0
 ```
 
-```
-figma_chunk_get
-  file_path: "/tmp/figma-mcp/chunk_index_123_456_1700000000_1234.json"
-  chunk_index: 1
-```
-
-Then take a child `id` from the chunk and load a small range:
 ```
 figma_get_node_chunk
   file_key: "KEY"
@@ -207,40 +201,19 @@ Response extras:
 - `summary`: priority/tokens overview
 - `requirements_json`: node type counts + auto-layout/image fills + top-level names
 
-### 3.3) Chunk Index + Selection (heuristic/LLM)
+### 3.3) LLM-friendly Split (Chunk + Summary)
 
-청킹된 인덱스를 먼저 받고, 필요한 청크만 선별합니다.
-
-1) Chunk index (heuristic).
+Large files: keep LLM context small with shallow chunks + summaries.
 ```
-figma_chunk_index
-  url: "https://www.figma.com/design/...?...node-id=123-456"
+figma_get_node_chunk
+  file_key: "KEY"
+  node_id: "123:456"
   token: "$FIGMA_TOKEN"
-  chunk_size: 60
-  selection_mode: "heuristic"
-  selection_limit: 4
+  depth_start: 0
+  depth_end: 2
+  max_children: 60
 ```
-Output includes `file_path` (stored under `/tmp/figma-mcp` by default).
-
-2) Chunk index (LLM selection, local 포함).
-```
-figma_chunk_index
-  url: "https://www.figma.com/design/...?...node-id=123-456"
-  token: "$FIGMA_TOKEN"
-  chunk_size: 60
-  selection_mode: "llm"
-  selection_task: "Generate HTML/CSS matching the main layout."
-  selection_llm_tool: "ollama"
-  selection_llm_args:
-    model: "qwen3-coder:30b"
-```
-
-3) Fetch a specific chunk.
-```
-figma_chunk_get
-  file_path: "/tmp/figma-mcp/chunk_index_123_456_1700000000_1234.json"
-  chunk_index: 2
-```
+Then feed a summary (names/types/layout) to `figma_llm_task`.
 
 ## 4) Visual Verification Loop
 
@@ -254,12 +227,7 @@ figma_verify_visual
   max_iterations: 3
 ```
 
-2) Inspect the evolution report.
-```
-figma_evolution_report
-  run_dir: "/tmp/figma-evolution/run_1705123456789"
-  generate_image: true
-```
+2) Inspect the stored run directory under `/tmp/figma-evolution/run_*` if needed.
 
 ## 5) Design Tokens Export
 
@@ -424,14 +392,15 @@ grpcurl -plaintext -import-path proto -proto figma.proto \
   localhost:50052 figma.FigmaService/GetNodeStream
 ```
 
-3) Build chunk index for selective LLM context.
+3) Split with shallow chunks for LLM context.
 ```
-figma_chunk_index
+figma_get_node_chunk
   file_key: "KEY"
   node_id: "123:456"
   token: "$FIGMA_TOKEN"
-  chunk_size: 50
-  sample_size: 6
+  depth_start: 0
+  depth_end: 2
+  max_children: 60
 ```
 
 4) Run LLM task with preset + plugin summary (fast iteration).
@@ -558,10 +527,12 @@ figma_verify_visual
   target_ssim: 0.95
   html_screenshot: "/path/to/rendered.png"  # Chrome MCP로 렌더링
 
-# 3. 영역별 상세 비교
-figma_compare_regions
-  image1: "/path/to/figma.png"
-  image2: "/path/to/html.png"
+# 3. 영역별 상세 체크 (checkpoint)
+figma_verify_visual
+  file_key: "KEY"
+  node_id: "123:456"
+  html_screenshot: "/path/to/html.png"
+  checkpoints: "[{\"name\":\"header\",\"x\":0,\"y\":0,\"width\":375,\"height\":120}]"
 ```
 
 ### 핵심 원칙

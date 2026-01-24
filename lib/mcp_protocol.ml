@@ -300,7 +300,7 @@ chrome 도구 불가 시 `figma_verify_visual` 내장 Playwright 사용:
 
 **Chrome-First 워크플로우 예시**:
 ```
-1. figma_get_node_with_image → DSL + Figma 렌더 이미지 획득
+1. figma_get_node_bundle → DSL + Figma 렌더 이미지 획득
 2. HTML 코드 생성 → 임시 파일 저장
 3. [Chrome 가용 시]
    - claude-in-chrome navigate → screenshot
