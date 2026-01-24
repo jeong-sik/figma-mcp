@@ -8,6 +8,8 @@
 
 OCaml 5.x 네이티브 MCP 서버 - Figma 디자인을 정확도 우선 Fidelity DSL로 변환
 
+Note: This is a personal project.
+
 ## 특징
 
 - **MCP 2025-11-25 스펙 준수** - JSON-RPC 2.0 over stdio
