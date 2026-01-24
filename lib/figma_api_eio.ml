@@ -57,7 +57,7 @@ let get_http_error_recovery code body retry_after =
          if string_contains body_lower "file_variables:read" || string_contains body_lower "invalid scope" then
            "Token missing scope: file_variables:read. Create a token with this scope in Figma Settings > Personal Access Tokens."
          else
-           "You don't have permission to access this file. Ask the owner to share it with you");
+           "You don't have permission to access this file. Ask the owner to share it with you, or check if the endpoint requires OAuth (PAT not allowed).");
       retryable = false;
       retry_after = 0.0;
     }
@@ -331,7 +331,33 @@ let with_raw_pool (client : client) f =
   Mutex.lock client.raw_pool_lock;
   Fun.protect ~finally:(fun () -> Mutex.unlock client.raw_pool_lock) f
 
+let close_raw_conn conn =
+  try Eio.Flow.close conn.flow with _ -> ()
+
+let raw_pool_ttl = 30.0
+let raw_pool_max = 4
+
+let prune_raw_pool (client : client) =
+  let now = Unix.gettimeofday () in
+  let to_close = ref [] in
+  with_raw_pool client (fun () ->
+    let stale_keys = ref [] in
+    Hashtbl.iter (fun key conn ->
+      if now -. conn.last_used > raw_pool_ttl then
+        stale_keys := key :: !stale_keys
+    ) client.raw_pool;
+    List.iter (fun key ->
+      match Hashtbl.find_opt client.raw_pool key with
+      | Some conn ->
+          Hashtbl.remove client.raw_pool key;
+          to_close := conn :: !to_close
+      | None -> ()
+    ) !stale_keys
+  );
+  List.iter close_raw_conn !to_close
+
 let take_raw_conn (client : client) key =
+  prune_raw_pool client;
   with_raw_pool client (fun () ->
     match Hashtbl.find_opt client.raw_pool key with
     | None -> None
@@ -340,10 +366,18 @@ let take_raw_conn (client : client) key =
         Some conn)
 
 let return_raw_conn (client : client) key conn =
-  with_raw_pool client (fun () -> Hashtbl.replace client.raw_pool key conn)
-
-let close_raw_conn conn =
-  try Eio.Flow.close conn.flow with _ -> ()
+  prune_raw_pool client;
+  let stored =
+    with_raw_pool client (fun () ->
+      if Hashtbl.length client.raw_pool >= raw_pool_max then
+        false
+      else begin
+        conn.last_used <- Unix.gettimeofday ();
+        Hashtbl.replace client.raw_pool key conn;
+        true
+      end)
+  in
+  if not stored then close_raw_conn conn
 
 let read_headers br =
   let rec loop acc =
