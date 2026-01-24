@@ -101,7 +101,7 @@ let handle_response ~prefix ~format content : Yojson.Safe.t =
       ("size_human", `String (human_size size));
       ("format", `String format);
       ("ttl_seconds", `Int response_ttl);
-      ("hint", `String "Use read_file with offset/limit for chunks, or figma_get_node_summary for lightweight structure");
+      ("hint", `String "Use figma_read_large_result with offset/limit, or figma_get_node_summary for lightweight structure");
       ("examples", `Assoc [
         ("read_first_1000_chars", `String (sprintf "head -c 1000 %s" filepath));
         ("read_with_jq", `String (sprintf "jq '.children[:5]' %s" filepath));
@@ -124,7 +124,7 @@ let wrap_string_result ~prefix ~format (content : string) : Yojson.Safe.t =
   else begin
     let filepath = save_to_file ~prefix content in
     let message = sprintf
-      "Large result saved to %s (%s). Use read_file or chunked loading."
+      "Large result saved to %s (%s). Use figma_read_large_result or chunked loading."
       filepath (human_size size)
     in
     add_meta (text_content message) [
@@ -133,7 +133,7 @@ let wrap_string_result ~prefix ~format (content : string) : Yojson.Safe.t =
       ("size_bytes", `Int size);
       ("size_human", `String (human_size size));
       ("format", `String format);
-      ("hint", `String "Content saved to file. Use read_file or figma_get_node_chunk for progressive loading.");
+      ("hint", `String "Content saved to file. Use figma_read_large_result or figma_get_node_chunk for progressive loading.");
     ]
   end
 
@@ -303,7 +303,7 @@ let wrap_dsl_with_warning ~prefix ~format ~node_count (dsl : string) : Yojson.Sa
     (* 파일로 저장 *)
     let filepath = save_to_file ~prefix dsl in
     let message = sprintf
-      "Large DSL saved to %s (%s). Use chunked loading if needed."
+      "Large DSL saved to %s (%s). Use figma_read_large_result if needed."
       filepath (human_size size)
     in
     add_meta (text_content message) [
@@ -313,6 +313,35 @@ let wrap_dsl_with_warning ~prefix ~format ~node_count (dsl : string) : Yojson.Sa
       ("size_bytes", `Int size);
       ("size_human", `String (human_size size));
       ("format", `String format);
-      ("hint", `String "Content saved to file. Use chunked loading if too large for context.");
+      ("hint", `String "Content saved to file. Use figma_read_large_result if too large for context.");
+    ]
+  end
+
+(** 텍스트 결과를 분석하고 경고 포함하여 반환 *)
+let wrap_text_with_warning ~prefix ~format ~node_count (text : string) : Yojson.Safe.t =
+  let analysis = analyze_node_count node_count in
+  let size = String.length text in
+
+  if size <= max_inline_size then begin
+    if analysis.level = Info then
+      text_content text
+    else
+      add_meta (text_content text) [
+        ("_warning", analysis_to_json analysis);
+      ]
+  end else begin
+    let filepath = save_to_file ~prefix text in
+    let message = sprintf
+      "Large result saved to %s (%s). Use figma_read_large_result."
+      filepath (human_size size)
+    in
+    add_meta (text_content message) [
+      ("_warning", analysis_to_json analysis);
+      ("status", `String "large_result");
+      ("file_path", `String filepath);
+      ("size_bytes", `Int size);
+      ("size_human", `String (human_size size));
+      ("format", `String format);
+      ("hint", `String "Use figma_read_large_result to read chunks.");
     ]
   end

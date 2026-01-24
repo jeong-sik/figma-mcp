@@ -45,7 +45,7 @@ When fetching complex Figma nodes (e.g., entire pages with deep hierarchies), th
   "size_bytes": 7764220,
   "size_human": "7.4MB",
   "format": "fidelity",
-  "hint": "Use read_file with offset/limit to read chunks, or figma_get_node_chunk for structured access"
+  "hint": "Use figma_read_large_result with offset/limit to read chunks, or figma_get_node_chunk for structured access"
 }
 ```
 

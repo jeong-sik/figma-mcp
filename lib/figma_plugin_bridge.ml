@@ -139,7 +139,7 @@ let take_result ~channel_id ~command_id =
             Hashtbl.remove session.results command_id;
             Some result)
 
-let wait_for_result ~channel_id ~command_id ~timeout_ms =
+let wait_for_result_with_sleep ~sleep ~channel_id ~command_id ~timeout_ms =
   let start_time = now () in
   let timeout_sec = float_of_int timeout_ms /. 1000.0 in
   
@@ -156,11 +156,18 @@ let wait_for_result ~channel_id ~command_id ~timeout_ms =
           let sleep_time = min backoff remaining in
           if sleep_time <= 0.0 then None
           else begin
-            Unix.sleepf sleep_time;
+            sleep sleep_time;
             poll (attempt + 1)
           end
   in
   poll 0
+
+let wait_for_result ~channel_id ~command_id ~timeout_ms =
+  wait_for_result_with_sleep
+    ~sleep:Unix.sleepf
+    ~channel_id
+    ~command_id
+    ~timeout_ms
 
 let cleanup_inactive ~ttl_seconds =
   with_lock (fun () ->

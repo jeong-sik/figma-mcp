@@ -184,6 +184,21 @@ let parse_text_align_v = function
   | "BOTTOM" -> Bottom
   | _ -> Top
 
+let parse_text_decoration = function
+  | "UNDERLINE" -> Underline
+  | "STRIKETHROUGH" -> Strikethrough
+  | "NONE" -> NoDeco
+  | _ -> NoDeco
+
+let parse_text_case = function
+  | "UPPER" -> Upper
+  | "LOWER" -> Lower
+  | "TITLE" -> Title
+  | "SMALL_CAPS" -> SmallCaps
+  | "SMALL_CAPS_FORCED" -> SmallCapsForced
+  | "ORIGINAL" -> Original
+  | _ -> Original
+
 let parse_typography json =
   get_assoc json "style" >>= fun s ->
   Some {
@@ -195,8 +210,8 @@ let parse_typography json =
     letter_spacing = get_float s "letterSpacing";
     text_align_h = get_string s "textAlignHorizontal" |> Option.map parse_text_align_h |? Left;
     text_align_v = get_string s "textAlignVertical" |> Option.map parse_text_align_v |? Top;
-    text_decoration = NoDeco;  (* TODO: parse *)
-    text_case = Original;      (* TODO: parse *)
+    text_decoration = get_string s "textDecoration" |> Option.map parse_text_decoration |? NoDeco;
+    text_case = get_string s "textCase" |> Option.map parse_text_case |? Original;
   }
 
 (** ============== 메인 노드 파싱 ============== *)

@@ -36,7 +36,7 @@ let set_grpc_eio_context ~sw ~net ~clock ~client =
 
 (** Convert Eio API error to Figma_api.api_error for handler compatibility *)
 let eio_error_to_figma_error = function
-  | Figma_api_eio.Http_error (code, msg) ->
+  | Figma_api_eio.Http_error (code, msg, _) ->
       if code = 401 || code = 403 then Figma_api.AuthError msg
       else if code = 404 then Figma_api.NotFound msg
       else if code = 429 then Figma_api.RateLimited

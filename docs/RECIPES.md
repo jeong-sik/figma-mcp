@@ -140,9 +140,45 @@ figma_get_node_chunk
   token: "$FIGMA_TOKEN"
   depth_start: 0
   depth_end: 2
+  max_children: 50  # optional: trim children to avoid slow/huge nodes
+  auto_trim_children: true
+  auto_trim_limit: 200
+  error_on_large: false
+  warn_threshold: 500
 ```
 
 3) Repeat for deeper ranges.
+   - If a node is very large, use `max_children` or `figma_chunk_index → figma_chunk_get` to target subtrees.
+
+### 3.0) Chunk Index → Chunk Get → Targeted Node
+
+Use this when a large node has many children. It lets you pick specific chunks and drill down.
+```
+figma_chunk_index
+  file_key: "KEY"
+  node_id: "123:456"
+  token: "$FIGMA_TOKEN"
+  depth: 1
+  chunk_size: 50
+  selection_mode: "none"
+```
+
+```
+figma_chunk_get
+  file_path: "/tmp/figma-mcp/chunk_index_123_456_1700000000_1234.json"
+  chunk_index: 1
+```
+
+Then take a child `id` from the chunk and load a small range:
+```
+figma_get_node_chunk
+  file_key: "KEY"
+  node_id: "123:789"
+  token: "$FIGMA_TOKEN"
+  depth_start: 0
+  depth_end: 1
+  max_children: 30
+```
 
 ### 3.1) gRPC Recursive Stream (Full Subtree)
 
@@ -184,6 +220,7 @@ figma_chunk_index
   selection_mode: "heuristic"
   selection_limit: 4
 ```
+Output includes `file_path` (stored under `/tmp/figma-mcp` by default).
 
 2) Chunk index (LLM selection, local 포함).
 ```

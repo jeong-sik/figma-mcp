@@ -47,7 +47,7 @@ echo '{"jsonrpc":"2.0","id":5,"method":"prompts/get","params":{"name":"figma_fid
 
 - `docs/RECIPES.md` - end-to-end usage patterns (quickstart, high fidelity, large nodes)
 
-## 도구 목록 (52개)
+## 도구 목록 (60개)
 
 ### Phase 1: Core
 | Tool | 설명 | 테스트 |
@@ -211,7 +211,7 @@ Figma MCP 결과를 정량화된 리포트로 저장합니다.
 | `figma_get_me` | 현재 인증된 사용자 정보 | ✅ |
 | `figma_list_projects` | 팀의 프로젝트 목록 | ✅ |
 | `figma_list_files` | 프로젝트의 파일 목록 | ✅ |
-| `figma_get_variables` | 디자인 토큰/변수 조회 | ❌ Enterprise 권한 필요 |
+| `figma_get_variables` | 디자인 토큰/변수 조회 | ❌ Enterprise 또는 `file_variables:read` 스코프 필요 |
 
 ### Phase 3: Analysis & Comparison
 | Tool | 설명 | 테스트 |
@@ -233,7 +233,7 @@ Figma MCP 결과를 정량화된 리포트로 저장합니다.
 
 ### 테스트 현황 (2026-01-14)
 - **성공**: 15/16 도구 (Core 기준)
-- **제한**: `figma_get_variables` - Figma Variables API는 Enterprise 플랜 또는 추가 OAuth 스코프 필요
+- **제한**: `figma_get_variables` - Figma Variables API는 Enterprise 플랜 또는 `file_variables:read` OAuth 스코프 필요
 - **신규 도구**: REST Parity/Plugin Bridge는 샘플 파일 기준 추가 검증 예정
 
 ## 설치

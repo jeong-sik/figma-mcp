@@ -684,6 +684,17 @@ let typography_to_css typo =
    | Right -> parts := "text-align:right" :: !parts
    | Justified -> parts := "text-align:justify" :: !parts
    | Left -> ());
+  (match typo.text_decoration with
+   | Underline -> parts := "text-decoration:underline" :: !parts
+   | Strikethrough -> parts := "text-decoration:line-through" :: !parts
+   | NoDeco -> ());
+  (match typo.text_case with
+   | Upper -> parts := "text-transform:uppercase" :: !parts
+   | Lower -> parts := "text-transform:lowercase" :: !parts
+   | Title -> parts := "text-transform:capitalize" :: !parts
+   | SmallCaps -> parts := "font-variant:small-caps" :: !parts
+   | SmallCapsForced -> parts := "font-variant:all-small-caps" :: !parts
+   | Original -> ());
   String.concat ";" (List.rev !parts)
 
 (** HTML 생성 - precise=true 시 rgb() 포맷 + 정확한 typography 사용 *)
