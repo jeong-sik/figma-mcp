@@ -47,7 +47,7 @@ echo '{"jsonrpc":"2.0","id":5,"method":"prompts/get","params":{"name":"figma_fid
 
 - `docs/RECIPES.md` - end-to-end usage patterns (quickstart, high fidelity, large nodes)
 
-## 도구 목록 (60개)
+## 도구 목록 (53개)
 
 ### Phase 1: Core
 | Tool | 설명 | 테스트 |
@@ -57,13 +57,10 @@ echo '{"jsonrpc":"2.0","id":5,"method":"prompts/get","params":{"name":"figma_fid
 | `figma_get_file_meta` | 파일 메타(components/componentSets/styles) 반환 | ✅ |
 | `figma_list_screens` | 파일 내 화면(Frame/Component) 목록 | ✅ |
 | `figma_get_node` | 특정 노드 ID만 가져와 DSL 변환 | ✅ |
-| `figma_get_node_with_image` | 노드 DSL + 이미지 URL 동시 반환 | ✅ |
 | `figma_get_node_bundle` | 정확도 극대화 번들(DSL+렌더+메타+변수+fills) | ✅ |
 | `figma_get_node_summary` | 경량 구조 요약 | ✅ |
 | `figma_select_nodes` | 후보 노드 점수화/선별 + 노트 텍스트 분리 | ✅ |
 | `figma_get_node_chunk` | 깊이 범위별 노드 청크 로드 | ✅ |
-| `figma_chunk_index` | DSL 청킹 인덱스/요약/선택 | ✅ |
-| `figma_chunk_get` | 청크 인덱스 기반 데이터 조회 | ✅ |
 | `figma_fidelity_loop` | fidelity 점수 미달 시 depth/geometry 자동 상향 | ✅ |
 | `figma_image_similarity` | 렌더 이미지 SSIM/PSNR 비교 | ✅ |
 | `figma_export_image` | 노드를 PNG/JPG/SVG/PDF URL로 내보내기 | ✅ |
@@ -96,7 +93,6 @@ echo '{"jsonrpc":"2.0","id":5,"method":"prompts/get","params":{"name":"figma_fid
 | Tool | 설명 | 테스트 |
 |------|------|--------|
 | `figma_verify_visual` | HTML 생성 + Playwright 렌더 + SSIM 비교 → 자동 조정 | ✅ |
-| `figma_evolution_report` | 진화 과정 리포트 조회 (SSIM 변화 추적) | ✅ |
 
 #### Evolution Tracking (진화 추적)
 
@@ -113,18 +109,6 @@ echo '{"jsonrpc":"2.0","id":5,"method":"prompts/get","params":{"name":"figma_fid
 │   ├── step2.html           # 2차 시도 HTML
 │   └── final.html           # 최종 HTML
 └── evolution.json           # 메타데이터
-```
-
-#### 진화 리포트 조회
-
-```bash
-# 최근 실행 목록
-figma_evolution_report
-
-# 특정 실행의 상세 리포트 (비교 이미지 자동 생성)
-figma_evolution_report
-  run_dir: "/tmp/figma-evolution/run_1705123456789"
-  generate_image: true
 ```
 
 #### 핵심 인사이트: Flat HTML > Nested HTML
@@ -152,14 +136,14 @@ figma_evolution_report
 
 ### node_id 형식 (중요)
 - Figma URL에서는 `node-id=2089-11127`(하이픈)처럼 보이지만, API는 `2089:11127`(콜론) 형식만 받습니다.
-- MCP 도구(`figma_get_node`, `figma_get_node_with_image`)의 `node_id`는 콜론 형식이 권장입니다.
+- MCP 도구(`figma_get_node`, `figma_get_node_bundle`)의 `node_id`는 콜론 형식이 권장입니다.
 - 변환 규칙: `2089-11127` -> `2089:11127`
 - MCP 도구/gRPC는 하이픈 형식도 자동 정규화합니다.
 - 팁: `figma_parse_url`로 URL에서 `node_id`를 추출하면 바로 사용할 수 있습니다.
 
 예시:
 ```
-figma_get_node_with_image
+figma_get_node_bundle
   file_key: "YOUR_FIGMA_FILE_KEY"
   node_id: "2089:11127"
   format: "html"
@@ -567,7 +551,7 @@ PlanTasks 응답 추가 필드:
 ```
 
 ### 이미지 다운로드 옵션
-`figma_export_image`, `figma_get_node_with_image`에서 `download: true`와 `save_dir` 지정 가능.
+`figma_export_image`, `figma_get_node_bundle`에서 `download: true`와 `save_dir` 지정 가능.
 기본 저장 경로는 `$ME_ROOT/download/figma-assets` 입니다. (`ME_ROOT` 미설정 시 `$HOME/me/download/figma-assets`, 없으면 `/tmp/figma-assets`)
 
 ## 테스트

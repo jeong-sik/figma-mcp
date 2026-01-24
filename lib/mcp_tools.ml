@@ -935,20 +935,13 @@ let all_tools = [
   tool_figma_get_file_meta;
   tool_figma_list_screens;
   tool_figma_get_node;
-  tool_figma_get_node_with_image;
   tool_figma_get_node_bundle;
   tool_figma_get_node_summary;
   tool_figma_select_nodes;
   tool_figma_get_node_chunk;
-  tool_figma_chunk_index;
-  tool_figma_chunk_get;
   tool_figma_fidelity_loop;
   tool_figma_image_similarity;
   tool_figma_verify_visual;
-  tool_figma_pixel_perfect_loop;
-  tool_figma_compare_regions;
-  tool_figma_evolution_report;
-  tool_figma_compare_elements;
   tool_figma_export_image;
   tool_figma_export_smart;
   tool_figma_get_image_fills;
@@ -2849,7 +2842,7 @@ let handle_get_node_chunk args : (Yojson.Safe.t, string) result =
              let large_error =
                if error_on_large && is_large then
                  Some (Printf.sprintf
-                   "Large node %s: %d children at root (warn_threshold=%d). Set max_children/auto_trim_children or use figma_chunk_index + figma_chunk_get."
+                   "Large node %s: %d children at root (warn_threshold=%d). Set max_children/auto_trim_children or use figma_get_node_chunk + figma_read_large_result."
                    node_id root_children_count warn_threshold)
                else
                  None
@@ -2861,7 +2854,7 @@ let handle_get_node_chunk args : (Yojson.Safe.t, string) result =
              (match warn_large, root_children_count, effective_max_children with
               | true, count, None when count > warn_threshold ->
                   add_warning (Printf.sprintf
-                    "Large node %s: %d children at root (warn_threshold=%d). Consider max_children/auto_trim_children or figma_chunk_index + figma_chunk_get."
+                    "Large node %s: %d children at root (warn_threshold=%d). Consider max_children/auto_trim_children or figma_get_node_chunk + figma_read_large_result."
                     node_id count warn_threshold)
               | _ -> ());
 
@@ -6404,20 +6397,13 @@ let all_handlers_sync : (string * tool_handler_sync) list = [
   ("figma_get_file_meta", wrap_sync_pure handle_get_file_meta);
   ("figma_list_screens", wrap_sync_pure handle_list_screens);
   ("figma_get_node", wrap_sync_pure handle_get_node);
-  ("figma_get_node_with_image", wrap_sync_pure handle_get_node_with_image);
   ("figma_get_node_bundle", wrap_sync_pure handle_get_node_bundle);
   ("figma_get_node_summary", wrap_sync_pure handle_get_node_summary);
   ("figma_select_nodes", wrap_sync_pure handle_select_nodes);
   ("figma_get_node_chunk", wrap_sync_pure handle_get_node_chunk);
-  ("figma_chunk_index", wrap_sync_pure handle_chunk_index);
-  ("figma_chunk_get", wrap_sync_pure handle_chunk_get);
   ("figma_fidelity_loop", wrap_sync_pure handle_fidelity_loop);
   ("figma_image_similarity", wrap_sync_pure handle_image_similarity);
   ("figma_verify_visual", wrap_sync_pure handle_verify_visual);
-  ("figma_pixel_perfect_loop", wrap_sync_pure handle_pixel_perfect_loop);
-  ("figma_compare_regions", wrap_sync_pure handle_compare_regions);
-  ("figma_evolution_report", wrap_sync_pure handle_evolution_report);
-  ("figma_compare_elements", wrap_sync_pure handle_compare_elements);
   ("figma_export_image", wrap_sync_pure handle_export_image);
   ("figma_export_smart", wrap_sync_pure handle_export_smart);
   ("figma_get_image_fills", wrap_sync_pure handle_get_image_fills);
@@ -6511,7 +6497,7 @@ let prompts : mcp_prompt list = [
 3) 이미지가 있는 경우 image_fills 누락 확인 (필요 시 include_image_fills=true)
 4) variables_resolved 누락 시 include_variables=true 제안
 5) 텍스트 세그먼트/라인 이슈 시 include_plugin=true 제안
-6) 렌더 정확도 이슈 시 figma_get_node_with_image + use_absolute_bounds=true 제안
+6) 렌더 정확도 이슈 시 figma_get_node_bundle + use_absolute_bounds=true 제안
 7) 변수 API 오류 시 include_plugin_variables=true 제안
 8) 플러그인 렌더가 필요하면 include_plugin_image=true 제안
 9) 벡터/패스 누락이면 geometry=paths + depth 상향 제안
@@ -6523,85 +6509,6 @@ let prompts : mcp_prompt list = [
 출력:
 - 누락/의심 항목 요약
 - 필요한 재호출 파라미터 제안
-|};
-  };
-  (* 🆕 Few-shot 예제 포함 DNA 분석 프롬프트 *)
-  {
-    name = "figma_pixel_perfect_guide";
-    description = "🧬 Pixel-Perfect DNA 분석 가이드 - Few-shot 예제 포함";
-    arguments = [
-      { name = "file_key"; description = "Figma 파일 키 (필수)"; required = true };
-      { name = "node_id"; description = "분석할 노드 ID (필수)"; required = true };
-      { name = "scale"; description = "이미지 스케일 (@1x=1.0, @2x=2.0)"; required = false };
-    ];
-    text = {|
-# 🧬 Figma DNA 분석 - Pixel-Perfect 가이드
-
-## 입력 파라미터
-- file_key: {{file_key}}
-- node_id: {{node_id}}
-- scale: {{scale}} (기본값: 1.0)
-
-## Few-shot 예제
-
-### 예제 1: 기본 분석
-```json
-{
-  "file_key": "abc123XYZ",
-  "node_id": "2089:11127",
-  "target_ssim": 0.95
-}
-```
-→ SSIM 95% 기준으로 Figma 노드와 구현 비교
-
-### 예제 2: 고해상도 레티나 분석
-```json
-{
-  "file_key": "abc123XYZ",
-  "node_id": "2089:11127",
-  "scale": 2.0,
-  "target_ssim": 0.99
-}
-```
-→ @2x 스케일로 99% 정밀도 분석
-
-### 예제 3: HTML 코드 직접 전달
-```json
-{
-  "file_key": "abc123XYZ",
-  "node_id": "2089:11127",
-  "html": "<div style='width:375px;height:200px;background:#1F8CF8'>...</div>"
-}
-```
-→ 제공된 HTML과 Figma 노드 비교
-
-## 응답 해석 가이드
-
-### regions._worst 분석법
-| 영역 | 의미 | 해결책 |
-|------|------|--------|
-| edges.top | 상단 padding/margin 불일치 | padding-top 조정 |
-| edges.left | 좌측 정렬 문제 | padding-left 또는 justify 확인 |
-| quadrants.topLeft | 좌상단 레이아웃 오류 | flex 정렬 확인 |
-| strips.middle | 본문 영역 스타일 차이 | 중앙 컨텐츠 CSS 확인 |
-
-### convergence 전략
-- `fine-tuning`: 1-2% 미세 조정
-- `targeted-fixes`: 특정 영역 집중 수정
-- `major-revision`: 레이아웃 재검토 필요
-
-## Progress 알림 (SSE)
-1. 🧬 Starting DNA analysis...
-2. 📥 Figma image downloaded
-3. 🖼️ Rendering HTML to PNG...
-4. 🔬 Comparing images with SSIM...
-5. 📊 Analyzing CSS corrections...
-→ ✅ DNA analysis complete! SSIM: XX.X%
-
-## 다음 도구 체이닝
-- SSIM < 90%: `figma_get_node`로 구조 재확인
-- regions 문제: `figma_compare_regions`로 상세 분석
-- 색상 차이: `figma_export_tokens`로 디자인 토큰 추출
 |};
   };
 ]
@@ -6638,7 +6545,7 @@ let read_resource uri =
 
 ## node_id format
 - Figma URL shows `node-id=2089-11127` (hyphen), but API expects `2089:11127` (colon)
-- MCP tools recommend colon format: `figma_get_node`, `figma_get_node_with_image`
+- MCP tools recommend colon format: `figma_get_node`, `figma_get_node_bundle`
 - Convert: `2089-11127` -> `2089:11127`
 - MCP tools normalize hyphen format automatically (URL format accepted)
 |} in
@@ -6656,7 +6563,7 @@ let read_resource uri =
 ## Accuracy-first loop (suggested order)
 1) `figma_fidelity_loop` with `include_variables=true`, `include_image_fills=true`, `include_plugin=true`
 2) If still low: increase `max_depth` / `depth_step` and ensure `geometry=paths`
-3) Validate pixels with `figma_get_node_with_image` + `use_absolute_bounds=true`
+3) Fetch render with `figma_get_node_bundle` + `use_absolute_bounds=true`
 4) Compare renders via `figma_image_similarity`
 
 ## Full-axes options
@@ -6664,7 +6571,7 @@ let read_resource uri =
 - `figma_get_node_bundle` + `include_plugin=true` for text segments/line bounds
 - `include_plugin_variables=true` for Variables API fallback (Enterprise-free)
 - `include_plugin_image=true` for plugin-rendered base64 images (large output)
-- Pair DSL with images via `figma_get_node_with_image` (use_absolute_bounds=true)
+- Pair DSL with images via `figma_get_node_bundle` (use_absolute_bounds=true)
 - For plugin snapshots:
   - `figma_plugin_connect` → copy channel ID
   - `figma_plugin_use_channel` or pass `plugin_channel_id`
@@ -6680,7 +6587,7 @@ let read_resource uri =
 
 ## node_id format
 - Figma URL shows `node-id=2089-11127` (hyphen), but API expects `2089:11127` (colon)
-- MCP tools recommend colon format: `figma_get_node`, `figma_get_node_with_image`
+- MCP tools recommend colon format: `figma_get_node`, `figma_get_node_bundle`
 - Convert: `2089-11127` -> `2089:11127`
 - MCP tools normalize hyphen format automatically (URL format accepted)
 - Tip: `figma_parse_url` returns a ready-to-use `node_id`
@@ -6698,7 +6605,7 @@ let read_resource uri =
 - `grpcurl` 사용 시 reflection이 비활성화되어 있으므로 `-import-path proto -proto figma.proto` 옵션 필요
 
 ## Pixel accuracy
-- Pair DSL with images via `figma_get_node_with_image`
+- Pair DSL with images via `figma_get_node_bundle`
 - Use `use_absolute_bounds=true` to include effects in render bounds
 |} in
       Ok ("text/markdown", body)
