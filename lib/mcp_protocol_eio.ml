@@ -651,6 +651,16 @@ let run ~sw ~net ~clock ~domain_mgr config server =
   eprintf "             POST /mcp -> JSON-RPC requests\n";
   eprintf "   Graceful shutdown: SIGTERM/SIGINT supported\n%!";
 
+  (* Periodic cleanup fiber for idle plugin channels - prevents memory leaks *)
+  Eio.Fiber.fork ~sw (fun () ->
+    let rec cleanup_loop () =
+      Eio.Time.sleep clock 60.0; (* Clean up every 1 minute *)
+      Figma_plugin_bridge.cleanup_inactive ~ttl_seconds:300.0; (* 5 min TTL *)
+      cleanup_loop ()
+    in
+    cleanup_loop ()
+  );
+
   let rec accept_loop () =
     let flow, client_addr = Eio.Net.accept ~sw first_socket in
     Eio.Fiber.fork ~sw (fun () ->
