@@ -1676,16 +1676,7 @@ let fidelity_score_of_bundle ~dsl_json ~variables ~image_fills ~plugin_snapshot 
   in
   fidelity_score_with_overrides dsl_json overrides
 
-let default_asset_dir () =
-  match Sys.getenv_opt "FIGMA_MCP_ASSET_DIR" with
-  | Some dir -> dir
-  | None ->
-      (match Sys.getenv_opt "ME_ROOT" with
-       | Some root -> root ^ "/download/figma-assets"
-       | None ->
-           (match Sys.getenv_opt "HOME" with
-            | Some home -> home ^ "/me/download/figma-assets"
-            | None -> "/tmp/figma-assets"))
+let default_asset_dir () = Figma_config.Asset.dir
 
 let default_compare_dir () =
   default_asset_dir () ^ "/compare"

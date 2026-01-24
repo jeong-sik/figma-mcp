@@ -345,13 +345,9 @@ let mcp_sse_handler ~clock _request reqd =
 
 (** ============== Plugin Bridge Handlers ============== *)
 
-let plugin_ttl_seconds =
-  try float_of_int (int_of_string (Sys.getenv "FIGMA_PLUGIN_TTL"))
-  with Not_found -> 1800.0
-
-let plugin_poll_max_ms =
-  try int_of_string (Sys.getenv "FIGMA_PLUGIN_POLL_MAX_MS")
-  with Not_found -> 30000
+(* Plugin configuration from centralized Figma_config *)
+let plugin_ttl_seconds = Figma_config.Plugin.ttl_seconds
+let plugin_poll_max_ms = Figma_config.Plugin.poll_max_ms
 
 let plugin_cleanup () =
   Figma_plugin_bridge.cleanup_inactive ~ttl_seconds:plugin_ttl_seconds

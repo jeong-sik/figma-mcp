@@ -10,23 +10,22 @@
 
 open Printf
 
-(** ============== 설정 ============== *)
+(** ============== 설정 (Figma_config에서 가져옴) ============== *)
 
-let temp_dir =
-  try Sys.getenv "FIGMA_VISUAL_TEMP_DIR"
-  with Not_found -> "/tmp/figma-visual"
+let temp_dir = Figma_config.Visual.temp_dir
 
 let render_script_path =
-  try Sys.getenv "FIGMA_RENDER_SCRIPT"
-  with Not_found ->
-    (* 상대 경로로 scripts/render-html.js 찾기 *)
-    let candidates = [
-      Filename.concat (Sys.getcwd ()) "scripts/render-html.js";
-      Filename.concat (Filename.dirname Sys.executable_name) "../scripts/render-html.js";
-      "/Users/dancer/me/.worktrees/figma-mcp-streaming/features/figma-mcp/scripts/render-html.js";
-    ] in
-    List.find_opt Sys.file_exists candidates
-    |> Option.value ~default:"scripts/render-html.js"
+  match Figma_config.Visual.render_script with
+  | Some path -> path
+  | None ->
+      (* 상대 경로로 scripts/render-html.js 찾기 *)
+      let candidates = [
+        Filename.concat (Sys.getcwd ()) "scripts/render-html.js";
+        Filename.concat (Filename.dirname Sys.executable_name) "../scripts/render-html.js";
+        "/Users/dancer/me/.worktrees/figma-mcp-streaming/features/figma-mcp/scripts/render-html.js";
+      ] in
+      List.find_opt Sys.file_exists candidates
+      |> Option.value ~default:"scripts/render-html.js"
 
 let default_target_ssim = 0.99
 let default_max_iterations = 5

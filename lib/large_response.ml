@@ -6,18 +6,10 @@
 
 open Printf
 
-(** 설정 *)
-let max_inline_size =
-  try int_of_string (Sys.getenv "FIGMA_MAX_INLINE_RESPONSE")
-  with Not_found -> 500_000  (* 500KB 기본값 *)
-
-let storage_dir =
-  try Sys.getenv "FIGMA_LARGE_RESPONSE_DIR"
-  with Not_found -> "/tmp/figma-mcp"
-
-let response_ttl =
-  try int_of_string (Sys.getenv "FIGMA_RESPONSE_TTL")
-  with Not_found -> 3600  (* 1시간 *)
+(** 설정 - Figma_config에서 가져옴 *)
+let max_inline_size = Figma_config.Response.max_inline
+let storage_dir = Figma_config.Response.large_dir
+let response_ttl = Figma_config.Response.ttl_seconds
 
 (** 디렉토리 생성 *)
 let ensure_dir path =

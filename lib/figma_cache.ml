@@ -6,23 +6,13 @@
 
 open Printf
 
-(** 캐시 설정 *)
+(** 캐시 설정 - Figma_config에서 가져옴 *)
 module Config = struct
-  let cache_dir =
-    try Sys.getenv "FIGMA_CACHE_DIR"
-    with Not_found -> "/tmp/figma-cache"
-  let ttl_hours =
-    try float_of_string (Sys.getenv "FIGMA_CACHE_TTL_HOURS")
-    with Not_found | Failure _ -> 24.0  (* 기본 TTL: 24시간 *)
-  let ttl_variables_hours =
-    try float_of_string (Sys.getenv "FIGMA_CACHE_TTL_VARIABLES_HOURS")
-    with Not_found | Failure _ -> 1.0  (* 변수는 1시간 *)
-  let max_l1_entries =
-    try int_of_string (Sys.getenv "FIGMA_CACHE_L1_MAX")
-    with Not_found | Failure _ -> 256
-  let l2_max_mb =
-    try int_of_string (Sys.getenv "FIGMA_CACHE_L2_MAX_MB")
-    with Not_found | Failure _ -> 200
+  let cache_dir = Figma_config.Cache.dir
+  let ttl_hours = Figma_config.Cache.ttl_hours
+  let ttl_variables_hours = Figma_config.Cache.ttl_variables_hours
+  let max_l1_entries = Figma_config.Cache.l1_max
+  let l2_max_mb = Figma_config.Cache.l2_max_mb
   let l2_max_bytes = l2_max_mb * 1024 * 1024
 end
 
