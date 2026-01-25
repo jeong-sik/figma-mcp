@@ -201,9 +201,9 @@ Response extras:
 - `summary`: priority/tokens overview
 - `requirements_json`: node type counts + auto-layout/image fills + top-level names
 
-### 3.3) LLM-friendly Split (Chunk + Summary)
+### 3.3) Chunked Split (Large Nodes)
 
-Large files: keep LLM context small with shallow chunks + summaries.
+Large files: keep payloads small with shallow chunks + summaries.
 ```
 figma_get_node_chunk
   file_key: "KEY"
@@ -213,8 +213,6 @@ figma_get_node_chunk
   depth_end: 2
   max_children: 60
 ```
-Then feed a summary (names/types/layout) to `figma_llm_task`.
-
 ## 4) Visual Verification Loop
 
 1) Generate HTML and verify against Figma render.
@@ -281,145 +279,11 @@ figma_verify_visual
   target_ssim: 0.95
 ```
 
-## 8) LLM-Assisted Output (Plugin + LLM)
-
-Goal: use plugin-only details (text segments/line bounds) with DSL in one prompt.
-
-1) Start MCP endpoint (llm-mcp is the default driver).
-```
-cd ~/me/workspace/yousleepwhen/llm-mcp
-./start-llm-mcp.sh --port 8932
-export MCP_SLOT_URL="http://127.0.0.1:8932/mcp"
-```
-
-Optional overrides:
-- `MCP_SLOT_TIMEOUT_MS=120000`
-- Per-call: `mcp_url: "http://..."`, `tool_name: "codex"`
-
-2) Run LLM task with plugin channel.
-```
-figma_llm_task
-  task: "Generate HTML/CSS matching the design. Output only code."
-  file_key: "KEY"
-  node_id: "123:456"
-  token: "$FIGMA_TOKEN"
-  include_plugin: true
-  plugin_channel_id: "ch-..."
-  plugin_depth: 0
-  quality: "best"
-  llm_tool: "codex"
-  llm_args:
-    model: "gpt-5.2"
-```
-
-3) Preset quick start (overridden by explicit options).
-```
-figma_llm_task
-  task: "Generate HTML/CSS matching the design. Output only code."
-  file_key: "KEY"
-  node_id: "123:456"
-  token: "$FIGMA_TOKEN"
-  include_plugin: true
-  plugin_channel_id: "ch-..."
-  preset: "balanced"  # draft|balanced|fidelity|text|icon
-```
-
-4) Large context fallback (chunked + retry).
-```
-figma_llm_task
-  task: "Generate HTML/CSS matching the design. Output only code."
-  file_key: "KEY"
-  node_id: "123:456"
-  token: "$FIGMA_TOKEN"
-  include_plugin: true
-  plugin_channel_id: "ch-..."
-  context_strategy: "chunked"
-  max_context_chars: 1000000
-  retry_on_llm_error: true
-  max_retries: 1
-  min_context_chars: 600000
-  retry_context_scale: 0.5
-```
-
-5) Chunk selection (heuristic/LLM).
-```
-figma_llm_task
-  task: "Generate HTML/CSS matching the design. Output only code."
-  file_key: "KEY"
-  node_id: "123:456"
-  token: "$FIGMA_TOKEN"
-  include_plugin: true
-  plugin_channel_id: "ch-..."
-  context_strategy: "chunked"
-  chunk_select_mode: "llm"
-  chunk_select_limit: 4
-  chunk_select_llm_tool: "ollama"
-  chunk_select_llm_args:
-    model: "qwen3-coder:30b"
-```
-
-6) Plugin summary only (context save).
-```
-figma_llm_task
-  task: "Generate HTML/CSS matching the design. Output only code."
-  file_key: "KEY"
-  node_id: "123:456"
-  token: "$FIGMA_TOKEN"
-  include_plugin: true
-  plugin_channel_id: "ch-..."
-  plugin_context_mode: "summary"
-  plugin_summary_sample_size: 5
-```
-
-Notes:
-- `quality: fast` sets `budget_mode` and uses compact responses.
-- If plugin isn't available, set `include_plugin: false` and rely on DSL/variables.
-
-## 9) Real-World Flow (URL → Split → LLM)
-
-Goal: make large files manageable and still hit high fidelity.
-
-1) Parse URL → `file_key`/`node_id`.
-```
-figma_parse_url
-  url: "https://www.figma.com/design/...?...node-id=123-456"
-```
-
-2) Use gRPC recursive stream for full subtree (recommended for huge nodes).
-```
-grpcurl -plaintext -import-path proto -proto figma.proto \
-  -d '{"file_key":"KEY","node_id":"123:456","token":"'$FIGMA_TOKEN'","recursive":true}' \
-  localhost:50052 figma.FigmaService/GetNodeStream
-```
-
-3) Split with shallow chunks for LLM context.
-```
-figma_get_node_chunk
-  file_key: "KEY"
-  node_id: "123:456"
-  token: "$FIGMA_TOKEN"
-  depth_start: 0
-  depth_end: 2
-  max_children: 60
-```
-
-4) Run LLM task with preset + plugin summary (fast iteration).
-```
-figma_llm_task
-  task: "Generate HTML/CSS matching the design. Output only code."
-  file_key: "KEY"
-  node_id: "123:456"
-  token: "$FIGMA_TOKEN"
-  include_plugin: true
-  plugin_channel_id: "ch-..."
-  preset: "fidelity"
-```
-
-## 10) Real-World Use Cases (Quick List)
+## 8) Real-World Use Cases (Quick List)
 
 1) **Full-page export with minimal loss**
-- gRPC `GetNodeStream` (`recursive=true`) → chunk index → `figma_llm_task` preset `fidelity`
-- Use plugin summary for fast iterations; switch to `plugin_context_mode: "both"` on final pass.
+- gRPC `GetNodeStream` (`recursive=true`) → `figma_get_node_chunk` → `figma_get_node_bundle`
+- 마지막 패스는 `figma_verify_visual`로 시각 검증
 
 2) **Typography precision (line breaks, text bounds)**
 - Render from DSL → pick suspect frames → `figma_plugin_read_selection`
@@ -431,7 +295,7 @@ figma_llm_task
 
 4) **Icon/vector fidelity**
 - `figma_plugin_get_node` with `include_geometry: true`
-- Use `preset: "icon"` to bias chunk selection for vector-heavy areas.
+- `figma_get_node_bundle`에 `geometry=paths`로 벡터 경로 포함
 
 ## Troubleshooting
 
@@ -447,12 +311,11 @@ figma_llm_task
   plugin URL/port mismatch. Confirm `curl http://localhost:8940/health`.
 - If Figma reports `Invalid value for devAllowedDomains`, use `localhost` only.
   IPs like `127.0.0.1` can be rejected; switch back to `plugin/manifest.json`.
-- If LLM tools fail, check `MCP_SLOT_URL` and verify the MCP endpoint supports `tools/call`.
 - If `grpcurl` reports missing reflection, pass `-import-path proto -proto figma.proto`.
 
 ---
 
-## 11) Visual Verification: 95% SSIM 달성 전략
+## 9) Visual Verification: 95% SSIM 달성 전략
 
 ### 문제: 72%에서 막힘
 
