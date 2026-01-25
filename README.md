@@ -25,7 +25,7 @@ Capabilities: tools ✅ · resources ✅ · prompts ✅
 
 | Capability | 상태 | 설명 |
 |------------|------|------|
-| **tools** | ✅ 지원 | 47개 도구 (아래 목록 참조) |
+| **tools** | ✅ 지원 | 51개 도구 (아래 목록 참조) |
 | **resources** | ✅ 지원 | `figma://docs/*` 가이드 |
 | **prompts** | ✅ 지원 | Fidelity 리뷰 프롬프트 |
 
@@ -49,7 +49,7 @@ echo '{"jsonrpc":"2.0","id":5,"method":"prompts/get","params":{"name":"figma_fid
 
 - `docs/RECIPES.md` - end-to-end usage patterns (quickstart, high fidelity, large nodes)
 
-## 도구 목록 (53개)
+## 도구 목록 (51개)
 
 ### Phase 1: Core
 | Tool | 설명 | 테스트 |
@@ -88,8 +88,6 @@ echo '{"jsonrpc":"2.0","id":5,"method":"prompts/get","params":{"name":"figma_fid
 | `figma_plugin_export_node_image` | 플러그인 exportAsync 이미지(base64) | ✅ |
 | `figma_plugin_get_variables` | 플러그인 Variables API 추출 | ✅ |
 | `figma_plugin_apply_ops` | 플러그인으로 create/update/delete | ✅ |
-| `figma_llm_call` | llm-mcp 프록시 호출 | ✅ |
-| `figma_llm_task` | Figma 컨텍스트 + Plugin 스냅샷 → LLM 작업 | ✅ |
 
 ### Phase 1.5: Visual Feedback Loop (95%+ 정확도)
 | Tool | 설명 | 테스트 |
@@ -354,123 +352,6 @@ HTTP 엔드포인트:
 - `GET  /plugin/status`
 `/plugin/poll`은 `wait_ms`(또는 `timeout_ms`)를 지원합니다. (long-poll, ms 단위)
 최대 대기 시간은 `FIGMA_PLUGIN_POLL_MAX_MS`로 제한됩니다. (기본 30000ms)
-
-## LLM Bridge (MCP 슬롯)
-
-플러그인 스냅샷(텍스트 세그먼트/라인 bounds 등)과 DSL을 함께 넣어 MCP endpoint로 전달합니다.
-
-1) llm-mcp 서버 실행
-```bash
-cd ~/me/workspace/yousleepwhen/llm-mcp
-./start-llm-mcp.sh --port 8932
-export MCP_SLOT_URL="http://127.0.0.1:8932/mcp"
-```
-
-2) LLM 작업 실행
-```
-figma_llm_task
-  task: "Generate HTML/CSS that matches the Figma layout. Output only code."
-  file_key: "..."
-  node_id: "123:456"
-  token: "$FIGMA_TOKEN"
-  include_plugin: true
-  plugin_channel_id: "ch-..."
-  plugin_depth: 0
-  llm_tool: "codex"
-  llm_args:
-    model: "gpt-5.2"
-```
-
-URL로 자동 추출 + 노드 모드:
-```
-figma_llm_task
-  task: "Generate HTML/CSS that matches the Figma layout. Output only code."
-  url: "https://www.figma.com/design/...?...node-id=123-456"
-  token: "$FIGMA_TOKEN"
-  auto_plugin: true
-  plugin_channel_id: "ch-..."
-  llm_tool: "codex"
-```
-
-프리셋 빠른 시작 (옵션이 있으면 프리셋보다 우선):
-- `draft`: 최소 컨텍스트, 플러그인/변수/이미지 fill 제외
-- `balanced`: chunked + heuristic 선택 + 플러그인 요약
-- `fidelity`: chunked + LLM 선택 + 플러그인 full+summary
-- `text`: 텍스트 중심 청크 선택
-- `icon`: 벡터/아이콘 중심 청크 선택 (+ geometry)
-
-```
-figma_llm_task
-  task: "Generate HTML/CSS that matches the Figma layout. Output only code."
-  url: "https://www.figma.com/design/...?...node-id=123-456"
-  token: "$FIGMA_TOKEN"
-  auto_plugin: true
-  plugin_channel_id: "ch-..."
-  preset: "balanced"
-```
-
-대용량 컨텍스트 (청킹 + 재시도):
-```
-figma_llm_task
-  task: "Generate HTML/CSS that matches the Figma layout. Output only code."
-  url: "https://www.figma.com/design/...?...node-id=123-456"
-  token: "$FIGMA_TOKEN"
-  auto_plugin: true
-  plugin_channel_id: "ch-..."
-  llm_tool: "codex"
-  context_strategy: "chunked"
-  chunk_select_mode: "heuristic"  # or llm
-  chunk_select_limit: 4
-  max_context_chars: 1000000
-  retry_on_llm_error: true
-  max_retries: 1
-  min_context_chars: 600000
-  retry_context_scale: 0.5
-```
-
-플러그인 컨텍스트 요약:
-```
-figma_llm_task
-  task: "Generate HTML/CSS that matches the Figma layout. Output only code."
-  url: "https://www.figma.com/design/...?...node-id=123-456"
-  token: "$FIGMA_TOKEN"
-  auto_plugin: true
-  plugin_channel_id: "ch-..."
-  plugin_context_mode: "summary"  # full|summary|both
-  plugin_summary_sample_size: 5
-  llm_tool: "codex"
-```
-
-고급 사용 (직접 프롬프트 전달):
-```
-figma_llm_call
-  llm_tool: "claude-cli"
-  prompt: "Summarize this layout..."
-```
-
-슬롯 교체:
-- `MCP_SLOT_URL`로 MCP endpoint 교체
-- `LLM_PROVIDER=mcp-http` (기본값), 다른 provider 추가 가능
-
-슬롯 개념:
-- figma-mcp는 LLM과 강결합하지 않습니다.
-- `MCP_SLOT_URL`을 바꾸면 원하는 MCP endpoint로 도킹해 호출합니다.
-
-### MCP 슬롯 가이드
-
-- 기본 슬롯: `MCP_SLOT_URL` (없으면 `LLM_MCP_URL` -> 기본값)
-- 타임아웃: `MCP_SLOT_TIMEOUT_MS` (없으면 `LLM_MCP_TIMEOUT_MS`)
-- provider 선택: `LLM_PROVIDER=mcp-http|stub`
-
-런타임에서 직접 override:
-```
-figma_llm_call
-  mcp_url: "http://127.0.0.1:8932/mcp"
-  tool_name: "codex"
-  prompt: "Generate HTML..."
-```
-
-슬롯이 비어 있으면 `figma_llm_*`만 실패하고 나머지 도구는 정상 동작합니다.
 
 ## gRPC Streaming (대용량 응답) - 권장
 
