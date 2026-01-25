@@ -10,6 +10,28 @@ OCaml 5.x 네이티브 MCP 서버 - Figma 디자인을 정확도 우선 Fidelity
 
 Note: This is a personal project.
 
+## Quickstart
+
+```bash
+eval $(opam env)
+opam pin add grpc-direct https://github.com/jeong-sik/grpc-direct.git -y
+opam install . --deps-only
+dune build
+export FIGMA_TOKEN="YOUR_TOKEN"
+./start-figma-mcp-http.sh --port 8940
+```
+
+```json
+{
+  "mcpServers": {
+    "figma": {
+      "type": "http",
+      "url": "http://127.0.0.1:8940/mcp"
+    }
+  }
+}
+```
+
 ## 특징
 
 - **MCP 2025-11-25 스펙 준수** - JSON-RPC 2.0 over stdio
