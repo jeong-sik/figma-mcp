@@ -1,28 +1,24 @@
 # Install Checklist
 
-## Prereqs
-- [ ] OCaml 5.x + opam
-- [ ] dune 3.x
+설치 후 동작 확인용 체크리스트입니다.
 
-## Build
-- [ ] `opam pin add grpc-direct https://github.com/jeong-sik/grpc-direct.git -y`
-- [ ] `opam install . --deps-only`
-- [ ] `dune build`
+## Pre-flight
 
-## Token
-- [ ] `export FIGMA_TOKEN="YOUR_TOKEN"` (일회성)
-  - 또는 Keychain에 `figma-mcp` 저장
+- [ ] opam + dune 설치
+- [ ] FIGMA_TOKEN 준비 (API 호출용)
+- [ ] 의존성 설치 (`opam install . --deps-only`)
+- [ ] 빌드 완료 (`dune build`)
 
 ## Run
-- [ ] `./start-figma-mcp-http.sh --port 8940`
-- [ ] `curl http://127.0.0.1:8940/health`
 
-## MCP Config
-- [ ] `~/.mcp.json`에 서버 등록
-```json
-{
-  "mcpServers": {
-    "figma": { "type": "http", "url": "http://127.0.0.1:8940/mcp" }
-  }
-}
+- [ ] 서버 실행 (`./start-figma-mcp.sh --port 8940`)
+
+## Post-install checks
+
+```bash
+curl http://127.0.0.1:8940/health
+
+curl -sS http://127.0.0.1:8940/mcp \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}'
 ```
