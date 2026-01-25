@@ -48,6 +48,8 @@ echo '{"jsonrpc":"2.0","id":5,"method":"prompts/get","params":{"name":"figma_fid
 ## Recipes
 
 - `docs/RECIPES.md` - end-to-end usage patterns (quickstart, high fidelity, large nodes)
+- `docs/SETUP.md` - 설치/실행/연동 요약
+- `docs/INSTALL-CHECKLIST.md` - 설치 체크리스트
 
 ## 도구 목록 (53개)
 
