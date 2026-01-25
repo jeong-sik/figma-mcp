@@ -87,6 +87,25 @@ module Response = struct
     let response = Httpun.Response.create ~headers `OK in
     let body = Httpun.Reqd.respond_with_streaming reqd response in
     on_write body
+
+  (** SSE single message response for POST→SSE (MCP Streamable HTTP) *)
+  let sse_message ?(session_id="") json_str reqd =
+    let event_id = Printf.sprintf "s%d-%d" (Unix.getpid ()) (Random.int 10000) in
+    let prime = Printf.sprintf "retry: 5000\nid: %s:2\n\n" event_id in
+    let message = Printf.sprintf "id: %s:1\ndata: %s\n\n" event_id json_str in
+    let body = prime ^ message in
+    let session_headers = if session_id = "" then [] else [("mcp-session-id", session_id)] in
+    let headers = Httpun.Headers.of_list ([
+      ("content-type", "text/event-stream");
+      ("content-length", string_of_int (String.length body));
+      ("cache-control", "no-cache");
+      ("access-control-allow-origin", "*");
+      ("access-control-allow-methods", "GET, POST, OPTIONS");
+      ("access-control-allow-headers", "Content-Type, Accept, Access-Control-Request-Private-Network");
+      ("access-control-allow-private-network", "true");
+    ] @ session_headers) in
+    let response = Httpun.Response.create ~headers `OK in
+    Httpun.Reqd.respond_with_string reqd response body
 end
 
 module Request = struct
@@ -111,6 +130,17 @@ module Request = struct
 
   let method_ (request : Httpun.Request.t) =
     request.meth
+
+  (** Check if client accepts SSE (MCP Streamable HTTP) *)
+  let accepts_sse (request : Httpun.Request.t) =
+    match Httpun.Headers.get request.headers "accept" with
+    | Some accept ->
+        let accept_lower = String.lowercase_ascii accept in
+        (try
+          let _ = Str.search_forward (Str.regexp_string "text/event-stream") accept_lower 0 in
+          true
+        with Not_found -> false)
+    | None -> false
 end
 
 (** ============== MCP Request Processing ============== *)
@@ -309,14 +339,22 @@ let mcp_post_handler ~sw ~domain_mgr ~eio_ctx server request reqd =
                  eprintf "[MCP] SSE request failed (client=%d): %s\n%!" id (Printexc.to_string exn);
                  unregister_sse_client id)
          | None ->
+             (* Check Accept header for SSE support (MCP Streamable HTTP) *)
+             let wants_sse = Request.accepts_sse request in
              (try
                let response_str = run_mcp_request ~domain_mgr ~eio_ctx server body_str in
-               Response.json response_str reqd
+               if wants_sse then
+                 Response.sse_message response_str reqd
+               else
+                 Response.json response_str reqd
              with exn ->
                eprintf "[MCP] request failed: %s\n%!" (Printexc.to_string exn);
                let err = Mcp_protocol.make_error_response `Null
                  Mcp_protocol.internal_error (Printexc.to_string exn) None in
-               Response.json ~status:`Internal_server_error (Yojson.Safe.to_string err) reqd)))
+               if wants_sse then
+                 Response.sse_message (Yojson.Safe.to_string err) reqd
+               else
+                 Response.json ~status:`Internal_server_error (Yojson.Safe.to_string err) reqd)))
 
 (** MCP SSE handler for streamable-http protocol (GET /mcp) *)
 let mcp_sse_handler ~clock _request reqd =
