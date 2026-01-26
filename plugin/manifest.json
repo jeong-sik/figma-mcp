@@ -4,11 +4,7 @@
   "api": "1.0.0",
   "main": "code.js",
   "ui": "ui.html",
-  "editorType": ["figma", "dev"],
-  "capabilities": ["inspect", "codegen"],
-  "codegenLanguages": [
-    { "label": "CSS", "value": "css" }
-  ],
+  "editorType": ["figma"],
   "documentAccess": "dynamic-page",
   "enableProposedApi": true,
   "networkAccess": {
@@ -18,6 +14,6 @@
     "devAllowedDomains": [
       "http://localhost:8940"
     ],
-    "reasoning": "Connect to local MCP server for high-fidelity extraction"
+    "reasoning": "Connect to local MCP server for bidirectional Figma control"
   }
 }

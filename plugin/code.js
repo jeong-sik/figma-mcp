@@ -383,6 +383,22 @@ async function applyTextProps(node, props) {
   if (props.textDecoration && props.textDecoration !== MIXED) node.textDecoration = props.textDecoration;
 }
 
+// Extract props from op object, supporting both direct fields and nested props
+function extractProps(op) {
+  const reserved = ['action', 'type', 'node_type', 'nodeType', 'parent_id', 'parentId', 'node_id', 'nodeId', 'props'];
+  const props = {};
+  for (const key of Object.keys(op)) {
+    if (!reserved.includes(key)) {
+      props[key] = op[key];
+    }
+  }
+  // Merge nested props (higher priority)
+  if (op.props && typeof op.props === 'object') {
+    Object.assign(props, op.props);
+  }
+  return props;
+}
+
 async function applyProps(node, props) {
   if (!props || typeof props !== "object") return;
 
@@ -436,6 +452,8 @@ function createNode(nodeType) {
       return figma.createVector();
     case "STAR":
       return figma.createStar();
+    case "COMPONENT":
+      return figma.createComponent();
     default:
       return figma.createFrame();
   }
@@ -461,7 +479,7 @@ async function applyOps(ops) {
         }
         const node = createNode(nodeType);
         parent.appendChild(node);
-        await applyProps(node, op.props || {});
+        await applyProps(node, extractProps(op));
         results.push({ action, status: "ok", node_id: node.id });
       } else if (action === "update") {
         const nodeId = op.node_id || op.nodeId;
@@ -470,7 +488,7 @@ async function applyOps(ops) {
           results.push({ action, status: "error", message: "Node not found" });
           continue;
         }
-        await applyProps(node, op.props || {});
+        await applyProps(node, extractProps(op));
         results.push({ action, status: "ok", node_id: node.id });
       } else if (action === "delete") {
         const nodeId = op.node_id || op.nodeId;
@@ -481,6 +499,19 @@ async function applyOps(ops) {
         }
         node.remove();
         results.push({ action, status: "ok", node_id: nodeId });
+      } else if (action === "convert_to_component") {
+        const nodeId = op.node_id || op.nodeId;
+        const node = nodeId ? await getNodeById(nodeId) : null;
+        if (!node) {
+          results.push({ action, status: "error", message: "Node not found" });
+          continue;
+        }
+        if (node.type !== "FRAME") {
+          results.push({ action, status: "error", message: "Only FRAME can be converted to component" });
+          continue;
+        }
+        const component = figma.createComponentFromNode(node);
+        results.push({ action, status: "ok", node_id: component.id, old_node_id: nodeId });
       } else {
         results.push({ action, status: "error", message: "Unknown action" });
       }
