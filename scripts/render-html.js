@@ -14,6 +14,7 @@ const path = require('path');
 
 function resolveExecutablePath() {
   const defaultPath = chromium.executablePath();
+  const arch = process.arch;
   if (defaultPath && fs.existsSync(defaultPath)) {
     return defaultPath;
   }
@@ -43,12 +44,21 @@ function resolveExecutablePath() {
   for (const dir of candidates) {
     const baseDir = path.join(cacheRoot, dir);
     const arm64 = path.join(baseDir, 'chrome-headless-shell-mac-arm64', 'chrome-headless-shell');
-    if (fs.existsSync(arm64)) {
-      return arm64;
-    }
     const x64 = path.join(baseDir, 'chrome-headless-shell-mac-x64', 'chrome-headless-shell');
-    if (fs.existsSync(x64)) {
-      return x64;
+    if (arch === 'arm64') {
+      if (fs.existsSync(arm64)) {
+        return arm64;
+      }
+      if (fs.existsSync(x64)) {
+        return x64;
+      }
+    } else {
+      if (fs.existsSync(x64)) {
+        return x64;
+      }
+      if (fs.existsSync(arm64)) {
+        return arm64;
+      }
     }
   }
 
