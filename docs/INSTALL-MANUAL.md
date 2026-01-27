@@ -68,7 +68,7 @@ security add-generic-password \
 예시 (macOS Apple Silicon, `~/bin` 설치):
 
 ```bash
-TAG="v0.3.4"
+TAG="v0.3.5"
 ASSET="figma-mcp-macos-arm64"
 INSTALL_DIR="$HOME/bin"
 
@@ -161,4 +161,3 @@ echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' \
 ```
 
 실제 Figma API를 호출하는 툴은 `FIGMA_TOKEN`이 필요합니다.
-
