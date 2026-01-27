@@ -9,9 +9,59 @@
 
 const { chromium } = require('playwright');
 const fs = require('fs');
+const os = require('os');
+const path = require('path');
+
+function resolveExecutablePath() {
+  const defaultPath = chromium.executablePath();
+  if (defaultPath && fs.existsSync(defaultPath)) {
+    return defaultPath;
+  }
+
+  // On macOS arm64, Playwright may look for a mac-x64 path that does not exist.
+  if (defaultPath && defaultPath.includes('chrome-headless-shell-mac-x64')) {
+    const arm64Path = defaultPath.replace(
+      'chrome-headless-shell-mac-x64',
+      'chrome-headless-shell-mac-arm64'
+    );
+    if (fs.existsSync(arm64Path)) {
+      return arm64Path;
+    }
+  }
+
+  const cacheRoot = path.join(os.homedir(), 'Library', 'Caches', 'ms-playwright');
+  if (!fs.existsSync(cacheRoot)) {
+    return undefined;
+  }
+
+  const candidates = fs
+    .readdirSync(cacheRoot)
+    .filter((name) => name.startsWith('chromium_headless_shell-'))
+    .sort()
+    .reverse();
+
+  for (const dir of candidates) {
+    const baseDir = path.join(cacheRoot, dir);
+    const arm64 = path.join(baseDir, 'chrome-headless-shell-mac-arm64', 'chrome-headless-shell');
+    if (fs.existsSync(arm64)) {
+      return arm64;
+    }
+    const x64 = path.join(baseDir, 'chrome-headless-shell-mac-x64', 'chrome-headless-shell');
+    if (fs.existsSync(x64)) {
+      return x64;
+    }
+  }
+
+  return undefined;
+}
 
 async function renderHtmlToPng(htmlPath, outputPath, width = 375, height = 812) {
-  const browser = await chromium.launch({ headless: true });
+  const launchOptions = { headless: true };
+  const executablePath = resolveExecutablePath();
+  if (executablePath) {
+    launchOptions.executablePath = executablePath;
+  }
+  const browser = await chromium.launch(launchOptions);
   const page = await browser.newPage();
 
   // 뷰포트 설정 (Figma frame 크기와 일치)
