@@ -1,6 +1,6 @@
 (lang dune 3.15)
 (name figma_mcp)
-(version 0.3.6)
+(version 0.3.7)
 
 (generate_opam_files true)
 
@@ -22,9 +22,7 @@
   (grpc-direct (>= 0.1.0))
   ; Standard dependencies
   (yojson (>= 2.0))
-  (cohttp-lwt-unix (>= 5.0))
-  (conduit-lwt-unix (>= 5.0))
-  (lwt (>= 5.6))
+  (cohttp-eio (>= 0.18))
   (uri (>= 4.2))
   (cmdliner (>= 1.1))
   (eio (>= 1.0))
