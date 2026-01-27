@@ -263,6 +263,8 @@ let tool_figma_fidelity_loop : tool_def = {
     ("plugin_channel_id", string_prop "플러그인 채널 ID (옵션)");
     ("plugin_depth", number_prop "플러그인 depth (기본값: 6)");
     ("plugin_timeout_ms", number_prop "플러그인 응답 대기 시간 (기본값: 20000)");
+    ("summary_only", bool_prop "대용량 방지를 위해 요약만 반환 (기본값: false, 필요 시 자동 요약)");
+    ("max_inline_bytes", number_prop "인라인 응답 최대 바이트 (기본값: LargeResponse 설정)");
   ] [];
 }
 
@@ -830,6 +832,29 @@ let normalize_node_id_key key value =
   match key with
   | "node_id" | "node_a_id" | "node_b_id" -> normalize_node_id value
   | _ -> value
+
+let hyphenate_node_id value =
+  String.map (fun c -> if c = ':' then '-' else c) value
+
+(* Figma API and clients sometimes disagree on ":" vs "-" node IDs.
+   Resolve by normalizing both the requested ID and map keys. *)
+let find_node_entry (nodes_map : (string * Yojson.Safe.t) list) ~(node_id : string)
+  : (string * Yojson.Safe.t) option =
+  let target = normalize_node_id node_id in
+  let direct_keys = [node_id; target; hyphenate_node_id target] in
+  let direct_hit =
+    List.find_map (fun key ->
+      match List.assoc_opt key nodes_map with
+      | Some v -> Some (key, v)
+      | None -> None
+    ) direct_keys
+  in
+  match direct_hit with
+  | Some hit -> Some hit
+  | None ->
+      List.find_map (fun (key, value) ->
+        if normalize_node_id key = target then Some (key, value) else None
+      ) nodes_map
 
 (** ============== 에러 처리 강화 + 모나딕 바인딩 ============== *)
 
@@ -1829,6 +1854,7 @@ let handle_get_node_bundle args : (Yojson.Safe.t, string) result =
 
   match (file_key, node_id, token) with
   | (Some file_key, Some node_id, Some token) ->
+      let node_id = normalize_node_id node_id in
       (* 캐시 옵션 생성 *)
       let cache_options =
         List.filter_map Fun.id [
@@ -1856,16 +1882,20 @@ let handle_get_node_bundle args : (Yojson.Safe.t, string) result =
       (match json_result with
        | Error err -> Error err
        | Ok json ->
-           let node_data = match member "nodes" json with
+           let node_lookup =
+             match member "nodes" json with
              | Some (`Assoc nodes_map) ->
-                 (match List.assoc_opt node_id nodes_map with
-                  | Some n -> member "document" n
+                 (match find_node_entry nodes_map ~node_id with
+                  | Some (node_key, node_entry) ->
+                      (match member "document" node_entry with
+                       | Some doc -> Some (node_key, doc)
+                       | None -> None)
                   | None -> None)
              | _ -> None
            in
-           (match node_data with
+           (match node_lookup with
             | None -> Error (sprintf "Node not found: %s" node_id)
-            | Some node ->
+            | Some (node_key, node) ->
                 let node_str = Yojson.Safe.to_string node in
                 let dsl_str = match process_json_string ~format node_str with
                   | Ok s -> s
@@ -1884,7 +1914,7 @@ let handle_get_node_bundle args : (Yojson.Safe.t, string) result =
                       let url =
                         match member "images" img_json with
                         | Some (`Assoc img_map) ->
-                            (match List.assoc_opt node_id img_map with
+                            (match List.assoc_opt node_key img_map with
                              | Some (`String u) -> u
                              | _ -> "No image URL returned")
                         | _ -> "No images returned"
@@ -2105,55 +2135,92 @@ let handle_get_node_summary args : (Yojson.Safe.t, string) result =
 
   match (file_key, node_id, token) with
   | (Some file_key, Some node_id, Some token) ->
-      let node_id = Figma_api.normalize_node_id node_id in
+      let node_id = normalize_node_id node_id in
       (* 최소 depth=1로 자식만 가져옴 *)
       (match Figma_effects.Perform.get_nodes ~token ~file_key ~node_ids:[node_id] ~depth:1 ?version () with
        | Error err -> Error (Printf.sprintf "Figma API error: %s" err)
        | Ok nodes_json ->
-           let open Yojson.Safe.Util in
-           let nodes = nodes_json |> member "nodes" in
-           let node_entry = nodes |> member node_id in
-           (match node_entry with
-            | `Null -> Error (Printf.sprintf "Node %s not found in file %s" node_id file_key)
-            | _ ->
-                let node_data = node_entry |> member "document" in
-                (match node_data with
-                 | `Null -> Error (Printf.sprintf "Document not found for node %s" node_id)
-                 | _ ->
-
-           (* 자식 요약 추출 *)
-           let children = node_data |> member "children" |> to_list in
-           let children_count = List.length children in
-           let children_summary =
-             children
-             |> List.mapi (fun i child ->
-                 if i >= max_children then None
-                 else
-                   let id = child |> member "id" |> to_string_option |> Option.value ~default:"" in
-                   let name = child |> member "name" |> to_string_option |> Option.value ~default:"" in
-                   let typ = child |> member "type" |> to_string_option |> Option.value ~default:"UNKNOWN" in
-                   let sub_children = child |> member "children" |> to_list |> List.length in
-                   Some (`Assoc [
-                     ("id", `String id);
-                     ("name", `String name);
-                     ("type", `String typ);
-                     ("children_count", `Int sub_children);
-                   ]))
-             |> List.filter_map Fun.id
+           let module U = Yojson.Safe.Util in
+           let nodes_map =
+             match U.member "nodes" nodes_json with
+             | `Assoc map -> map
+             | _ -> []
            in
-
-           let node_name = node_data |> member "name" |> to_string_option |> Option.value ~default:"" in
-           let node_type = node_data |> member "type" |> to_string_option |> Option.value ~default:"UNKNOWN" in
-
-           Ok (`Assoc [
-             ("node_id", `String node_id);
-             ("name", `String node_name);
-             ("type", `String node_type);
-             ("children_count", `Int children_count);
-             ("children", `List children_summary);
-             ("truncated", `Bool (children_count > max_children));
-             ("hint", `String "Use figma_get_node_chunk for progressive loading of specific depth ranges");
-           ]))))
+           let node_data =
+             match find_node_entry nodes_map ~node_id with
+             | Some (_key, node_entry) ->
+                 (match U.member "document" node_entry with
+                  | `Null -> None
+                  | doc -> Some doc)
+             | None -> None
+           in
+           (match node_data with
+            | None -> Error (Printf.sprintf "Node %s not found in file %s" node_id file_key)
+            | Some node_data ->
+                let children =
+                  match U.member "children" node_data with
+                  | `List xs -> xs
+                  | _ -> []
+                in
+                let children_count = List.length children in
+                let children_summary =
+                  children
+                  |> List.mapi (fun i child ->
+                      if i >= max_children then None
+                      else
+                        let id =
+                          match U.member "id" child with
+                          | `String s -> s
+                          | _ -> ""
+                        in
+                        let name =
+                          match U.member "name" child with
+                          | `String s -> s
+                          | _ -> ""
+                        in
+                        let typ =
+                          match U.member "type" child with
+                          | `String s -> s
+                          | _ -> "UNKNOWN"
+                        in
+                        let sub_children =
+                          match U.member "children" child with
+                          | `List xs -> List.length xs
+                          | _ -> 0
+                        in
+                        Some
+                          (`Assoc
+                            [
+                              ("id", `String id);
+                              ("name", `String name);
+                              ("type", `String typ);
+                              ("children_count", `Int sub_children);
+                            ]))
+                  |> List.filter_map Fun.id
+                in
+                let node_name =
+                  match U.member "name" node_data with
+                  | `String s -> s
+                  | _ -> ""
+                in
+                let node_type =
+                  match U.member "type" node_data with
+                  | `String s -> s
+                  | _ -> "UNKNOWN"
+                in
+                Ok
+                  (`Assoc
+                    [
+                      ("node_id", `String node_id);
+                      ("name", `String node_name);
+                      ("type", `String node_type);
+                      ("children_count", `Int children_count);
+                      ("children", `List children_summary);
+                      ("truncated", `Bool (children_count > max_children));
+                      ( "hint",
+                        `String
+                          "Use figma_get_node_chunk for progressive loading of specific depth ranges" );
+                    ])))
   | _ -> Error "Missing required parameters: file_key/node_id or url, token"
 
 (** figma_select_nodes 핸들러 - 점수 기반 후보 선별 *)
@@ -2700,6 +2767,12 @@ let handle_fidelity_loop args : (Yojson.Safe.t, string) result =
   let plugin_channel_id = get_string "plugin_channel_id" args in
   let plugin_depth = match get_int "plugin_depth" args with Some d when d > 0 -> d | _ -> 6 in
   let plugin_timeout_ms = get_int "plugin_timeout_ms" args |> Option.value ~default:20000 in
+  let summary_only = get_bool_or "summary_only" false args in
+  let max_inline_bytes =
+    match get_int "max_inline_bytes" args with
+    | Some n when n > 0 -> n
+    | _ -> Large_response.max_inline_size
+  in
 
   let clamp_score v =
     if v < 0.0 then 0.0 else if v > 1.0 then 1.0 else v
@@ -2710,6 +2783,7 @@ let handle_fidelity_loop args : (Yojson.Safe.t, string) result =
       if format <> "fidelity" then
         Error "figma_fidelity_loop only supports format=fidelity"
       else
+        let node_id = normalize_node_id node_id in
         let target_score = clamp_score target_score in
         let file_meta =
           if include_meta then
@@ -2830,14 +2904,18 @@ let handle_fidelity_loop args : (Yojson.Safe.t, string) result =
             (match json_result with
             | Error err -> (best, (`Assoc [("attempt", `Int attempt); ("error", `String err)]) :: attempts, None)
             | Ok json ->
-                let node_data = match member "nodes" json with
+                let node_lookup =
+                  match member "nodes" json with
                   | Some (`Assoc nodes_map) ->
-                      (match List.assoc_opt node_id nodes_map with
-                       | Some n -> member "document" n
+                      (match find_node_entry nodes_map ~node_id with
+                       | Some (_node_key, node_entry) ->
+                           (match member "document" node_entry with
+                            | Some doc -> Some doc
+                            | None -> None)
                        | None -> None)
                   | _ -> None
                 in
-                (match node_data with
+                (match node_lookup with
                  | None ->
                      let entry = `Assoc [
                        ("attempt", `Int attempt);
@@ -2931,13 +3009,77 @@ let handle_fidelity_loop args : (Yojson.Safe.t, string) result =
           | Some cond -> Figma_early_stop.to_json early_stop_detector cond
           | None -> `Assoc [("summary", `String (Figma_early_stop.summary early_stop_detector))]
         in
+        let attempt_overall entry =
+          match member "fidelity" entry with
+          | Some fidelity ->
+              (match member "overall" fidelity with
+               | Some (`Float f) -> Some f
+               | Some (`Int i) -> Some (float_of_int i)
+               | _ -> None)
+          | None -> None
+        in
+        let summarize_attempt entry =
+          let overall_json =
+            match attempt_overall entry with
+            | Some f -> `Float f
+            | None -> `Null
+          in
+          let missing_total =
+            match member "fidelity" entry with
+            | Some fidelity ->
+                (match member "missing_total" fidelity with
+                 | Some v -> v
+                 | None -> `Null)
+            | None -> `Null
+          in
+          `Assoc [
+            ("attempt", member "attempt" entry |> Option.value ~default:`Null);
+            ("depth", member "depth" entry |> Option.value ~default:`Null);
+            ("fidelity", `Assoc [
+              ("overall", overall_json);
+              ("missing_total", missing_total);
+            ]);
+            ("early_stop", member "early_stop" entry |> Option.value ~default:`Null);
+            ("error", member "error" entry |> Option.value ~default:`Null);
+          ]
+        in
+        let summarize_best payload =
+          match payload with
+          | `Assoc _ ->
+              let overall_json =
+                match member "fidelity" payload with
+                | Some fidelity ->
+                    (match member "overall" fidelity with
+                     | Some (`Float f) -> `Float f
+                     | Some (`Int i) -> `Float (float_of_int i)
+                     | _ -> `Null)
+                | None -> `Null
+              in
+              let missing_total =
+                match member "fidelity" payload with
+                | Some fidelity ->
+                    (match member "missing_total" fidelity with
+                     | Some v -> v
+                     | None -> `Null)
+                | None -> `Null
+              in
+              `Assoc [
+                ("depth", member "depth" payload |> Option.value ~default:`Null);
+                ("fidelity", `Assoc [
+                  ("overall", overall_json);
+                  ("missing_total", missing_total);
+                ]);
+              ]
+          | _ -> `Null
+        in
+        let attempts_list = List.rev attempts in
         let result = `Assoc [
           ("target_score", `Float target_score);
           ("early_stop", early_stop_summary);
           ("best_score", `Float best_score);
           ("achieved", `Bool (best_score >= target_score));
           ("best", best_payload);
-          ("attempts", `List (List.rev attempts));
+          ("attempts", `List attempts_list);
           ("file_meta", file_meta);
           ("variables", variables);
           ("variables_source", variables_source);
@@ -2945,7 +3087,45 @@ let handle_fidelity_loop args : (Yojson.Safe.t, string) result =
           ("image_fills", image_fills);
           ("plugin_snapshot", plugin_snapshot);
         ] in
-        Ok (make_text_content (Yojson.Safe.pretty_to_string result))
+        let full_str = Yojson.Safe.pretty_to_string result in
+        let full_size = String.length full_str in
+        let prefix = Printf.sprintf "fidelity_%s" (sanitize_node_id node_id) in
+        let needs_summary = summary_only || full_size > max_inline_bytes in
+        if needs_summary then
+          let summary_json = `Assoc [
+            ("target_score", `Float target_score);
+            ("early_stop", early_stop_summary);
+            ("best_score", `Float best_score);
+            ("achieved", `Bool (best_score >= target_score));
+            ("best", summarize_best best_payload);
+            ("attempts", `List (List.map summarize_attempt attempts_list));
+            ("options", `Assoc [
+              ("include_meta", `Bool include_meta);
+              ("include_variables", `Bool include_variables);
+              ("include_image_fills", `Bool include_image_fills);
+              ("include_plugin", `Bool include_plugin);
+            ]);
+            ("full_result_size_bytes", `Int full_size);
+          ] in
+          if full_size > max_inline_bytes then
+            let filepath = Large_response.save_to_file ~prefix full_str in
+            let large_meta = [
+              ("status", `String "large_result");
+              ("file_path", `String filepath);
+              ("size_bytes", `Int full_size);
+              ("size_human", `String (Large_response.human_size full_size));
+              ("format", `String format);
+              ("ttl_seconds", `Int Large_response.response_ttl);
+              ("hint", `String "Full result saved to file due to size. Use figma_read_large_result.");
+            ] in
+            let summary_content = make_text_content (Yojson.Safe.pretty_to_string summary_json) in
+            (match summary_content with
+             | `Assoc fields -> Ok (`Assoc (fields @ large_meta))
+             | _ -> Ok summary_content)
+          else
+            Ok (make_text_content (Yojson.Safe.pretty_to_string summary_json))
+        else
+          Ok (Large_response.wrap_string_result ~prefix ~format full_str)
   | _ -> Error "Missing required parameters: file_key, node_id, token"
 
 (** figma_image_similarity 핸들러 *)

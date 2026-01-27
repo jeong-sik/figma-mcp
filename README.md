@@ -1,6 +1,6 @@
 # Figma MCP Server
 
-[![Version](https://img.shields.io/badge/version-0.1.0-blue.svg)](https://github.com/jeong-sik/figma-mcp)
+[![Version](https://img.shields.io/badge/version-0.3.4-blue.svg)](https://github.com/jeong-sik/figma-mcp)
 [![OCaml](https://img.shields.io/badge/OCaml-5.x-orange.svg)](https://ocaml.org/)
 [![MCP](https://img.shields.io/badge/MCP-2025--11--25-blue.svg)](https://spec.modelcontextprotocol.io/)
 [![Status](https://img.shields.io/badge/status-Production%20Ready-green.svg)]()
@@ -275,6 +275,9 @@ export FIGMA_TOKEN="YOUR_TOKEN"
 # 2) Keychain 저장 (권장)
 security add-generic-password -s "figma-mcp" -a "FIGMA_TOKEN" -w "YOUR_TOKEN"
 ```
+
+상세 가이드(토큰 발급 경로, 릴리즈 바이너리 설치, 설정 JSON 예시):
+- `docs/INSTALL-MANUAL.md`
 
 ## Claude Code MCP 설정
 
