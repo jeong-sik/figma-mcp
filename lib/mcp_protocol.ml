@@ -382,12 +382,26 @@ let handle_tools_call_sync server params : (Yojson.Safe.t, int * string) result 
       let arguments = List.assoc_opt "arguments" lst |> Option.value ~default:(`Assoc []) in
       (match name with
        | Some tool_name ->
+           let start = Unix.gettimeofday () in
+           let finish result =
+             let duration_ms =
+               int_of_float ((Unix.gettimeofday () -. start) *. 1000.0)
+             in
+             let success = Result.is_ok result in
+             let error = match result with Ok _ -> None | Error (_, msg) -> Some msg in
+             Telemetry_jsonl.log_tool_called ~tool_name ~duration_ms ~success ~error;
+             result
+           in
            (match List.assoc_opt tool_name server.handlers_sync with
             | Some handler ->
-                (match handler arguments with
-                 | Ok res -> Ok res
-                 | Error msg -> Error (internal_error, msg))
-            | None -> Error (method_not_found, sprintf "Tool not found: %s" tool_name))
+                let result =
+                  match handler arguments with
+                  | Ok res -> Ok res
+                  | Error msg -> Error (internal_error, msg)
+                in
+                finish result
+            | None ->
+                finish (Error (method_not_found, sprintf "Tool not found: %s" tool_name)))
        | None -> Error (invalid_params, "Missing tool name"))
   | _ -> Error (invalid_params, "Invalid params format")
 
