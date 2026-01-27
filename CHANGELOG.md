@@ -16,6 +16,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Clamp `figma_select_nodes` summary depth/preview scale and emit warnings on clamp.
 - Run Lwt-based Figma API calls in a separate Eio domain in the example tool executor.
 
+## [0.3.4] - 2026-01-27
+
+### Fixed
+- Normalize node IDs (`:` vs `-`) and resolve nodes robustly across API responses.
+- Fix `figma_get_node_summary` to avoid empty results and parse children safely.
+- Fix `figma_get_node_bundle` to use the resolved node key when looking up documents and images.
+- Add `summary_only` and `max_inline_bytes` handling in `figma_fidelity_loop`, and persist oversized full results to disk while returning a compact summary.
+
 ## [0.1.0] - 2026-01-18
 
 ### Added
