@@ -276,6 +276,9 @@ export FIGMA_TOKEN="YOUR_TOKEN"
 security add-generic-password -s "figma-mcp" -a "FIGMA_TOKEN" -w "YOUR_TOKEN"
 ```
 
+상세 가이드(토큰 발급 경로, 릴리즈 바이너리 설치, 설정 JSON 예시):
+- `docs/INSTALL-MANUAL.md`
+
 ## Claude Code MCP 설정
 
 `~/.mcp.json` 또는 프로젝트 `.mcp.json`에 추가:
