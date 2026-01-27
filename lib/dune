@@ -5,6 +5,7 @@
    yojson
    uri
    str
+   unix
    ipaddr
    ;; Eio (Pure: HTTP server + gRPC server + Figma API client)
    eio
