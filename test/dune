@@ -4,6 +4,11 @@
  (deps
   (glob_files fixtures/*.json)))
 
+; MCP Protocol Coverage Tests (JSON-RPC, MCP types, Eio patterns)
+(test
+ (name test_mcp_protocol_coverage)
+ (libraries figma_mcp alcotest yojson str))
+
 ; Semantic Style DSL Mapper 테스트 (Phase 1 - Tier 1)
 (test
  (name test_semantic_mapper)
@@ -65,3 +70,25 @@
 (test
  (name test_plan_tasks_rpc)
  (libraries figma_mcp alcotest yojson fmt))
+
+; Figma API Eio 커버리지 테스트 (에러 처리, URL, JSON 유틸 등 순수 함수)
+(test
+ (name test_figma_api_coverage)
+ (libraries figma_mcp alcotest yojson str))
+
+; Comprehensive Coverage Test for figma_codegen.ml (1,268 lines)
+(test
+ (name test_figma_codegen_coverage)
+ (libraries figma_mcp alcotest yojson str))
+
+; Comprehensive Coverage Test for mcp_tools.ml (5,320 lines)
+(test
+ (name test_mcp_tools_coverage)
+ (libraries figma_mcp alcotest yojson str unix))
+
+; Comprehensive Coverage Test for similarity and effects modules
+; figma_similarity.ml (653 lines), figma_effects.ml (605 lines),
+; figma_image_similarity.ml (350 lines)
+(test
+ (name test_similarity_effects_coverage)
+ (libraries figma_mcp alcotest yojson str fmt))
