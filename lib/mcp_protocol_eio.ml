@@ -388,7 +388,10 @@ let plugin_ttl_seconds = Figma_config.Plugin.ttl_seconds
 let plugin_poll_max_ms = Figma_config.Plugin.poll_max_ms
 
 let plugin_cleanup () =
-  Figma_plugin_bridge.cleanup_inactive ~ttl_seconds:plugin_ttl_seconds
+  try
+    Figma_plugin_bridge.cleanup_inactive ~ttl_seconds:plugin_ttl_seconds
+  with exn ->
+    eprintf "[Plugin] cleanup error: %s\n%!" (Printexc.to_string exn)
 
 let json_error ?(status=`Bad_request) msg reqd =
   let body = Yojson.Safe.to_string (`Assoc [("error", `String msg)]) in
@@ -656,21 +659,35 @@ let run ~sw ~net ~clock ~domain_mgr config server =
         List.iter
           (fun extra ->
             Eio.Fiber.fork ~sw (fun () ->
+              let initial_backoff_s = 0.05 in
+              let max_backoff_s = 1.0 in
+              let backoff_s = ref initial_backoff_s in
+              let reset_backoff () = backoff_s := initial_backoff_s in
+              let bump_backoff () = backoff_s := min max_backoff_s (!backoff_s *. 2.0) in
               let rec accept_loop () =
-                let flow, client_addr = Eio.Net.accept ~sw extra in
-                Eio.Fiber.fork ~sw (fun () ->
-                  try
-                    Httpun_eio.Server.create_connection_handler
-                      ~sw
-                      ~request_handler
-                      ~error_handler
-                      client_addr
-                      flow
-                  with exn ->
-                    eprintf "[%s] Connection error: %s\n%!"
-                      Mcp_protocol.server_name
-                      (Printexc.to_string exn)
-                );
+                (try
+                   let flow, client_addr = Eio.Net.accept ~sw extra in
+                   reset_backoff ();
+                   Eio.Fiber.fork ~sw (fun () ->
+                     try
+                       Httpun_eio.Server.create_connection_handler
+                         ~sw
+                         ~request_handler
+                         ~error_handler
+                         client_addr
+                         flow
+                     with exn ->
+                       eprintf "[%s] Connection error: %s\n%!"
+                         Mcp_protocol.server_name
+                         (Printexc.to_string exn))
+                 with exn ->
+                   let delay = !backoff_s in
+                   eprintf "[%s] Accept error: %s (backoff %.2fs)\n%!"
+                     Mcp_protocol.server_name
+                     (Printexc.to_string exn)
+                     delay;
+                   Eio.Time.sleep clock delay;
+                   bump_backoff ());
                 accept_loop ()
               in
               accept_loop ()))
@@ -689,27 +706,44 @@ let run ~sw ~net ~clock ~domain_mgr config server =
   Eio.Fiber.fork ~sw (fun () ->
     let rec cleanup_loop () =
       Eio.Time.sleep clock 60.0; (* Clean up every 1 minute *)
-      Figma_plugin_bridge.cleanup_inactive ~ttl_seconds:300.0; (* 5 min TTL *)
+      (* Cleanup must never crash the server loop. *)
+      (try Figma_plugin_bridge.cleanup_inactive ~ttl_seconds:300.0
+       with exn ->
+         eprintf "[Plugin] cleanup loop error: %s\n%!" (Printexc.to_string exn));
       cleanup_loop ()
     in
     cleanup_loop ()
   );
 
+  let initial_backoff_s = 0.05 in
+  let max_backoff_s = 1.0 in
+  let backoff_s = ref initial_backoff_s in
+  let reset_backoff () = backoff_s := initial_backoff_s in
+  let bump_backoff () = backoff_s := min max_backoff_s (!backoff_s *. 2.0) in
   let rec accept_loop () =
-    let flow, client_addr = Eio.Net.accept ~sw first_socket in
-    Eio.Fiber.fork ~sw (fun () ->
-      try
-        Httpun_eio.Server.create_connection_handler
-          ~sw
-          ~request_handler
-          ~error_handler
-          client_addr
-          flow
-      with exn ->
-        eprintf "[%s] Connection error: %s\n%!"
-          Mcp_protocol.server_name
-          (Printexc.to_string exn)
-    );
+    (try
+       let flow, client_addr = Eio.Net.accept ~sw first_socket in
+       reset_backoff ();
+       Eio.Fiber.fork ~sw (fun () ->
+         try
+           Httpun_eio.Server.create_connection_handler
+             ~sw
+             ~request_handler
+             ~error_handler
+             client_addr
+             flow
+         with exn ->
+           eprintf "[%s] Connection error: %s\n%!"
+             Mcp_protocol.server_name
+             (Printexc.to_string exn));
+     with exn ->
+       let delay = !backoff_s in
+       eprintf "[%s] Accept error: %s (backoff %.2fs)\n%!"
+         Mcp_protocol.server_name
+         (Printexc.to_string exn)
+         delay;
+       Eio.Time.sleep clock delay;
+       bump_backoff ());
     accept_loop ()
   in
   accept_loop ()
