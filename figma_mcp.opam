@@ -20,6 +20,15 @@ depends: [
   "uri" {>= "4.2"}
   "cmdliner" {>= "1.1"}
   "eio" {>= "1.0"}
+  "eio_main" {>= "1.0"}
+  "httpun-eio" {>= "0.2"}
+  "gluten-eio" {>= "0.4"}
+  "cohttp-eio" {>= "6.0"}
+  "tls-eio" {>= "0.16"}
+  "ca-certs" {>= "1.0"}
+  "bigstringaf" {>= "0.10"}
+  "ipaddr" {>= "5.0"}
+  "mirage-crypto-rng" {>= "1.0"}
   "ppx_deriving_yojson" {>= "3.6"}
   "odoc" {with-doc}
 ]
