@@ -2653,11 +2653,19 @@ let handle_get_node_chunk args : (Yojson.Safe.t, string) result =
                | None -> assoc
              in
 
+             (* null-safe children 추출 *)
+             let get_children_safe json =
+               match json |> member "children" with
+               | `Null -> []
+               | `List lst -> lst
+               | _ -> []
+             in
+
              (* 깊이 범위에 따라 필터링하는 재귀 함수 *)
              let rec filter_by_depth current_depth json =
                if current_depth < depth_start then
                  (* 시작 깊이 미만: 자식만 재귀 처리 *)
-                 let children = json |> member "children" |> to_list in
+                 let children = get_children_safe json in
                  let children, truncated = trim_children children in
                  let filtered_children = List.filter_map (fun c ->
                      let result = filter_by_depth (current_depth + 1) c in
@@ -2674,11 +2682,11 @@ let handle_get_node_chunk args : (Yojson.Safe.t, string) result =
                  (* 종료 깊이 초과: 자식 제거 *)
                  let assoc = to_assoc json in
                  let without_children = List.filter (fun (k, _) -> k <> "children") assoc in
-                 let children = json |> member "children" |> to_list |> List.length in
-                 `Assoc (without_children @ [("_truncated_children", `Int children)])
+                 let children_count = get_children_safe json |> List.length in
+                 `Assoc (without_children @ [("_truncated_children", `Int children_count)])
                else
                  (* 범위 내: 자식 재귀 처리 *)
-                 let children = json |> member "children" |> to_list in
+                 let children = get_children_safe json in
                  let children, truncated = trim_children children in
                  let filtered_children = List.map (fun c -> filter_by_depth (current_depth + 1) c) children in
                  let assoc = to_assoc json in
