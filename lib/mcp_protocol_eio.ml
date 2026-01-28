@@ -649,6 +649,59 @@ let run ~sw ~net ~clock ~domain_mgr config server =
     resolve_listen_ips config.host
     |> List.filter_map listen_socket
   in
+  let is_cancelled exn =
+    match exn with
+    | Eio.Cancel.Cancelled _ -> true
+    | _ -> false
+  in
+  let initial_backoff_s = 0.05 in
+  let max_backoff_s = 1.0 in
+  let make_accept_loop socket =
+    let backoff_s = ref initial_backoff_s in
+    let reset_backoff () = backoff_s := initial_backoff_s in
+    let bump_backoff () = backoff_s := min max_backoff_s (!backoff_s *. 2.0) in
+    let rec accept_loop () =
+      try
+        (try
+           let flow, client_addr = Eio.Net.accept ~sw socket in
+           reset_backoff ();
+           Eio.Fiber.fork ~sw (fun () ->
+             try
+               Httpun_eio.Server.create_connection_handler
+                 ~sw
+                 ~request_handler
+                 ~error_handler
+                 client_addr
+                 flow
+             with exn ->
+               eprintf "[%s] Connection error: %s\n%!"
+                 Mcp_protocol.server_name
+                 (Printexc.to_string exn)
+           )
+         with exn ->
+           if is_cancelled exn then raise exn;
+           let delay = !backoff_s in
+           eprintf "[%s] Accept error: %s (backoff %.2fs)\n%!"
+             Mcp_protocol.server_name
+             (Printexc.to_string exn)
+             delay;
+           Eio.Time.sleep clock delay;
+           bump_backoff ());
+        accept_loop ()
+      with exn ->
+        if is_cancelled exn then ()
+        else
+          let delay = !backoff_s in
+          eprintf "[%s] Accept loop error: %s (backoff %.2fs)\n%!"
+            Mcp_protocol.server_name
+            (Printexc.to_string exn)
+            delay;
+          Eio.Time.sleep clock delay;
+          bump_backoff ();
+          accept_loop ()
+    in
+    accept_loop
+  in
   let first_socket =
     match sockets with
     | [] -> failwith "No listening sockets available"
@@ -656,24 +709,7 @@ let run ~sw ~net ~clock ~domain_mgr config server =
         List.iter
           (fun extra ->
             Eio.Fiber.fork ~sw (fun () ->
-              let rec accept_loop () =
-                let flow, client_addr = Eio.Net.accept ~sw extra in
-                Eio.Fiber.fork ~sw (fun () ->
-                  try
-                    Httpun_eio.Server.create_connection_handler
-                      ~sw
-                      ~request_handler
-                      ~error_handler
-                      client_addr
-                      flow
-                  with exn ->
-                    eprintf "[%s] Connection error: %s\n%!"
-                      Mcp_protocol.server_name
-                      (Printexc.to_string exn)
-                );
-                accept_loop ()
-              in
-              accept_loop ()))
+              make_accept_loop extra ()))
           rest;
         socket
   in
@@ -687,31 +723,30 @@ let run ~sw ~net ~clock ~domain_mgr config server =
 
   (* Periodic cleanup fiber for idle plugin channels - prevents memory leaks *)
   Eio.Fiber.fork ~sw (fun () ->
+    let is_cancelled exn =
+      match exn with
+      | Eio.Cancel.Cancelled _ -> true
+      | _ -> false
+    in
     let rec cleanup_loop () =
-      Eio.Time.sleep clock 60.0; (* Clean up every 1 minute *)
-      Figma_plugin_bridge.cleanup_inactive ~ttl_seconds:300.0; (* 5 min TTL *)
+      (try
+         Eio.Time.sleep clock 60.0 (* Clean up every 1 minute *)
+       with exn ->
+         if is_cancelled exn then raise exn;
+         eprintf "[Plugin] cleanup sleep error: %s\n%!" (Printexc.to_string exn));
+      (try
+         Figma_plugin_bridge.cleanup_inactive ~ttl_seconds:300.0 (* 5 min TTL *)
+       with exn ->
+         if is_cancelled exn then raise exn;
+         eprintf "[Plugin] cleanup loop error: %s\n%!" (Printexc.to_string exn));
       cleanup_loop ()
     in
-    cleanup_loop ()
+    try cleanup_loop () with exn ->
+      if is_cancelled exn then ()
+      else eprintf "[Plugin] cleanup fatal error: %s\n%!" (Printexc.to_string exn)
   );
 
-  let rec accept_loop () =
-    let flow, client_addr = Eio.Net.accept ~sw first_socket in
-    Eio.Fiber.fork ~sw (fun () ->
-      try
-        Httpun_eio.Server.create_connection_handler
-          ~sw
-          ~request_handler
-          ~error_handler
-          client_addr
-          flow
-      with exn ->
-        eprintf "[%s] Connection error: %s\n%!"
-          Mcp_protocol.server_name
-          (Printexc.to_string exn)
-    );
-    accept_loop ()
-  in
+  let accept_loop = make_accept_loop first_socket in
   accept_loop ()
 
 (** Graceful shutdown exception *)
