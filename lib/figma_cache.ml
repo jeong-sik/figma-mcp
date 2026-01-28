@@ -28,9 +28,16 @@ let make_cache_key ~file_key ~node_id ~options =
 
 (** 파일 시스템 유틸리티 *)
 module FS = struct
+  let rec mkdir_p path =
+    if not (Sys.file_exists path) then begin
+      let parent = Filename.dirname path in
+      if parent <> path then mkdir_p parent;
+      Unix.mkdir path 0o755
+    end
+
   let ensure_dir path =
     if not (Sys.file_exists path) then
-      Unix.mkdir path 0o755
+      mkdir_p path
 
   let read_file path =
     if Sys.file_exists path then
