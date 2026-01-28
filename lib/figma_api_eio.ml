@@ -40,7 +40,7 @@ let get_http_error_recovery code body retry_after =
   match code with
   | 400 -> {
       message = "Invalid request";
-      suggestion = "Check node_id format (should be like '123:456') and required parameters";
+      suggestion = "Check request parameters: verify file_key exists and is accessible. For node operations, verify node_id format (e.g., '123:456')";
       retryable = false;
       retry_after = 0.0;
     }
