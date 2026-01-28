@@ -723,12 +723,27 @@ let run ~sw ~net ~clock ~domain_mgr config server =
 
   (* Periodic cleanup fiber for idle plugin channels - prevents memory leaks *)
   Eio.Fiber.fork ~sw (fun () ->
+    let is_cancelled exn =
+      match exn with
+      | Eio.Cancel.Cancelled _ -> true
+      | _ -> false
+    in
     let rec cleanup_loop () =
-      Eio.Time.sleep clock 60.0; (* Clean up every 1 minute *)
-      Figma_plugin_bridge.cleanup_inactive ~ttl_seconds:300.0; (* 5 min TTL *)
+      (try
+         Eio.Time.sleep clock 60.0 (* Clean up every 1 minute *)
+       with exn ->
+         if is_cancelled exn then raise exn;
+         eprintf "[Plugin] cleanup sleep error: %s\n%!" (Printexc.to_string exn));
+      (try
+         Figma_plugin_bridge.cleanup_inactive ~ttl_seconds:300.0 (* 5 min TTL *)
+       with exn ->
+         if is_cancelled exn then raise exn;
+         eprintf "[Plugin] cleanup loop error: %s\n%!" (Printexc.to_string exn));
       cleanup_loop ()
     in
-    cleanup_loop ()
+    try cleanup_loop () with exn ->
+      if is_cancelled exn then ()
+      else eprintf "[Plugin] cleanup fatal error: %s\n%!" (Printexc.to_string exn)
   );
 
   let accept_loop = make_accept_loop first_socket in
