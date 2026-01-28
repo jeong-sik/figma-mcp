@@ -1499,6 +1499,20 @@ let sanitize_node_id id =
   ) buf;
   Bytes.to_string buf
 
+let sanitize_file_key key =
+  let buf = Buffer.create (String.length key) in
+  String.iter (fun c ->
+    let is_safe =
+      (c >= 'a' && c <= 'z') ||
+      (c >= 'A' && c <= 'Z') ||
+      (c >= '0' && c <= '9') ||
+      c = '-' || c = '_'
+    in
+    Buffer.add_char buf (if is_safe then c else '-')
+  ) key;
+  let sanitized = String.trim (Buffer.contents buf) in
+  if sanitized = "" then "unknown" else sanitized
+
 let strip_query url =
   match String.index_opt url '?' with
   | Some i -> String.sub url 0 i
@@ -1632,7 +1646,7 @@ let download_image_fill save_dir file_key (id, url) =
   | `String url when is_http_url url ->
       let ext = file_ext_from_url url in
       let path = Printf.sprintf "%s/%s/%s%s"
-        save_dir file_key (sanitize_node_id id) ext in
+        save_dir (sanitize_file_key file_key) (sanitize_node_id id) ext in
       (match Figma_effects.Perform.download_url ~url ~path with
        | Ok saved ->
            `Assoc [
@@ -1922,7 +1936,7 @@ let handle_get_node_bundle args : (Yojson.Safe.t, string) result =
                       if download then
                         if is_http_url url then
                           let path = Printf.sprintf "%s/%s/%s.%s"
-                            save_dir file_key (sanitize_node_id node_id) image_format in
+                            save_dir (sanitize_file_key file_key) (sanitize_node_id node_id) image_format in
                           (match Figma_effects.Perform.download_url ~url ~path with
                            | Ok saved -> (url, `String saved)
                            | Error err -> (url, `String ("Download error: " ^ err)))
@@ -3161,9 +3175,9 @@ let handle_image_similarity args : (Yojson.Safe.t, string) result =
             (match (url_for node_a_id, url_for node_b_id) with
              | (Ok url_a, Ok url_b) ->
                  let path_a = Printf.sprintf "%s/%s/%s__%.2f.%s"
-                   save_dir file_key (sanitize_node_id node_a_id) scale format in
+                   save_dir (sanitize_file_key file_key) (sanitize_node_id node_a_id) scale format in
                  let path_b = Printf.sprintf "%s/%s/%s__%.2f.%s"
-                   save_dir file_key (sanitize_node_id node_b_id) scale format in
+                   save_dir (sanitize_file_key file_key) (sanitize_node_id node_b_id) scale format in
                  (match Figma_effects.Perform.download_url ~url:url_a ~path:path_a with
                   | Error err -> Error err
                   | Ok saved_a ->
@@ -3736,7 +3750,7 @@ let handle_export_image args : (Yojson.Safe.t, string) result =
                          if download then
                            if is_http_url url then
                              let path = Printf.sprintf "%s/%s/%s.%s"
-                               save_dir file_key (sanitize_node_id id) format in
+                               save_dir (sanitize_file_key file_key) (sanitize_node_id id) format in
                              (match Figma_effects.Perform.download_url ~url ~path with
                               | Ok saved -> sprintf "%s: %s -> %s" id url saved
                               | Error err -> sprintf "%s: %s (download error: %s)" id url err)
@@ -3826,8 +3840,8 @@ let handle_export_smart args : (Yojson.Safe.t, string) result =
                | `String url_str ->
                    let final_path =
                      if download && is_http_url url_str then
-                       let path = Printf.sprintf "%s/%s/%s.%s"
-                         save_dir (Option.get file_key) (sanitize_node_id id) format in
+                      let path = Printf.sprintf "%s/%s/%s.%s"
+                        save_dir (sanitize_file_key (Option.get file_key)) (sanitize_node_id id) format in
                        match Figma_effects.Perform.download_url ~url:url_str ~path with
                        | Ok saved -> Some saved
                        | Error _ -> Some url_str
