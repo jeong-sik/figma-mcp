@@ -689,6 +689,180 @@ figma.ui.onmessage = async (msg) => {
         try { node.remove(); } catch (e) { /* already removed */ }
         payload = { ungrouped_ids: childIds };
       }
+    } else if (command.name === "set_selection") {
+      // Set the current selection
+      const nodeIds = command.payload && command.payload.node_ids;
+      if (!nodeIds || !Array.isArray(nodeIds)) {
+        ok = false;
+        payload = { error: "node_ids array required" };
+      } else {
+        const nodes = [];
+        for (const id of nodeIds) {
+          const n = await getNodeById(id);
+          if (n) nodes.push(n);
+        }
+        figma.currentPage.selection = nodes;
+        payload = { selected_count: nodes.length, node_ids: nodes.map(n => n.id) };
+      }
+    } else if (command.name === "zoom_to") {
+      // Zoom viewport to fit specific nodes
+      const nodeIds = command.payload && command.payload.node_ids;
+      const nodeId = command.payload && command.payload.node_id;
+      let nodes = [];
+      if (nodeIds && Array.isArray(nodeIds)) {
+        for (const id of nodeIds) {
+          const n = await getNodeById(id);
+          if (n) nodes.push(n);
+        }
+      } else if (nodeId) {
+        const n = await getNodeById(nodeId);
+        if (n) nodes.push(n);
+      } else {
+        nodes = [...figma.currentPage.selection];
+      }
+      if (nodes.length === 0) {
+        ok = false;
+        payload = { error: "No nodes to zoom to" };
+      } else {
+        figma.viewport.scrollAndZoomIntoView(nodes);
+        payload = { zoomed_to: nodes.map(n => n.id), viewport: { x: figma.viewport.center.x, y: figma.viewport.center.y, zoom: figma.viewport.zoom } };
+      }
+    } else if (command.name === "reorder") {
+      // Change z-order: "front", "back", "forward", "backward"
+      const nodeId = command.payload && command.payload.node_id;
+      const direction = command.payload && command.payload.direction;
+      const node = nodeId ? await getNodeById(nodeId) : null;
+      if (!node) {
+        ok = false;
+        payload = { error: "Node not found" };
+      } else if (!node.parent || !("children" in node.parent)) {
+        ok = false;
+        payload = { error: "Node has no reorderable parent" };
+      } else {
+        const parent = node.parent;
+        const siblings = parent.children;
+        const idx = siblings.indexOf(node);
+        if (direction === "front") {
+          parent.insertChild(siblings.length - 1, node);
+        } else if (direction === "back") {
+          parent.insertChild(0, node);
+        } else if (direction === "forward" && idx < siblings.length - 1) {
+          parent.insertChild(idx + 1, node);
+        } else if (direction === "backward" && idx > 0) {
+          parent.insertChild(idx - 1, node);
+        }
+        payload = { node_id: node.id, direction, new_index: parent.children.indexOf(node) };
+      }
+    } else if (command.name === "set_locked") {
+      // Lock or unlock a node
+      const nodeId = command.payload && command.payload.node_id;
+      const locked = command.payload && command.payload.locked;
+      const node = nodeId ? await getNodeById(nodeId) : null;
+      if (!node) {
+        ok = false;
+        payload = { error: "Node not found" };
+      } else if (!("locked" in node)) {
+        ok = false;
+        payload = { error: "Node cannot be locked" };
+      } else {
+        node.locked = locked !== false;
+        payload = { node_id: node.id, locked: node.locked };
+      }
+    } else if (command.name === "set_visible") {
+      // Show or hide a node
+      const nodeId = command.payload && command.payload.node_id;
+      const visible = command.payload && command.payload.visible;
+      const node = nodeId ? await getNodeById(nodeId) : null;
+      if (!node) {
+        ok = false;
+        payload = { error: "Node not found" };
+      } else if (!("visible" in node)) {
+        ok = false;
+        payload = { error: "Node cannot be hidden" };
+      } else {
+        node.visible = visible !== false;
+        payload = { node_id: node.id, visible: node.visible };
+      }
+    } else if (command.name === "flatten") {
+      // Flatten a vector node
+      const nodeId = command.payload && command.payload.node_id;
+      const node = nodeId ? await getNodeById(nodeId) : null;
+      if (!node) {
+        ok = false;
+        payload = { error: "Node not found" };
+      } else if (typeof node.flatten !== "function") {
+        ok = false;
+        payload = { error: "Node cannot be flattened" };
+      } else {
+        const flattened = figma.flatten([node]);
+        payload = { original_id: nodeId, flattened_id: flattened.id };
+      }
+    } else if (command.name === "set_auto_layout") {
+      // Enable or modify auto layout on a frame
+      const nodeId = command.payload && command.payload.node_id;
+      const node = nodeId ? await getNodeById(nodeId) : null;
+      if (!node) {
+        ok = false;
+        payload = { error: "Node not found" };
+      } else if (node.type !== "FRAME" && node.type !== "COMPONENT") {
+        ok = false;
+        payload = { error: "Only FRAME or COMPONENT can have auto layout" };
+      } else {
+        const p = command.payload;
+        if (p.layoutMode) node.layoutMode = p.layoutMode; // "HORIZONTAL" | "VERTICAL" | "NONE"
+        if (typeof p.itemSpacing === "number") node.itemSpacing = p.itemSpacing;
+        if (typeof p.paddingLeft === "number") node.paddingLeft = p.paddingLeft;
+        if (typeof p.paddingRight === "number") node.paddingRight = p.paddingRight;
+        if (typeof p.paddingTop === "number") node.paddingTop = p.paddingTop;
+        if (typeof p.paddingBottom === "number") node.paddingBottom = p.paddingBottom;
+        if (p.primaryAxisAlignItems) node.primaryAxisAlignItems = p.primaryAxisAlignItems;
+        if (p.counterAxisAlignItems) node.counterAxisAlignItems = p.counterAxisAlignItems;
+        if (p.primaryAxisSizingMode) node.primaryAxisSizingMode = p.primaryAxisSizingMode;
+        if (p.counterAxisSizingMode) node.counterAxisSizingMode = p.counterAxisSizingMode;
+        payload = {
+          node_id: node.id,
+          layoutMode: node.layoutMode,
+          itemSpacing: node.itemSpacing,
+          padding: { left: node.paddingLeft, right: node.paddingRight, top: node.paddingTop, bottom: node.paddingBottom }
+        };
+      }
+    } else if (command.name === "get_viewport") {
+      // Get current viewport info
+      payload = {
+        center: figma.viewport.center,
+        zoom: figma.viewport.zoom,
+        bounds: figma.viewport.bounds
+      };
+    } else if (command.name === "set_viewport") {
+      // Set viewport center and zoom
+      const center = command.payload && command.payload.center;
+      const zoom = command.payload && command.payload.zoom;
+      if (center && typeof center.x === "number" && typeof center.y === "number") {
+        figma.viewport.center = center;
+      }
+      if (typeof zoom === "number") {
+        figma.viewport.zoom = zoom;
+      }
+      payload = {
+        center: figma.viewport.center,
+        zoom: figma.viewport.zoom
+      };
+    } else if (command.name === "rename") {
+      // Rename a node
+      const nodeId = command.payload && command.payload.node_id;
+      const newName = command.payload && command.payload.name;
+      const node = nodeId ? await getNodeById(nodeId) : null;
+      if (!node) {
+        ok = false;
+        payload = { error: "Node not found" };
+      } else if (!newName) {
+        ok = false;
+        payload = { error: "name is required" };
+      } else {
+        const oldName = node.name;
+        node.name = newName;
+        payload = { node_id: node.id, old_name: oldName, new_name: node.name };
+      }
     } else {
       ok = false;
       payload = { error: "Unknown command" };
