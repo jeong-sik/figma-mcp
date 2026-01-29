@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.16] - 2026-01-29
+
+### Changed
+- STRAP pattern: Consolidate 8 plugin tools → 1 unified `figma_plugin` tool
+- Tool count: 51 → 44 (14% reduction, ~14% context savings)
+
+### Plugin Actions
+- `connect`, `use_channel`, `status`, `read_selection`
+- `get_node`, `export_image`, `get_variables`, `apply_ops`
+
+### Sources
+- [STRAP Pattern](https://almatuck.com/articles/reduced-mcp-tools-96-to-10-strap-pattern)
+- [MCP Spec 2025-11-25](https://modelcontextprotocol.io/specification/2025-11-25)
+
 ## [0.3.15] - 2026-01-29
 
 ### Improved
