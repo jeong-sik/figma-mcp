@@ -621,8 +621,10 @@ let tool_figma_plugin : tool_def = {
       "outline_stroke"; "set_blend_mode"; "get_selection_colors";
       "swap_fill_stroke"; "copy_style"; "get_fonts"; "set_parent";
       "create_vector"; "set_image_fill"; "get_plugin_data"; "set_plugin_data";
-      "get_doc_info"; "get_absolute_bounds"; "create_component_set"; "remove_auto_layout"
-    ] "72개 action: 연결(3), 페이지(4), 문서(get_doc_info), 생성(frame/rectangle/ellipse/text/line/polygon/star/vector/component/component_set), 조회(node/selection/components/styles/colors/fonts/viewport/absolute_bounds/plugin_data), 편집(clone/duplicate/delete/group/ungroup/flatten/detach/set_parent), 변형(resize/move/rotate/flip/reorder), 불리언(4), 정렬(2), 스타일(fill/stroke/effects/opacity/corner_radius/blend_mode/copy_style/swap_fill_stroke/outline_stroke/image_fill), 레이아웃(set_auto_layout/remove_auto_layout)");
+      "get_doc_info"; "get_absolute_bounds"; "create_component_set"; "remove_auto_layout";
+      "create_slice"; "set_export_settings"; "get_reactions"; "set_reactions";
+      "rasterize"; "get_shared_plugin_data"; "set_shared_plugin_data"
+    ] "79개 action: 연결(3), 페이지(4), 문서(1), 생성(frame/rectangle/ellipse/text/line/polygon/star/vector/component/component_set/slice), 조회(node/selection/components/styles/colors/fonts/viewport/absolute_bounds/plugin_data/reactions/shared_data), 편집(clone/duplicate/delete/group/ungroup/flatten/detach/set_parent), 변형(resize/move/rotate/flip/reorder), 불리언(4), 정렬(2), 스타일(17), 레이아웃(2), 내보내기(export_settings/rasterize), 프로토타입(get/set_reactions)");
     ("channel_id", string_prop "채널 ID");
     ("node_id", string_prop "노드 ID");
     ("url", string_prop "Figma URL (node_id 자동 추출)");
@@ -694,6 +696,13 @@ let tool_figma_plugin : tool_def = {
     ("data_key", string_prop "플러그인 데이터 키 (get/set_plugin_data)");
     ("data_value", string_prop "플러그인 데이터 값 (set_plugin_data)");
     ("component_ids", array_prop "컴포넌트 ID 배열 (create_component_set, 최소 2개)");
+    ("export_format", enum_prop ["PNG"; "JPG"; "SVG"; "PDF"] "내보내기 포맷 (set_export_settings)");
+    ("suffix", string_prop "내보내기 파일 접미사 (set_export_settings)");
+    ("append", bool_prop "기존 설정에 추가 여부 (set_export_settings)");
+    ("trigger", enum_prop ["ON_CLICK"; "ON_HOVER"; "ON_PRESS"; "ON_DRAG"; "AFTER_TIMEOUT"; "MOUSE_ENTER"; "MOUSE_LEAVE"; "MOUSE_UP"; "MOUSE_DOWN"] "인터랙션 트리거 (set_reactions)");
+    ("navigation", enum_prop ["NAVIGATE"; "SWAP"; "OVERLAY"; "SCROLL_TO"; "CHANGE_TO"] "네비게이션 타입 (set_reactions)");
+    ("preserve_scroll", bool_prop "스크롤 위치 유지 (set_reactions)");
+    ("namespace", string_prop "공유 플러그인 데이터 네임스페이스 (get/set_shared_plugin_data)");
   ] ["action"];
 }
 
@@ -5514,6 +5523,142 @@ let handle_plugin_remove_auto_layout args : (Yojson.Safe.t, string) result =
        | Error err -> Error err
        | Ok result -> Ok (make_text_content (Yojson.Safe.pretty_to_string result.payload)))
 
+(* create_slice 핸들러 *)
+let handle_plugin_create_slice args : (Yojson.Safe.t, string) result =
+  match resolve_channel_id args with
+  | Error msg -> Error msg
+  | Ok channel_id ->
+      let timeout_ms = get_int "timeout_ms" args |> Option.value ~default:10000 in
+      let name = get_string "name" args in
+      let x = get_float "x" args in
+      let y = get_float "y" args in
+      let width = get_float "width" args in
+      let height = get_float "height" args in
+      let fields = [] in
+      let fields = match name with Some v -> ("name", `String v) :: fields | None -> fields in
+      let fields = match x with Some v -> ("x", `Float v) :: fields | None -> fields in
+      let fields = match y with Some v -> ("y", `Float v) :: fields | None -> fields in
+      let fields = match width with Some v -> ("width", `Float v) :: fields | None -> fields in
+      let fields = match height with Some v -> ("height", `Float v) :: fields | None -> fields in
+      let payload = `Assoc fields in
+      let command_id = Figma_plugin_bridge.enqueue_command ~channel_id ~name:"create_slice" ~payload in
+      (match plugin_wait ~channel_id ~command_id ~timeout_ms with
+       | Error err -> Error err
+       | Ok result -> Ok (make_text_content (Yojson.Safe.pretty_to_string result.payload)))
+
+(* set_export_settings 핸들러 *)
+let handle_plugin_set_export_settings args : (Yojson.Safe.t, string) result =
+  match resolve_channel_id args with
+  | Error msg -> Error msg
+  | Ok channel_id ->
+      let timeout_ms = get_int "timeout_ms" args |> Option.value ~default:10000 in
+      let node_id = get_string "node_id" args in
+      let format = get_string "export_format" args in
+      let scale = get_float "scale" args in
+      let suffix = get_string "suffix" args in
+      let append = get_bool "append" args in
+      let fields = [] in
+      let fields = match node_id with Some v -> ("node_id", `String v) :: fields | None -> fields in
+      let fields = match format with Some v -> ("format", `String v) :: fields | None -> fields in
+      let fields = match scale with Some v -> ("scale", `Float v) :: fields | None -> fields in
+      let fields = match suffix with Some v -> ("suffix", `String v) :: fields | None -> fields in
+      let fields = match append with Some v -> ("append", `Bool v) :: fields | None -> fields in
+      let payload = `Assoc fields in
+      let command_id = Figma_plugin_bridge.enqueue_command ~channel_id ~name:"set_export_settings" ~payload in
+      (match plugin_wait ~channel_id ~command_id ~timeout_ms with
+       | Error err -> Error err
+       | Ok result -> Ok (make_text_content (Yojson.Safe.pretty_to_string result.payload)))
+
+(* get_reactions 핸들러 *)
+let handle_plugin_get_reactions args : (Yojson.Safe.t, string) result =
+  match resolve_channel_id args with
+  | Error msg -> Error msg
+  | Ok channel_id ->
+      let timeout_ms = get_int "timeout_ms" args |> Option.value ~default:10000 in
+      let node_id = get_string "node_id" args in
+      let fields = match node_id with Some v -> [("node_id", `String v)] | None -> [] in
+      let payload = `Assoc fields in
+      let command_id = Figma_plugin_bridge.enqueue_command ~channel_id ~name:"get_reactions" ~payload in
+      (match plugin_wait ~channel_id ~command_id ~timeout_ms with
+       | Error err -> Error err
+       | Ok result -> Ok (make_text_content (Yojson.Safe.pretty_to_string result.payload)))
+
+(* set_reactions 핸들러 *)
+let handle_plugin_set_reactions args : (Yojson.Safe.t, string) result =
+  match (get_string "target_id" args, resolve_channel_id args) with
+  | (None, _) -> Error "Missing required parameter: target_id"
+  | (_, Error msg) -> Error msg
+  | (Some target_id, Ok channel_id) ->
+      let timeout_ms = get_int "timeout_ms" args |> Option.value ~default:10000 in
+      let node_id = get_string "node_id" args in
+      let trigger = get_string "trigger" args |> Option.value ~default:"ON_CLICK" in
+      let navigation = get_string "navigation" args in
+      let preserve_scroll = get_bool "preserve_scroll" args in
+      let fields = [("target_id", `String target_id); ("trigger", `String trigger)] in
+      let fields = match node_id with Some v -> ("node_id", `String v) :: fields | None -> fields in
+      let fields = match navigation with Some v -> ("navigation", `String v) :: fields | None -> fields in
+      let fields = match preserve_scroll with Some v -> ("preserve_scroll", `Bool v) :: fields | None -> fields in
+      let payload = `Assoc fields in
+      let command_id = Figma_plugin_bridge.enqueue_command ~channel_id ~name:"set_reactions" ~payload in
+      (match plugin_wait ~channel_id ~command_id ~timeout_ms with
+       | Error err -> Error err
+       | Ok result -> Ok (make_text_content (Yojson.Safe.pretty_to_string result.payload)))
+
+(* rasterize 핸들러 *)
+let handle_plugin_rasterize args : (Yojson.Safe.t, string) result =
+  match resolve_channel_id args with
+  | Error msg -> Error msg
+  | Ok channel_id ->
+      let timeout_ms = get_int "timeout_ms" args |> Option.value ~default:30000 in
+      let node_id = get_string "node_id" args in
+      let format = get_string "format" args in
+      let scale = get_float "scale" args in
+      let fields = [] in
+      let fields = match node_id with Some v -> ("node_id", `String v) :: fields | None -> fields in
+      let fields = match format with Some v -> ("format", `String v) :: fields | None -> fields in
+      let fields = match scale with Some v -> ("scale", `Float v) :: fields | None -> fields in
+      let payload = `Assoc fields in
+      let command_id = Figma_plugin_bridge.enqueue_command ~channel_id ~name:"rasterize" ~payload in
+      (match plugin_wait ~channel_id ~command_id ~timeout_ms with
+       | Error err -> Error err
+       | Ok result -> Ok (make_text_content (Yojson.Safe.pretty_to_string result.payload)))
+
+(* get_shared_plugin_data 핸들러 *)
+let handle_plugin_get_shared_plugin_data args : (Yojson.Safe.t, string) result =
+  match resolve_channel_id args with
+  | Error msg -> Error msg
+  | Ok channel_id ->
+      let timeout_ms = get_int "timeout_ms" args |> Option.value ~default:10000 in
+      let node_id = get_string "node_id" args in
+      let namespace = get_string "namespace" args |> Option.value ~default:"shared" in
+      let key = get_string "data_key" args in
+      let fields = [("namespace", `String namespace)] in
+      let fields = match node_id with Some v -> ("node_id", `String v) :: fields | None -> fields in
+      let fields = match key with Some v -> ("key", `String v) :: fields | None -> fields in
+      let payload = `Assoc fields in
+      let command_id = Figma_plugin_bridge.enqueue_command ~channel_id ~name:"get_shared_plugin_data" ~payload in
+      (match plugin_wait ~channel_id ~command_id ~timeout_ms with
+       | Error err -> Error err
+       | Ok result -> Ok (make_text_content (Yojson.Safe.pretty_to_string result.payload)))
+
+(* set_shared_plugin_data 핸들러 *)
+let handle_plugin_set_shared_plugin_data args : (Yojson.Safe.t, string) result =
+  match (get_string "data_key" args, resolve_channel_id args) with
+  | (None, _) -> Error "Missing required parameter: data_key"
+  | (_, Error msg) -> Error msg
+  | (Some key, Ok channel_id) ->
+      let timeout_ms = get_int "timeout_ms" args |> Option.value ~default:10000 in
+      let node_id = get_string "node_id" args in
+      let namespace = get_string "namespace" args |> Option.value ~default:"shared" in
+      let value = get_string "data_value" args |> Option.value ~default:"" in
+      let fields = [("namespace", `String namespace); ("key", `String key); ("value", `String value)] in
+      let fields = match node_id with Some v -> ("node_id", `String v) :: fields | None -> fields in
+      let payload = `Assoc fields in
+      let command_id = Figma_plugin_bridge.enqueue_command ~channel_id ~name:"set_shared_plugin_data" ~payload in
+      (match plugin_wait ~channel_id ~command_id ~timeout_ms with
+       | Error err -> Error err
+       | Ok result -> Ok (make_text_content (Yojson.Safe.pretty_to_string result.payload)))
+
 (* STRAP 통합 핸들러: action으로 라우팅, 기존 핸들러 재사용 *)
 let handle_figma_plugin args : (Yojson.Safe.t, string) result =
   match get_string "action" args with
@@ -5592,7 +5737,14 @@ let handle_figma_plugin args : (Yojson.Safe.t, string) result =
       | "get_absolute_bounds" -> handle_plugin_get_absolute_bounds args
       | "create_component_set" -> handle_plugin_create_component_set args
       | "remove_auto_layout" -> handle_plugin_remove_auto_layout args
-      | _ -> Error (sprintf "Unknown action: %s. 72 actions available." action)
+      | "create_slice" -> handle_plugin_create_slice args
+      | "set_export_settings" -> handle_plugin_set_export_settings args
+      | "get_reactions" -> handle_plugin_get_reactions args
+      | "set_reactions" -> handle_plugin_set_reactions args
+      | "rasterize" -> handle_plugin_rasterize args
+      | "get_shared_plugin_data" -> handle_plugin_get_shared_plugin_data args
+      | "set_shared_plugin_data" -> handle_plugin_set_shared_plugin_data args
+      | _ -> Error (sprintf "Unknown action: %s. 79 actions available." action)
 
 (** ============== LLM Bridge 핸들러 ============== *)
 

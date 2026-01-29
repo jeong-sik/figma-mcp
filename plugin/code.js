@@ -1850,6 +1850,178 @@ figma.ui.onmessage = async (msg) => {
         node.layoutMode = "NONE";
         payload = { node_id: node.id, layout_mode: "NONE" };
       }
+    } else if (command.name === "create_slice") {
+      // Create a slice for export
+      const p = command.payload || {};
+      const slice = figma.createSlice();
+      if (p.name) slice.name = p.name;
+      if (p.x !== undefined) slice.x = p.x;
+      if (p.y !== undefined) slice.y = p.y;
+      if (p.width !== undefined && p.height !== undefined) {
+        slice.resize(p.width, p.height);
+      }
+      payload = { node_id: slice.id, name: slice.name, type: "SLICE" };
+    } else if (command.name === "set_export_settings") {
+      // Set export settings on a node
+      const p = command.payload || {};
+      const nodeId = p.node_id || p.nodeId;
+      const node = nodeId ? await getNodeById(nodeId) : (figma.currentPage.selection[0] || null);
+      if (!node) {
+        ok = false;
+        payload = { error: "Node not found" };
+      } else if (!("exportSettings" in node)) {
+        ok = false;
+        payload = { error: "Node does not support export settings" };
+      } else {
+        const format = (p.format || "PNG").toUpperCase();
+        const scale = p.scale || 1;
+        const suffix = p.suffix || "";
+        const constraint = p.constraint || { type: "SCALE", value: scale };
+        const newSettings = [{
+          format: format,
+          suffix: suffix,
+          constraint: constraint
+        }];
+        // Append or replace
+        if (p.append) {
+          node.exportSettings = [...node.exportSettings, ...newSettings];
+        } else {
+          node.exportSettings = newSettings;
+        }
+        payload = { node_id: node.id, export_settings: node.exportSettings };
+      }
+    } else if (command.name === "get_reactions") {
+      // Get prototype reactions from a node
+      const p = command.payload || {};
+      const nodeId = p.node_id || p.nodeId;
+      const node = nodeId ? await getNodeById(nodeId) : (figma.currentPage.selection[0] || null);
+      if (!node) {
+        ok = false;
+        payload = { error: "Node not found" };
+      } else if (!("reactions" in node)) {
+        ok = false;
+        payload = { error: "Node does not support reactions" };
+      } else {
+        const reactions = node.reactions.map(r => ({
+          trigger: r.trigger,
+          actions: r.actions
+        }));
+        payload = { node_id: node.id, reactions: reactions };
+      }
+    } else if (command.name === "set_reactions") {
+      // Set prototype reactions on a node (simplified: navigate to node)
+      const p = command.payload || {};
+      const nodeId = p.node_id || p.nodeId;
+      const targetId = p.target_id || p.targetId;
+      const trigger = p.trigger || "ON_CLICK";
+      const node = nodeId ? await getNodeById(nodeId) : (figma.currentPage.selection[0] || null);
+      if (!node) {
+        ok = false;
+        payload = { error: "Node not found" };
+      } else if (!("reactions" in node)) {
+        ok = false;
+        payload = { error: "Node does not support reactions" };
+      } else if (!targetId) {
+        ok = false;
+        payload = { error: "target_id required for navigation" };
+      } else {
+        const targetNode = await getNodeById(targetId);
+        if (!targetNode) {
+          ok = false;
+          payload = { error: "Target node not found" };
+        } else {
+          // Create a simple navigate reaction
+          const reaction = {
+            trigger: { type: trigger },
+            actions: [{
+              type: "NODE",
+              destinationId: targetId,
+              navigation: p.navigation || "NAVIGATE",
+              transition: p.transition || null,
+              preserveScrollPosition: p.preserve_scroll || false
+            }]
+          };
+          node.reactions = [reaction];
+          payload = { node_id: node.id, target_id: targetId, trigger: trigger };
+        }
+      }
+    } else if (command.name === "rasterize") {
+      // Rasterize a node to image bytes
+      const p = command.payload || {};
+      const nodeId = p.node_id || p.nodeId;
+      const node = nodeId ? await getNodeById(nodeId) : (figma.currentPage.selection[0] || null);
+      if (!node) {
+        ok = false;
+        payload = { error: "Node not found" };
+      } else if (!("exportAsync" in node)) {
+        ok = false;
+        payload = { error: "Node does not support export" };
+      } else {
+        const format = (p.format || "PNG").toUpperCase();
+        const scale = p.scale || 1;
+        try {
+          const bytes = await node.exportAsync({
+            format: format,
+            constraint: { type: "SCALE", value: scale }
+          });
+          // Convert to base64
+          let binary = "";
+          for (let i = 0; i < bytes.length; i++) {
+            binary += String.fromCharCode(bytes[i]);
+          }
+          const base64 = btoa(binary);
+          payload = {
+            node_id: node.id,
+            format: format,
+            scale: scale,
+            size: bytes.length,
+            base64: base64
+          };
+        } catch (e) {
+          ok = false;
+          payload = { error: String(e) };
+        }
+      }
+    } else if (command.name === "get_shared_plugin_data") {
+      // Get shared plugin data (accessible across plugins)
+      const p = command.payload || {};
+      const nodeId = p.node_id || p.nodeId;
+      const namespace = p.namespace || "shared";
+      const key = p.key;
+      const node = nodeId ? await getNodeById(nodeId) : figma.currentPage;
+      if (!node) {
+        ok = false;
+        payload = { error: "Node not found" };
+      } else if (!key) {
+        // Get all shared plugin data keys for namespace
+        const keys = node.getSharedPluginDataKeys(namespace);
+        const data = {};
+        for (const k of keys) {
+          data[k] = node.getSharedPluginData(namespace, k);
+        }
+        payload = { node_id: node.id, namespace: namespace, data: data };
+      } else {
+        const value = node.getSharedPluginData(namespace, key);
+        payload = { node_id: node.id, namespace: namespace, key: key, value: value };
+      }
+    } else if (command.name === "set_shared_plugin_data") {
+      // Set shared plugin data
+      const p = command.payload || {};
+      const nodeId = p.node_id || p.nodeId;
+      const namespace = p.namespace || "shared";
+      const key = p.key;
+      const value = p.value || "";
+      const node = nodeId ? await getNodeById(nodeId) : figma.currentPage;
+      if (!node) {
+        ok = false;
+        payload = { error: "Node not found" };
+      } else if (!key) {
+        ok = false;
+        payload = { error: "Missing required parameter: key" };
+      } else {
+        node.setSharedPluginData(namespace, key, value);
+        payload = { node_id: node.id, namespace: namespace, key: key, value: value };
+      }
     } else {
       ok = false;
       payload = { error: "Unknown command" };
