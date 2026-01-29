@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.13] - 2026-01-29
+
+### Improved
+- Tool descriptions with emoji markers (🎯 CORE, 📦 RECOMMENDED, ✅ VERIFY)
+- MCP Instructions: Parse, Don't Validate principle (always start with `figma_parse_url`)
+- MCP Instructions: Error prevention checklist before API calls
+- MCP Instructions: Tool selection guide table
+- MCP Instructions: Common errors and solutions table
+- MCP Instructions: Simplified 3-step error recovery workflow
+
+### Added
+- New prompt `figma_error_troubleshoot` for systematic error diagnosis
+- Core principles summary section (Best Programmer Principles)
+- `figma_verify_visual` detailed usage guide with code example
+
 ## [0.3.12] - 2026-01-29
 
 ### Improved
