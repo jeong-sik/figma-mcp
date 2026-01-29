@@ -5382,7 +5382,7 @@ let resources : mcp_resource list = [
 let prompts : mcp_prompt list = [
   {
     name = "figma_fidelity_review";
-    description = "레이아웃/페인트/타이포 누락 필드 확인용 리뷰 프롬프트";
+    description = "🔍 REVIEW: Fidelity DSL 누락 필드 점검. *_missing 목록 확인하고 재호출 파라미터 제안. 구현 전 품질 체크에 사용.";
     arguments = [
       { name = "file_key"; description = "Figma 파일 키"; required = true };
       { name = "node_id"; description = "노드 ID"; required = true };
@@ -5414,6 +5414,52 @@ let prompts : mcp_prompt list = [
 출력:
 - 누락/의심 항목 요약
 - 필요한 재호출 파라미터 제안
+|};
+  };
+  {
+    name = "figma_error_troubleshoot";
+    description = "🩺 TROUBLESHOOT: API 에러 원인 분석 및 해결책 제안. 에러 메시지와 파라미터를 입력하면 복구 방법 안내.";
+    arguments = [
+      { name = "error_message"; description = "발생한 에러 메시지"; required = true };
+      { name = "tool_name"; description = "호출한 도구 이름"; required = true };
+      { name = "params"; description = "사용한 파라미터 (JSON)"; required = false };
+    ];
+    text = {|
+당신은 Figma MCP 에러 진단 전문가입니다.
+
+입력:
+- error_message: {{error_message}}
+- tool_name: {{tool_name}}
+- params: {{params}}
+
+진단 체크리스트:
+1) **node_id 형식 확인**
+   - 올바른 형식: `123:456` (숫자:숫자)
+   - URL에서 추출 시: `node-id=123-456` → `123:456`로 변환
+   - figma_parse_url로 URL 파싱 권장
+
+2) **file_key 확인**
+   - figma.com/file/XXXXX/... 에서 XXXXX 부분
+   - 영문+숫자 조합 (보통 22자)
+
+3) **권한 문제 (403)**
+   - FIGMA_TOKEN 환경변수 설정 확인
+   - 토큰 만료 여부 확인
+   - 파일이 팀/조직 내 공유되었는지 확인
+
+4) **리소스 없음 (404)**
+   - node_id가 해당 파일에 존재하는지 확인
+   - 버전 파라미터가 올바른지 확인 (version=...)
+
+5) **대용량 응답**
+   - depth 파라미터로 깊이 제한
+   - figma_get_node_chunk로 분할 로드
+   - large_result 반환 시 figma_read_large_result 사용
+
+출력:
+- 원인 분석 (가장 가능성 높은 원인)
+- 해결 단계 (구체적인 명령/파라미터)
+- 예방책 (향후 같은 에러 방지)
 |};
   };
 ]
