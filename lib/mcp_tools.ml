@@ -84,7 +84,7 @@ let fetch_variables_cached ~file_key ~token =
 
 let tool_figma_codegen : tool_def = {
   name = "figma_codegen";
-  description = "Figma JSON을 정확도 우선 Fidelity DSL로 변환합니다.";
+  description = "[Advanced] JSON을 Fidelity DSL로 변환. 보통 figma_get_node가 자동 처리.";
   input_schema = object_schema [
     ("json", string_prop "Figma JSON 데이터 (document 노드 또는 전체 응답)");
     ("format", enum_prop ["fidelity"; "raw"; "html"] "출력 포맷: fidelity (정확도 우선), raw (원본 JSON), html (HTML 프리뷰)");
@@ -93,7 +93,7 @@ let tool_figma_codegen : tool_def = {
 
 let tool_figma_get_file : tool_def = {
   name = "figma_get_file";
-  description = "Figma 파일 데이터를 가져와 Fidelity DSL로 변환합니다.";
+  description = "[Advanced] 전체 파일 데이터. 대용량 주의. 보통 figma_get_node로 충분.";
   input_schema = object_schema [
     ("file_key", string_prop "Figma 파일 키 (URL에서 추출: figma.com/file/KEY/...)");
     ("token", string_prop "Figma Personal Access Token (optional if FIGMA_TOKEN env var is set)");
@@ -107,7 +107,7 @@ let tool_figma_get_file : tool_def = {
 
 let tool_figma_get_file_meta : tool_def = {
   name = "figma_get_file_meta";
-  description = "Figma 파일의 컴포넌트/스타일 메타데이터를 반환합니다.";
+  description = "📋 QUICK: 파일의 컴포넌트/스타일 메타데이터. 디자인 시스템 파악.";
   input_schema = object_schema [
     ("file_key", string_prop "Figma 파일 키");
     ("token", string_prop "Figma Personal Access Token (optional if FIGMA_TOKEN env var is set)");
@@ -117,7 +117,7 @@ let tool_figma_get_file_meta : tool_def = {
 
 let tool_figma_list_screens : tool_def = {
   name = "figma_list_screens";
-  description = "Figma 파일 내 모든 화면(Frame/Component) 목록을 반환합니다.";
+  description = "📋 QUICK: 파일의 화면/Frame/Component 목록. 탐색 시작점 파악.";
   input_schema = object_schema [
     ("file_key", string_prop "Figma 파일 키");
     ("token", string_prop "Figma Personal Access Token (optional if FIGMA_TOKEN env var is set)");
@@ -192,7 +192,7 @@ let tool_figma_get_node_summary : tool_def = {
 (** 노드 자동 선택 - 점수 기반 후보 선별 *)
 let tool_figma_select_nodes : tool_def = {
   name = "figma_select_nodes";
-  description = "URL/노드 기준으로 후보 노드를 점수화해 선택 목록과 노트 텍스트를 반환합니다.";
+  description = "🎯 CORE: 후보 노드 점수화 선택. 노트/주석 자동 분리. Outside-In 첫 단계.";
   input_schema = object_schema [
     ("file_key", string_prop "Figma 파일 키");
     ("node_id", string_prop "노드 ID (예: 123:456)");
@@ -218,7 +218,7 @@ let tool_figma_select_nodes : tool_def = {
 (** 깊이 범위별 청크 로드 - 대형 노드를 점진적으로 로드 *)
 let tool_figma_get_node_chunk : tool_def = {
   name = "figma_get_node_chunk";
-  description = "특정 깊이 범위의 노드 데이터만 가져옵니다. 대형 노드를 점진적으로 로드할 때 사용합니다. depth_start=0, depth_end=2면 루트부터 2단계까지만 반환.";
+  description = "📦 CHUNK: 깊이 범위별 노드 로드. 대형 노드 점진적 탐색. depth_start=0, depth_end=2면 2단계까지.";
   input_schema = object_schema [
     ("file_key", string_prop "Figma 파일 키");
     ("node_id", string_prop "노드 ID (예: 123:456)");
@@ -240,7 +240,7 @@ let tool_figma_get_node_chunk : tool_def = {
 
 let tool_figma_fidelity_loop : tool_def = {
   name = "figma_fidelity_loop";
-  description = "DSL coverage 기반 fidelity 점수가 목표 미달이면 depth/geometry를 올리며 재조회합니다.";
+  description = "🔄 AUTO: fidelity 점수 미달 시 depth/geometry 자동 증가. 목표 달성까지 반복.";
   input_schema = object_schema [
     ("file_key", string_prop "Figma 파일 키");
     ("node_id", string_prop "노드 ID (예: 123:456)");
@@ -270,7 +270,7 @@ let tool_figma_fidelity_loop : tool_def = {
 
 let tool_figma_image_similarity : tool_def = {
   name = "figma_image_similarity";
-  description = "렌더 이미지 SSIM/PSNR 비교로 정확도를 평가합니다.";
+  description = "✅ VERIFY: 렌더 이미지 SSIM/PSNR 비교. 노드 간 정확도 평가.";
   input_schema = object_schema [
     ("file_key", string_prop "Figma 파일 키");
     ("node_a_id", string_prop "기준 노드 ID");
@@ -310,7 +310,7 @@ let tool_figma_verify_visual : tool_def = {
 (** Region-based comparison - 영역별 상세 비교 *)
 let tool_figma_compare_regions : tool_def = {
   name = "figma_compare_regions";
-  description = "두 이미지의 특정 영역들을 비교합니다. 아이콘, 헤더, 푸터 등 개별 요소의 정확도를 측정할 때 사용합니다.";
+  description = "✅ VERIFY: 이미지 영역별 비교. 아이콘/헤더/푸터 개별 정확도 측정.";
   input_schema = object_schema [
     ("image_a", string_prop "기준 이미지 경로 (Figma 렌더)");
     ("image_b", string_prop "비교 이미지 경로 (HTML 렌더)");
@@ -323,7 +323,7 @@ let tool_figma_compare_regions : tool_def = {
 (** Evolution Report - 진화 과정 리포트 조회 *)
 let tool_figma_evolution_report : tool_def = {
   name = "figma_evolution_report";
-  description = "Visual Feedback Loop의 진화 과정 리포트를 조회합니다. run_dir 없이 호출하면 최근 실행 목록을 반환하고, run_dir를 지정하면 해당 실행의 상세 리포트를 생성합니다.";
+  description = "📊 REPORT: Visual Loop 진화 리포트. run_dir 없으면 목록, 있으면 상세.";
   input_schema = object_schema [
     ("run_dir", string_prop "Evolution 디렉토리 경로 (예: /tmp/figma-evolution/run_1234567890). 없으면 최근 실행 목록 반환");
     ("generate_image", bool_prop "비교 이미지 자동 생성 여부 (기본값: true)");
@@ -333,7 +333,7 @@ let tool_figma_evolution_report : tool_def = {
 (** Compare Elements - 색상/박스 확장 메트릭 비교 *)
 let tool_figma_compare_elements : tool_def = {
   name = "figma_compare_elements";
-  description = "두 요소(색상 또는 박스)의 확장 메트릭을 비교합니다. 색상: OKLab, CIEDE2000, RGB Euclidean. 박스: IoU, GIoU, DIoU. Figma 시안과 구현체 비교에 유용합니다.";
+  description = "✅ VERIFY: 색상/박스 정밀 비교. OKLab/CIEDE2000, IoU/GIoU/DIoU 메트릭.";
   input_schema = object_schema [
     ("type", enum_prop ["color"; "box"; "full"] "비교 타입: color(색상), box(박스), full(둘 다)");
     ("color1", string_prop "첫 번째 색상 (#RRGGBB 또는 rgb(r,g,b))");
@@ -345,7 +345,7 @@ let tool_figma_compare_elements : tool_def = {
 
 let tool_figma_export_image : tool_def = {
   name = "figma_export_image";
-  description = "노드를 이미지로 내보내기 위한 URL을 반환합니다.";
+  description = "🖼️ ASSET: 노드 이미지 내보내기 URL. 에셋 다운로드용.";
   input_schema = object_schema [
     ("file_key", string_prop "Figma 파일 키");
     ("node_ids", string_prop "노드 ID들 (쉼표 구분)");
@@ -362,8 +362,7 @@ let tool_figma_export_image : tool_def = {
 (** Smart export - 자동 scale 조정 및 재귀 분할 지원 *)
 let tool_figma_export_smart : tool_def = {
   name = "figma_export_smart";
-  description = "대형 노드를 자동으로 scale 조정하거나 자식 노드로 분할하여 내보냅니다. " ^
-                "max_pixels 초과 시 자동으로 scale을 낮추거나, split_children=true면 자식 노드로 분할합니다.";
+  description = "🖼️ ASSET: 대형 노드 스마트 내보내기. max_pixels 초과 시 scale 조정 또는 분할.";
   input_schema = object_schema [
     ("file_key", string_prop "Figma 파일 키");
     ("node_id", string_prop "대상 노드 ID (단일)");
@@ -380,7 +379,7 @@ let tool_figma_export_smart : tool_def = {
 
 let tool_figma_get_image_fills : tool_def = {
   name = "figma_get_image_fills";
-  description = "파일 내 이미지 채움(image fills) 원본 URL 맵을 반환합니다.";
+  description = "🖼️ ASSET: 이미지 채움(fills) URL 맵 반환. 에셋 수집용.";
   input_schema = object_schema [
     ("file_key", string_prop "Figma 파일 키");
     ("token", string_prop "Figma Personal Access Token (optional if FIGMA_TOKEN env var is set)");
@@ -392,7 +391,7 @@ let tool_figma_get_image_fills : tool_def = {
 
 let tool_figma_get_nodes : tool_def = {
   name = "figma_get_nodes";
-  description = "여러 노드 ID의 데이터를 한 번에 가져옵니다.";
+  description = "📦 BATCH: 여러 노드 ID 데이터를 한번에. 반복 API 호출 절약.";
   input_schema = object_schema [
     ("file_key", string_prop "Figma 파일 키");
     ("node_ids", string_prop "노드 ID들 (쉼표 구분: 1:2,3:4)");
@@ -407,7 +406,7 @@ let tool_figma_get_nodes : tool_def = {
 
 let tool_figma_get_file_versions : tool_def = {
   name = "figma_get_file_versions";
-  description = "파일 버전 목록을 조회합니다.";
+  description = "[Advanced] 파일 버전 목록. 히스토리 추적용.";
   input_schema = object_schema [
     ("file_key", string_prop "Figma 파일 키");
     ("token", string_prop "Figma Personal Access Token (optional if FIGMA_TOKEN env var is set)");
@@ -416,7 +415,7 @@ let tool_figma_get_file_versions : tool_def = {
 
 let tool_figma_get_file_comments : tool_def = {
   name = "figma_get_file_comments";
-  description = "파일 코멘트 목록을 조회합니다.";
+  description = "[Advanced] 파일 코멘트 목록. 협업 히스토리 조회.";
   input_schema = object_schema [
     ("file_key", string_prop "Figma 파일 키");
     ("token", string_prop "Figma Personal Access Token (optional if FIGMA_TOKEN env var is set)");
@@ -425,7 +424,7 @@ let tool_figma_get_file_comments : tool_def = {
 
 let tool_figma_post_comment : tool_def = {
   name = "figma_post_comment";
-  description = "파일에 코멘트를 추가합니다.";
+  description = "[Advanced] 파일에 코멘트 추가. 협업/피드백용.";
   input_schema = object_schema [
     ("file_key", string_prop "Figma 파일 키");
     ("token", string_prop "Figma Personal Access Token (optional if FIGMA_TOKEN env var is set)");
@@ -438,7 +437,7 @@ let tool_figma_post_comment : tool_def = {
 
 let tool_figma_get_file_components : tool_def = {
   name = "figma_get_file_components";
-  description = "파일의 컴포넌트 목록을 조회합니다.";
+  description = "📋 QUICK: 파일의 컴포넌트 목록. 디자인 시스템 파악.";
   input_schema = object_schema [
     ("file_key", string_prop "Figma 파일 키");
     ("token", string_prop "Figma Personal Access Token (optional if FIGMA_TOKEN env var is set)");
@@ -456,7 +455,7 @@ let tool_figma_get_team_components : tool_def = {
 
 let tool_figma_get_file_component_sets : tool_def = {
   name = "figma_get_file_component_sets";
-  description = "파일의 컴포넌트 셋 목록을 조회합니다.";
+  description = "📋 QUICK: 파일의 컴포넌트 셋(Variants). 디자인 시스템 파악.";
   input_schema = object_schema [
     ("file_key", string_prop "Figma 파일 키");
     ("token", string_prop "Figma Personal Access Token (optional if FIGMA_TOKEN env var is set)");
@@ -474,7 +473,7 @@ let tool_figma_get_team_component_sets : tool_def = {
 
 let tool_figma_get_file_styles : tool_def = {
   name = "figma_get_file_styles";
-  description = "파일의 스타일 목록을 조회합니다.";
+  description = "📋 QUICK: 파일의 스타일 목록. 디자인 토큰 파악.";
   input_schema = object_schema [
     ("file_key", string_prop "Figma 파일 키");
     ("token", string_prop "Figma Personal Access Token (optional if FIGMA_TOKEN env var is set)");
@@ -492,7 +491,7 @@ let tool_figma_get_team_styles : tool_def = {
 
 let tool_figma_get_component : tool_def = {
   name = "figma_get_component";
-  description = "컴포넌트 키로 상세 정보를 조회합니다.";
+  description = "[Advanced] 컴포넌트 키로 상세 정보. 보통 figma_get_file_components로 충분.";
   input_schema = object_schema [
     ("component_key", string_prop "컴포넌트 키");
     ("token", string_prop "Figma Personal Access Token (optional if FIGMA_TOKEN env var is set)");
@@ -501,7 +500,7 @@ let tool_figma_get_component : tool_def = {
 
 let tool_figma_get_component_set : tool_def = {
   name = "figma_get_component_set";
-  description = "컴포넌트 셋 키로 상세 정보를 조회합니다.";
+  description = "[Advanced] 컴포넌트 셋 키로 상세 정보. 보통 figma_get_file_component_sets로 충분.";
   input_schema = object_schema [
     ("component_set_key", string_prop "컴포넌트 셋 키");
     ("token", string_prop "Figma Personal Access Token (optional if FIGMA_TOKEN env var is set)");
@@ -510,7 +509,7 @@ let tool_figma_get_component_set : tool_def = {
 
 let tool_figma_get_style : tool_def = {
   name = "figma_get_style";
-  description = "스타일 키로 상세 정보를 조회합니다.";
+  description = "[Advanced] 스타일 키로 상세 정보. 보통 figma_get_file_styles로 충분.";
   input_schema = object_schema [
     ("style_key", string_prop "스타일 키");
     ("token", string_prop "Figma Personal Access Token (optional if FIGMA_TOKEN env var is set)");
@@ -521,7 +520,7 @@ let tool_figma_get_style : tool_def = {
 
 let tool_figma_plugin_connect : tool_def = {
   name = "figma_plugin_connect";
-  description = "Figma Plugin 채널을 생성하거나 연결합니다.";
+  description = "🔌 PLUGIN: 채널 생성/연결. 실시간 동기화의 시작점.";
   input_schema = object_schema [
     ("channel_id", string_prop "기존 채널 ID (옵션)");
   ] [];
@@ -529,7 +528,7 @@ let tool_figma_plugin_connect : tool_def = {
 
 let tool_figma_plugin_use_channel : tool_def = {
   name = "figma_plugin_use_channel";
-  description = "기본 채널 ID를 설정합니다.";
+  description = "🔌 PLUGIN: 기본 채널 ID 설정. 매번 ID 지정 불필요.";
   input_schema = object_schema [
     ("channel_id", string_prop "채널 ID");
   ] ["channel_id"];
@@ -537,13 +536,13 @@ let tool_figma_plugin_use_channel : tool_def = {
 
 let tool_figma_plugin_status : tool_def = {
   name = "figma_plugin_status";
-  description = "현재 연결된 플러그인 채널 상태를 확인합니다.";
+  description = "🔌 PLUGIN: 채널 상태 확인. 연결 디버깅용.";
   input_schema = object_schema [] [];
 }
 
 let tool_figma_plugin_read_selection : tool_def = {
   name = "figma_plugin_read_selection";
-  description = "플러그인에서 현재 선택된 노드 정보를 가져옵니다.";
+  description = "🔌 PLUGIN: 현재 선택 노드 정보. Desktop 앱과 연동.";
   input_schema = object_schema [
     ("channel_id", string_prop "채널 ID (옵션)");
     ("depth", number_prop "자식 탐색 깊이 (기본값: 6)");
@@ -553,7 +552,7 @@ let tool_figma_plugin_read_selection : tool_def = {
 
 let tool_figma_plugin_get_node : tool_def = {
   name = "figma_plugin_get_node";
-  description = "플러그인에서 특정 노드 정보를 가져옵니다.";
+  description = "🔌 PLUGIN: 특정 노드 정보. REST API 보다 빠름.";
   input_schema = object_schema [
     ("channel_id", string_prop "채널 ID (옵션)");
     ("node_id", string_prop "노드 ID (예: 123:456)");
@@ -566,7 +565,7 @@ let tool_figma_plugin_get_node : tool_def = {
 
 let tool_figma_plugin_export_node_image : tool_def = {
   name = "figma_plugin_export_node_image";
-  description = "플러그인 exportAsync로 노드 이미지를 base64로 반환합니다.";
+  description = "🔌 PLUGIN: exportAsync로 이미지 내보내기. base64 반환.";
   input_schema = object_schema [
     ("channel_id", string_prop "채널 ID (옵션)");
     ("node_id", string_prop "노드 ID (예: 123:456)");
@@ -579,7 +578,7 @@ let tool_figma_plugin_export_node_image : tool_def = {
 
 let tool_figma_plugin_get_variables : tool_def = {
   name = "figma_plugin_get_variables";
-  description = "플러그인 Variables API로 로컬 변수/컬렉션을 가져옵니다.";
+  description = "🔌 PLUGIN: Variables API로 로컬 변수/컬렉션. 디자인 토큰 추출.";
   input_schema = object_schema [
     ("channel_id", string_prop "채널 ID (옵션)");
     ("timeout_ms", number_prop "응답 대기 시간 (기본값: 20000)");
@@ -588,7 +587,7 @@ let tool_figma_plugin_get_variables : tool_def = {
 
 let tool_figma_plugin_apply_ops : tool_def = {
   name = "figma_plugin_apply_ops";
-  description = "플러그인으로 노드 생성/수정/삭제 작업을 요청합니다.";
+  description = "🔌 PLUGIN: 노드 생성/수정/삭제. 실시간 디자인 편집.";
   input_schema = object_schema [
     ("channel_id", string_prop "채널 ID (옵션)");
     ("ops", array_prop "작업 목록 (create/update/delete 오브젝트 배열)");
@@ -599,7 +598,7 @@ let tool_figma_plugin_apply_ops : tool_def = {
 
 let tool_figma_parse_url : tool_def = {
   name = "figma_parse_url";
-  description = "Figma URL에서 team_id, project_id, file_key, node_id를 추출합니다. API 호출 없이 로컬에서 파싱합니다.";
+  description = "🎯 CORE: URL 파싱 (Parse Don't Validate). file_key/node_id 추출. API 호출 없음.";
   input_schema = object_schema [
     ("url", string_prop "Figma URL (팀/프로젝트/파일/노드 페이지 모두 지원)");
   ] ["url"];
@@ -607,7 +606,7 @@ let tool_figma_parse_url : tool_def = {
 
 let tool_figma_get_me : tool_def = {
   name = "figma_get_me";
-  description = "현재 인증된 사용자 정보를 반환합니다.";
+  description = "📋 QUICK: 인증 사용자 정보. 토큰 유효성 확인용.";
   input_schema = object_schema [
     ("token", string_prop "Figma Personal Access Token (optional if FIGMA_TOKEN env var is set)");
   ] [];
@@ -615,7 +614,7 @@ let tool_figma_get_me : tool_def = {
 
 let tool_figma_list_projects : tool_def = {
   name = "figma_list_projects";
-  description = "팀의 모든 프로젝트 목록을 반환합니다.";
+  description = "📋 QUICK: 팀의 프로젝트 목록. 탐색 시작점 파악.";
   input_schema = object_schema [
     ("team_id", string_prop "팀 ID (URL에서 추출 또는 figma_parse_url 사용)");
     ("token", string_prop "Figma Personal Access Token (optional if FIGMA_TOKEN env var is set)");
@@ -624,7 +623,7 @@ let tool_figma_list_projects : tool_def = {
 
 let tool_figma_list_files : tool_def = {
   name = "figma_list_files";
-  description = "프로젝트의 모든 파일 목록을 반환합니다.";
+  description = "📋 QUICK: 프로젝트의 파일 목록. 탐색 시작점 파악.";
   input_schema = object_schema [
     ("project_id", string_prop "프로젝트 ID");
     ("token", string_prop "Figma Personal Access Token (optional if FIGMA_TOKEN env var is set)");
@@ -633,7 +632,7 @@ let tool_figma_list_files : tool_def = {
 
 let tool_figma_get_variables : tool_def = {
   name = "figma_get_variables";
-  description = "파일의 디자인 토큰/변수를 반환합니다 (색상, 타이포, 간격 등).";
+  description = "📦 TOKENS: 파일의 디자인 토큰/변수. 색상, 타이포, 간격 등.";
   input_schema = object_schema [
     ("file_key", string_prop "Figma 파일 키");
     ("token", string_prop "Figma Personal Access Token (optional if FIGMA_TOKEN env var is set)");
@@ -676,7 +675,7 @@ let tool_figma_search : tool_def = {
 
 let tool_figma_compare : tool_def = {
   name = "figma_compare";
-  description = "두 노드(또는 Web/Mobile 컴포넌트)를 비교하여 일관성을 검사합니다. 크기, 색상, 타이포그래피, 레이아웃 차이를 분석합니다.";
+  description = "✅ VERIFY: 두 노드 일관성 검사. 크기/색상/타이포/레이아웃 차이 분석.";
   input_schema = object_schema [
     ("file_key", string_prop "Figma 파일 키");
     ("token", string_prop "Figma Personal Access Token (optional if FIGMA_TOKEN env var is set)");
@@ -704,7 +703,7 @@ let tool_figma_tree : tool_def = {
 
 let tool_figma_stats : tool_def = {
   name = "figma_stats";
-  description = "Figma 파일의 디자인 통계를 분석합니다. 색상, 폰트, 크기, 컴포넌트 사용 현황.";
+  description = "📊 REPORT: 파일 디자인 통계. 색상/폰트/크기/컴포넌트 현황.";
   input_schema = object_schema [
     ("file_key", string_prop "Figma 파일 키");
     ("token", string_prop "Figma Personal Access Token (optional if FIGMA_TOKEN env var is set)");
@@ -714,7 +713,7 @@ let tool_figma_stats : tool_def = {
 
 let tool_figma_export_tokens : tool_def = {
   name = "figma_export_tokens";
-  description = "Figma 파일에서 디자인 토큰을 추출합니다. CSS, Tailwind, JSON, Semantic DSL 포맷 지원.";
+  description = "📦 TOKENS: 디자인 토큰 추출. CSS/Tailwind/JSON/Semantic DSL 지원.";
   input_schema = object_schema [
     ("file_key", string_prop "Figma 파일 키");
     ("token", string_prop "Figma Personal Access Token (optional if FIGMA_TOKEN env var is set)");
@@ -726,14 +725,14 @@ let tool_figma_export_tokens : tool_def = {
 (** 환경/의존성 점검 도구 *)
 let tool_figma_doctor : tool_def = {
   name = "figma_doctor";
-  description = "로컬 의존성(Node/Playwright/ImageMagick) 및 스크립트 경로를 점검합니다.";
+  description = "🔧 UTIL: 로컬 의존성 점검. Node/Playwright/ImageMagick 확인.";
   input_schema = object_schema [] [];
 }
 
 (** large_result 파일 읽기 *)
 let tool_figma_read_large_result : tool_def = {
   name = "figma_read_large_result";
-  description = "large_result로 저장된 파일을 offset/limit로 읽습니다.";
+  description = "🔧 UTIL: large_result 파일 읽기. offset/limit로 분할 읽기.";
   input_schema = object_schema [
     ("file_path", string_prop "large_result file_path");
     ("offset", number_prop "읽기 시작 바이트 (기본값: 0)");
@@ -744,13 +743,13 @@ let tool_figma_read_large_result : tool_def = {
 (** 캐시 관리 도구 *)
 let tool_figma_cache_stats : tool_def = {
   name = "figma_cache_stats";
-  description = "노드 캐시 통계를 조회합니다. L1(메모리) + L2(파일) 캐시 엔트리 수, TTL 설정 등.";
+  description = "🔧 UTIL: 캐시 통계. L1(메모리)+L2(파일) 엔트리/TTL 정보.";
   input_schema = object_schema [] [];
 }
 
 let tool_figma_cache_invalidate : tool_def = {
   name = "figma_cache_invalidate";
-  description = "노드 캐시를 무효화합니다. file_key와 node_id로 범위 지정 가능.";
+  description = "🔧 UTIL: 캐시 무효화. file_key/node_id로 범위 지정.";
   input_schema = object_schema [
     ("file_key", string_prop "무효화할 파일 키 (생략시 전체)");
     ("node_id", string_prop "무효화할 노드 ID (생략시 해당 파일 전체)");
