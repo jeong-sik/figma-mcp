@@ -595,7 +595,7 @@ let tool_figma_plugin_apply_ops : tool_def = {
   ] ["ops"];
 }
 
-(* STRAP 통합: 8개 plugin 도구 → 1개 (56→49 도구) *)
+(* STRAP 통합: plugin 도구 통합 (8→14 actions) *)
 let tool_figma_plugin : tool_def = {
   name = "figma_plugin";
   description = "🔌 PLUGIN: Figma Desktop 앱과 실시간 연동. action으로 세부 동작 선택.";
@@ -603,10 +603,12 @@ let tool_figma_plugin : tool_def = {
     ("action", enum_prop [
       "connect"; "use_channel"; "status";
       "read_selection"; "get_node"; "export_image";
-      "get_variables"; "apply_ops"
-    ] "수행할 동작: connect(채널 생성), use_channel(기본 채널 설정), status(상태 확인), read_selection(선택 노드), get_node(노드 정보), export_image(이미지 내보내기), get_variables(변수 조회), apply_ops(노드 편집)");
+      "get_variables"; "apply_ops";
+      "list_pages"; "switch_page"; "list_components";
+      "clone"; "group"; "ungroup"
+    ] "수행할 동작: connect(채널 생성), use_channel(기본 채널 설정), status(상태 확인), read_selection(선택 노드), get_node(노드 정보), export_image(이미지 내보내기), get_variables(변수 조회), apply_ops(노드 편집), list_pages(페이지 목록), switch_page(페이지 전환), list_components(컴포넌트 목록), clone(노드 복제), group(그룹화), ungroup(그룹 해제)");
     ("channel_id", string_prop "채널 ID (옵션, connect/use_channel에서 사용)");
-    ("node_id", string_prop "노드 ID (get_node/export_image에서 사용)");
+    ("node_id", string_prop "노드 ID (get_node/export_image/clone/ungroup에서 사용)");
     ("url", string_prop "Figma URL (node_id 자동 추출)");
     ("depth", number_prop "자식 탐색 깊이 (기본값: 6)");
     ("include_geometry", bool_prop "벡터/지오메트리 포함 여부 (기본값: true)");
@@ -614,6 +616,11 @@ let tool_figma_plugin : tool_def = {
     ("scale", number_prop "스케일 (export_image, 기본값: 1)");
     ("ops", array_prop "작업 목록 (apply_ops에서 사용)");
     ("timeout_ms", number_prop "응답 대기 시간 (기본값: 20000)");
+    ("page_id", string_prop "페이지 ID (switch_page에서 사용)");
+    ("node_ids", array_prop "노드 ID 배열 (group에서 사용)");
+    ("offset_x", number_prop "X 오프셋 (clone, 기본값: 20)");
+    ("offset_y", number_prop "Y 오프셋 (clone, 기본값: 20)");
+    ("name", string_prop "새 이름 (clone/group에서 사용)");
   ] ["action"];
 }
 
@@ -4384,6 +4391,92 @@ let handle_plugin_apply_ops args : (Yojson.Safe.t, string) result =
             ] in
            Ok (make_text_content (Yojson.Safe.pretty_to_string response)))
 
+(* list_pages 핸들러 *)
+let handle_plugin_list_pages args : (Yojson.Safe.t, string) result =
+  match resolve_channel_id args with
+  | Error msg -> Error msg
+  | Ok channel_id ->
+      let timeout_ms = get_int "timeout_ms" args |> Option.value ~default:10000 in
+      let command_id = Figma_plugin_bridge.enqueue_command ~channel_id ~name:"list_pages" ~payload:`Null in
+      (match plugin_wait ~channel_id ~command_id ~timeout_ms with
+       | Error err -> Error err
+       | Ok result -> Ok (make_text_content (Yojson.Safe.pretty_to_string result.payload)))
+
+(* switch_page 핸들러 *)
+let handle_plugin_switch_page args : (Yojson.Safe.t, string) result =
+  match (get_string "page_id" args, resolve_channel_id args) with
+  | (None, _) -> Error "Missing required parameter: page_id"
+  | (_, Error msg) -> Error msg
+  | (Some page_id, Ok channel_id) ->
+      let timeout_ms = get_int "timeout_ms" args |> Option.value ~default:10000 in
+      let payload = `Assoc [("page_id", `String page_id)] in
+      let command_id = Figma_plugin_bridge.enqueue_command ~channel_id ~name:"switch_page" ~payload in
+      (match plugin_wait ~channel_id ~command_id ~timeout_ms with
+       | Error err -> Error err
+       | Ok result -> Ok (make_text_content (Yojson.Safe.pretty_to_string result.payload)))
+
+(* list_components 핸들러 *)
+let handle_plugin_list_components args : (Yojson.Safe.t, string) result =
+  match resolve_channel_id args with
+  | Error msg -> Error msg
+  | Ok channel_id ->
+      let timeout_ms = get_int "timeout_ms" args |> Option.value ~default:20000 in
+      let command_id = Figma_plugin_bridge.enqueue_command ~channel_id ~name:"list_components" ~payload:`Null in
+      (match plugin_wait ~channel_id ~command_id ~timeout_ms with
+       | Error err -> Error err
+       | Ok result -> Ok (make_text_content (Yojson.Safe.pretty_to_string result.payload)))
+
+(* clone 핸들러 *)
+let handle_plugin_clone args : (Yojson.Safe.t, string) result =
+  match (get_string "node_id" args, resolve_channel_id args) with
+  | (None, _) -> Error "Missing required parameter: node_id"
+  | (_, Error msg) -> Error msg
+  | (Some node_id, Ok channel_id) ->
+      let timeout_ms = get_int "timeout_ms" args |> Option.value ~default:10000 in
+      let offset_x = get_int "offset_x" args |> Option.value ~default:20 in
+      let offset_y = get_int "offset_y" args |> Option.value ~default:20 in
+      let name = get_string "name" args in
+      let payload_fields = [
+        ("node_id", `String node_id);
+        ("offset_x", `Int offset_x);
+        ("offset_y", `Int offset_y);
+      ] @ (match name with Some n -> [("name", `String n)] | None -> []) in
+      let payload = `Assoc payload_fields in
+      let command_id = Figma_plugin_bridge.enqueue_command ~channel_id ~name:"clone" ~payload in
+      (match plugin_wait ~channel_id ~command_id ~timeout_ms with
+       | Error err -> Error err
+       | Ok result -> Ok (make_text_content (Yojson.Safe.pretty_to_string result.payload)))
+
+(* group 핸들러 *)
+let handle_plugin_group args : (Yojson.Safe.t, string) result =
+  match resolve_channel_id args with
+  | Error msg -> Error msg
+  | Ok channel_id ->
+      let timeout_ms = get_int "timeout_ms" args |> Option.value ~default:10000 in
+      let node_ids = get_string_list "node_ids" args in
+      let name = get_string "name" args in
+      let payload_fields =
+        (match node_ids with Some ids -> [("node_ids", `List (List.map (fun s -> `String s) ids))] | None -> []) @
+        (match name with Some n -> [("name", `String n)] | None -> []) in
+      let payload = `Assoc payload_fields in
+      let command_id = Figma_plugin_bridge.enqueue_command ~channel_id ~name:"group" ~payload in
+      (match plugin_wait ~channel_id ~command_id ~timeout_ms with
+       | Error err -> Error err
+       | Ok result -> Ok (make_text_content (Yojson.Safe.pretty_to_string result.payload)))
+
+(* ungroup 핸들러 *)
+let handle_plugin_ungroup args : (Yojson.Safe.t, string) result =
+  match (get_string "node_id" args, resolve_channel_id args) with
+  | (None, _) -> Error "Missing required parameter: node_id"
+  | (_, Error msg) -> Error msg
+  | (Some node_id, Ok channel_id) ->
+      let timeout_ms = get_int "timeout_ms" args |> Option.value ~default:10000 in
+      let payload = `Assoc [("node_id", `String node_id)] in
+      let command_id = Figma_plugin_bridge.enqueue_command ~channel_id ~name:"ungroup" ~payload in
+      (match plugin_wait ~channel_id ~command_id ~timeout_ms with
+       | Error err -> Error err
+       | Ok result -> Ok (make_text_content (Yojson.Safe.pretty_to_string result.payload)))
+
 (* STRAP 통합 핸들러: action으로 라우팅, 기존 핸들러 재사용 *)
 let handle_figma_plugin args : (Yojson.Safe.t, string) result =
   match get_string "action" args with
@@ -4398,7 +4491,13 @@ let handle_figma_plugin args : (Yojson.Safe.t, string) result =
       | "export_image" -> handle_plugin_export_node_image args
       | "get_variables" -> handle_plugin_get_variables args
       | "apply_ops" -> handle_plugin_apply_ops args
-      | _ -> Error (sprintf "Unknown action: %s. Available: connect, use_channel, status, read_selection, get_node, export_image, get_variables, apply_ops" action)
+      | "list_pages" -> handle_plugin_list_pages args
+      | "switch_page" -> handle_plugin_switch_page args
+      | "list_components" -> handle_plugin_list_components args
+      | "clone" -> handle_plugin_clone args
+      | "group" -> handle_plugin_group args
+      | "ungroup" -> handle_plugin_ungroup args
+      | _ -> Error (sprintf "Unknown action: %s. Available: connect, use_channel, status, read_selection, get_node, export_image, get_variables, apply_ops, list_pages, switch_page, list_components, clone, group, ungroup" action)
 
 (** ============== LLM Bridge 핸들러 ============== *)
 

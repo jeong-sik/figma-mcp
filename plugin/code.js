@@ -515,6 +515,26 @@ async function applyOps(ops) {
         }
         const component = figma.createComponentFromNode(node);
         results.push({ action, status: "ok", node_id: component.id, old_node_id: nodeId });
+      } else if (action === "create_instance") {
+        // Create instance from existing component
+        const componentId = op.component_id || op.componentId;
+        const component = componentId ? await getNodeById(componentId) : null;
+        if (!component) {
+          results.push({ action, status: "error", message: "Component not found" });
+          continue;
+        }
+        if (component.type !== "COMPONENT") {
+          results.push({ action, status: "error", message: "Node is not a COMPONENT, got: " + component.type });
+          continue;
+        }
+        const instance = component.createInstance();
+        const props = op.props || {};
+        if (typeof props.x === "number") instance.x = props.x;
+        if (typeof props.y === "number") instance.y = props.y;
+        if (typeof props.width === "number") instance.resize(props.width, instance.height);
+        if (typeof props.height === "number") instance.resize(instance.width, props.height);
+        if (props.name) instance.name = props.name;
+        results.push({ action, status: "ok", node_id: instance.id, component_id: componentId });
       } else {
         results.push({ action, status: "error", message: "Unknown action" });
       }
@@ -566,6 +586,108 @@ figma.ui.onmessage = async (msg) => {
       payload = await serializeVariables();
     } else if (command.name === "apply_ops") {
       payload = await applyOps(command.payload && command.payload.ops ? command.payload.ops : []);
+    } else if (command.name === "list_pages") {
+      // List all pages in the document
+      payload = {
+        pages: figma.root.children.map(page => ({
+          id: page.id,
+          name: page.name,
+          isCurrent: page.id === figma.currentPage.id
+        })),
+        currentPageId: figma.currentPage.id
+      };
+    } else if (command.name === "switch_page") {
+      // Switch to a different page (async for dynamic-page mode)
+      const pageId = command.payload && command.payload.page_id;
+      const page = pageId ? figma.root.children.find(p => p.id === pageId) : null;
+      if (!page) {
+        ok = false;
+        payload = { error: "Page not found" };
+      } else {
+        await figma.setCurrentPageAsync(page);
+        payload = { page_id: page.id, page_name: page.name };
+      }
+    } else if (command.name === "list_components") {
+      // List all local components in the file (with dynamic page loading)
+      await figma.loadAllPagesAsync();
+      const components = [];
+      function findComponents(node) {
+        if (node.type === "COMPONENT") {
+          components.push({
+            id: node.id,
+            name: node.name,
+            description: node.description || "",
+            width: node.width,
+            height: node.height,
+            page: node.parent && node.parent.type === "PAGE" ? node.parent.name : null
+          });
+        }
+        if ("children" in node) {
+          for (const child of node.children) {
+            findComponents(child);
+          }
+        }
+      }
+      for (const page of figma.root.children) {
+        findComponents(page);
+      }
+      payload = { components, count: components.length };
+    } else if (command.name === "clone") {
+      // Clone a node
+      const nodeId = command.payload && command.payload.node_id;
+      const node = nodeId ? await getNodeById(nodeId) : null;
+      if (!node) {
+        ok = false;
+        payload = { error: "Node not found" };
+      } else {
+        const clone = node.clone();
+        const offsetX = command.payload && typeof command.payload.offset_x === "number" ? command.payload.offset_x : 20;
+        const offsetY = command.payload && typeof command.payload.offset_y === "number" ? command.payload.offset_y : 20;
+        clone.x = node.x + offsetX;
+        clone.y = node.y + offsetY;
+        if (command.payload && command.payload.name) clone.name = command.payload.name;
+        payload = { node_id: clone.id, original_id: nodeId };
+      }
+    } else if (command.name === "group") {
+      // Group selected nodes or specified nodes
+      const nodeIds = command.payload && command.payload.node_ids;
+      let nodes = [];
+      if (nodeIds && Array.isArray(nodeIds)) {
+        for (const id of nodeIds) {
+          const n = await getNodeById(id);
+          if (n) nodes.push(n);
+        }
+      } else {
+        nodes = [...figma.currentPage.selection];
+      }
+      if (nodes.length < 1) {
+        ok = false;
+        payload = { error: "No nodes to group" };
+      } else {
+        const group = figma.group(nodes, figma.currentPage);
+        if (command.payload && command.payload.name) group.name = command.payload.name;
+        payload = { group_id: group.id, children_count: nodes.length };
+      }
+    } else if (command.name === "ungroup") {
+      // Ungroup a group node
+      const nodeId = command.payload && command.payload.node_id;
+      const node = nodeId ? await getNodeById(nodeId) : null;
+      if (!node) {
+        ok = false;
+        payload = { error: "Node not found" };
+      } else if (node.type !== "GROUP") {
+        ok = false;
+        payload = { error: "Node is not a GROUP" };
+      } else {
+        const children = [...node.children];
+        const parent = node.parent;
+        const childIds = children.map(c => c.id);
+        for (const child of children) {
+          parent.appendChild(child);
+        }
+        node.remove();
+        payload = { ungrouped_ids: childIds };
+      }
     } else {
       ok = false;
       payload = { error: "Unknown command" };
