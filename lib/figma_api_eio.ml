@@ -40,7 +40,16 @@ let get_http_error_recovery code body retry_after =
   match code with
   | 400 -> {
       message = "Invalid request";
-      suggestion = "Check request parameters: verify file_key exists and is accessible. For node operations, verify node_id format (e.g., '123:456')";
+      suggestion =
+        (let body_lower = String.lowercase_ascii body in
+         if string_contains body_lower "invalid" && string_contains body_lower "id" then
+           "Invalid ID format. Node IDs should be like '123:456', file keys are alphanumeric strings."
+         else if string_contains body_lower "missing" then
+           "Missing required parameter. Check file_key, node_id, or other required fields."
+         else if string_contains body_lower "node" then
+           "Node-related error. Verify the node exists and ID format is correct (e.g., '123:456')."
+         else
+           "Invalid request parameters. Check file_key and node_id are correct.");
       retryable = false;
       retry_after = 0.0;
     }
@@ -63,7 +72,16 @@ let get_http_error_recovery code body retry_after =
     }
   | 404 -> {
       message = "Not found";
-      suggestion = "File or node doesn't exist. Check file_key and node_id are correct";
+      suggestion =
+        (let body_lower = String.lowercase_ascii body in
+         if string_contains body_lower "file" then
+           "File not found. The file may have been deleted, moved, or you may not have access."
+         else if string_contains body_lower "node" then
+           "Node not found. The node may have been deleted or the ID is incorrect."
+         else if string_contains body_lower "version" then
+           "Version not found. The specified version may not exist."
+         else
+           "Resource not found. Verify file_key and node_id exist and are accessible.");
       retryable = false;
       retry_after = 0.0;
     }
