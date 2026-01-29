@@ -3,7 +3,7 @@
  * 100 actions, ~800 lines (vs 2500 lines before)
  */
 
-figma.showUI(__html__, { width: 360, height: 480 });
+figma.showUI(__html__, { width: 360, height: 600 });
 
 const MIXED = figma.mixed;
 const MAX_PAYLOAD_CHARS = 2000000;
@@ -227,6 +227,49 @@ const handlers = {
       effect: safeMap(function() { return figma.getLocalEffectStyles(); }),
       grid: safeMap(function() { return figma.getLocalGridStyles(); })
     };
+  }),
+
+  get_variables: H.simple(async () => {
+    var result = { collections: [], variables: [] };
+    try {
+      if (typeof figma.variables !== "undefined") {
+        var collections = await figma.variables.getLocalVariableCollectionsAsync();
+        result.collections = collections.map(function(c) { return { id: c.id, name: c.name, modes: c.modes }; });
+        var variables = await figma.variables.getLocalVariablesAsync();
+        result.variables = variables.map(function(v) { return { id: v.id, name: v.name, resolvedType: v.resolvedType }; });
+      }
+    } catch (e) { result.error = String(e); }
+    return result;
+  }),
+
+  export_tokens: H.simple(() => {
+    var tokens = { colors: [], typography: [] };
+    try {
+      var paintStyles = figma.getLocalPaintStyles();
+      for (var i = 0; i < paintStyles.length; i++) {
+        var ps = paintStyles[i];
+        if (ps.paints && ps.paints.length > 0 && ps.paints[0].type === "SOLID") {
+          var c = ps.paints[0].color;
+          tokens.colors.push({
+            name: ps.name,
+            hex: "#" + Math.round(c.r * 255).toString(16).padStart(2, "0") +
+                      Math.round(c.g * 255).toString(16).padStart(2, "0") +
+                      Math.round(c.b * 255).toString(16).padStart(2, "0")
+          });
+        }
+      }
+      var textStyles = figma.getLocalTextStyles();
+      for (var j = 0; j < textStyles.length; j++) {
+        var ts = textStyles[j];
+        tokens.typography.push({
+          name: ts.name,
+          fontSize: ts.fontSize,
+          fontFamily: ts.fontName ? ts.fontName.family : null,
+          fontWeight: ts.fontName ? ts.fontName.style : null
+        });
+      }
+    } catch (e) { tokens.error = String(e); }
+    return tokens;
   }),
 
   get_selection_colors: H.simple(() => {
@@ -982,7 +1025,64 @@ async function handleCommand(command) {
 
 // ============== Message Handler ==============
 
+// Helper: Get selection data for inspector
+function getSelectionData() {
+  var sel = figma.currentPage.selection;
+  if (sel.length === 0) return { count: 0, nodes: [] };
+  return {
+    count: sel.length,
+    nodes: sel.slice(0, 5).map(function(n) {
+      var data = {
+        id: n.id,
+        name: n.name,
+        type: n.type,
+        x: n.x,
+        y: n.y,
+        width: n.width,
+        height: n.height
+      };
+      if ("opacity" in n) data.opacity = n.opacity;
+      if ("fills" in n && n.fills !== MIXED) data.fills = n.fills.length;
+      return data;
+    })
+  };
+}
+
+// Helper: Extract design tokens (colors from styles)
+function extractTokens() {
+  var colors = [];
+  try {
+    var paintStyles = figma.getLocalPaintStyles();
+    for (var i = 0; i < paintStyles.length; i++) {
+      var style = paintStyles[i];
+      if (style.paints && style.paints.length > 0) {
+        var paint = style.paints[0];
+        if (paint.type === "SOLID") {
+          var c = paint.color;
+          var hex = "#" + Math.round(c.r * 255).toString(16).padStart(2, "0") +
+                         Math.round(c.g * 255).toString(16).padStart(2, "0") +
+                         Math.round(c.b * 255).toString(16).padStart(2, "0");
+          colors.push(hex);
+        }
+      }
+    }
+  } catch (e) {}
+  return colors;
+}
+
+// Selection change listener
+figma.on("selectionchange", function() {
+  figma.ui.postMessage({ type: "selection_update", selection: getSelectionData() });
+});
+
 figma.ui.onmessage = async (msg) => {
+  // Handle selection request
+  if (msg.type === "request_selection") {
+    figma.ui.postMessage({ type: "selection_update", selection: getSelectionData() });
+    figma.ui.postMessage({ type: "tokens_update", tokens: extractTokens() });
+    return;
+  }
+
   if (msg.type === "command") {
     const command = msg.command;
     const result = await handleCommand(command);
@@ -990,6 +1090,7 @@ figma.ui.onmessage = async (msg) => {
     figma.ui.postMessage({
       type: "command_result",
       command_id: command.id,
+      action: command.name,
       ok: result.ok,
       payload_json: (() => {
         try {
