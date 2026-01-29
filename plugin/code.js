@@ -331,7 +331,12 @@ const handlers = {
         style = { fontSize, fontFamily: fontName === MIXED ? "mixed" : fontName.family };
       }
       if (i === chars.length || JSON.stringify(style) !== JSON.stringify(currentStyle)) {
-        if (currentStyle) styles.push({ start, end: i, text: chars.substring(start, i), ...currentStyle });
+        if (currentStyle) {
+          var styleEntry = { start: start, end: i, text: chars.substring(start, i) };
+          if (currentStyle.fontSize !== undefined) styleEntry.fontSize = currentStyle.fontSize;
+          if (currentStyle.fontFamily !== undefined) styleEntry.fontFamily = currentStyle.fontFamily;
+          styles.push(styleEntry);
+        }
         currentStyle = style;
         start = i;
       }
@@ -495,7 +500,7 @@ const handlers = {
 
   ungroup: H.node((node) => {
     if (node.type !== "GROUP") return { error: "Node is not a group" };
-    const children = [...node.children];
+    const children = node.children.slice();
     const parent = node.parent;
     for (const child of children) parent.appendChild(child);
     node.remove();
@@ -610,10 +615,10 @@ const handlers = {
     const dir = (p.direction || "LEFT").toUpperCase();
     // Simplified alignment
     let target;
-    if (dir === "LEFT") target = Math.min(...sel.map(n => n.x));
-    else if (dir === "RIGHT") target = Math.max(...sel.map(n => n.x + n.width));
-    else if (dir === "TOP") target = Math.min(...sel.map(n => n.y));
-    else if (dir === "BOTTOM") target = Math.max(...sel.map(n => n.y + n.height));
+    if (dir === "LEFT") target = Math.min.apply(null, sel.map(function(n) { return n.x; }));
+    else if (dir === "RIGHT") target = Math.max.apply(null, sel.map(function(n) { return n.x + n.width; }));
+    else if (dir === "TOP") target = Math.min.apply(null, sel.map(function(n) { return n.y; }));
+    else if (dir === "BOTTOM") target = Math.max.apply(null, sel.map(function(n) { return n.y + n.height; }));
     else if (dir === "CENTER_H") target = sel.reduce((s, n) => s + n.x + n.width / 2, 0) / sel.length;
     else if (dir === "CENTER_V") target = sel.reduce((s, n) => s + n.y + n.height / 2, 0) / sel.length;
 
@@ -632,7 +637,7 @@ const handlers = {
     const sel = figma.currentPage.selection;
     if (sel.length < 3) return { error: "Select at least 3 nodes" };
     const axis = (p.axis || "horizontal").toLowerCase();
-    const sorted = [...sel].sort((a, b) => axis === "horizontal" ? a.x - b.x : a.y - b.y);
+    const sorted = sel.slice().sort(function(a, b) { return axis === "horizontal" ? a.x - b.x : a.y - b.y; });
     const first = sorted[0], last = sorted[sorted.length - 1];
     const total = axis === "horizontal"
       ? (last.x + last.width) - first.x - sorted.reduce((s, n) => s + n.width, 0)
@@ -858,7 +863,7 @@ const handlers = {
     } else {
       grid.sectionSize = p.size || 10;
     }
-    node.layoutGrids = p.append ? [...node.layoutGrids, grid] : [grid];
+    node.layoutGrids = p.append ? node.layoutGrids.concat([grid]) : [grid];
     return { node_id: node.id, grids: node.layoutGrids };
   }),
 
@@ -905,7 +910,7 @@ const handlers = {
     const format = (p.format || p.export_format || "PNG").toUpperCase();
     const scale = p.scale || 1;
     const settings = [{ format, suffix: p.suffix || "", constraint: { type: "SCALE", value: scale } }];
-    node.exportSettings = p.append ? [...node.exportSettings, ...settings] : settings;
+    node.exportSettings = p.append ? node.exportSettings.concat(settings) : settings;
     return { node_id: node.id, export_settings: node.exportSettings };
   }),
 
