@@ -809,14 +809,26 @@ figma.ui.onmessage = async (msg) => {
         payload = { error: "Only FRAME or COMPONENT can have auto layout" };
       } else {
         const p = command.payload;
-        if (p.layoutMode) node.layoutMode = p.layoutMode; // "HORIZONTAL" | "VERTICAL" | "NONE"
-        if (typeof p.itemSpacing === "number") node.itemSpacing = p.itemSpacing;
-        if (typeof p.paddingLeft === "number") node.paddingLeft = p.paddingLeft;
-        if (typeof p.paddingRight === "number") node.paddingRight = p.paddingRight;
-        if (typeof p.paddingTop === "number") node.paddingTop = p.paddingTop;
-        if (typeof p.paddingBottom === "number") node.paddingBottom = p.paddingBottom;
-        if (p.primaryAxisAlignItems) node.primaryAxisAlignItems = p.primaryAxisAlignItems;
-        if (p.counterAxisAlignItems) node.counterAxisAlignItems = p.counterAxisAlignItems;
+        // Support both camelCase and snake_case
+        const layoutMode = p.layoutMode || p.layout_mode;
+        const itemSpacing = p.itemSpacing ?? p.item_spacing;
+        const padding = p.padding;
+        const primaryAlignment = p.primaryAxisAlignItems || p.primary_alignment;
+        const counterAlignment = p.counterAxisAlignItems || p.counter_alignment;
+
+        if (layoutMode) node.layoutMode = layoutMode; // "HORIZONTAL" | "VERTICAL" | "NONE"
+        if (typeof itemSpacing === "number") node.itemSpacing = itemSpacing;
+        // Handle single padding value or individual values
+        if (typeof padding === "number") {
+          node.paddingLeft = node.paddingRight = node.paddingTop = node.paddingBottom = padding;
+        } else {
+          if (typeof p.paddingLeft === "number") node.paddingLeft = p.paddingLeft;
+          if (typeof p.paddingRight === "number") node.paddingRight = p.paddingRight;
+          if (typeof p.paddingTop === "number") node.paddingTop = p.paddingTop;
+          if (typeof p.paddingBottom === "number") node.paddingBottom = p.paddingBottom;
+        }
+        if (primaryAlignment) node.primaryAxisAlignItems = primaryAlignment;
+        if (counterAlignment) node.counterAxisAlignItems = counterAlignment;
         if (p.primaryAxisSizingMode) node.primaryAxisSizingMode = p.primaryAxisSizingMode;
         if (p.counterAxisSizingMode) node.counterAxisSizingMode = p.counterAxisSizingMode;
         payload = {
