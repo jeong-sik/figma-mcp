@@ -110,3 +110,10 @@
 {"timestamp":1769654618.024914,"event":["Tool_called",{"tool_name":"figma_list_screens","success":true,"duration_ms":19816,"agent_id":null,"error":null}]}
 {"timestamp":1769654630.966003,"event":["Tool_called",{"tool_name":"figma_get_node","success":true,"duration_ms":2935,"agent_id":null,"error":null}]}
 {"timestamp":1769654634.052644,"event":["Tool_called",{"tool_name":"figma_get_node","success":true,"duration_ms":2983,"agent_id":null,"error":null}]}
+{"timestamp":1769654655.92161,"event":["Tool_called",{"tool_name":"figma_export_image","success":true,"duration_ms":8509,"agent_id":null,"error":null}]}
+{"timestamp":1769655046.762278,"event":["Tool_called",{"tool_name":"figma_export_image","success":true,"duration_ms":14172,"agent_id":null,"error":null}]}
+{"timestamp":1769659824.340249,"event":["Tool_called",{"tool_name":"figma_parse_url","success":true,"duration_ms":0,"agent_id":null,"error":null}]}
+{"timestamp":1769659832.719566,"event":["Tool_called",{"tool_name":"figma_get_node_summary","success":true,"duration_ms":1036,"agent_id":null,"error":null}]}
+{"timestamp":1769659841.936681,"event":["Tool_called",{"tool_name":"figma_get_node","success":true,"duration_ms":620,"agent_id":null,"error":null}]}
+{"timestamp":1769659963.313988,"event":["Tool_called",{"tool_name":"figma_get_node","success":true,"duration_ms":3278,"agent_id":null,"error":null}]}
+{"timestamp":1769659974.376873,"event":["Tool_called",{"tool_name":"figma_get_node","success":true,"duration_ms":2744,"agent_id":null,"error":null}]}
