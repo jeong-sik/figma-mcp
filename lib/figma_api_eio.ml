@@ -127,7 +127,14 @@ let get_network_error_recovery msg =
 let api_error_to_friendly_string = function
   | Http_error (code, body, retry_after) ->
       let recovery = get_http_error_recovery code body retry_after in
-      sprintf "%s: %s" recovery.message recovery.suggestion
+      let body_preview =
+        if String.length body > 200 then String.sub body 0 200 ^ "..."
+        else body
+      in
+      if body_preview = "" then
+        sprintf "%s: %s" recovery.message recovery.suggestion
+      else
+        sprintf "%s: %s [API response: %s]" recovery.message recovery.suggestion body_preview
   | Json_error msg -> sprintf "Invalid response from Figma: %s" msg
   | Network_error msg ->
       let recovery = get_network_error_recovery msg in

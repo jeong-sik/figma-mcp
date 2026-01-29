@@ -4,6 +4,11 @@
 
 set -e
 
+# Try to raise the file descriptor limit to avoid EMFILE accept crashes.
+# This must never be fatal under launchd.
+ULIMIT_NOFILE="${FIGMA_ULIMIT_NOFILE:-65536}"
+ulimit -n "$ULIMIT_NOFILE" >/dev/null 2>&1 || true
+
 # Load FIGMA_TOKEN from Keychain if not already set
 if [ -z "$FIGMA_TOKEN" ]; then
   FIGMA_TOKEN=$(security find-generic-password -s "figma-mcp" -a "FIGMA_TOKEN" -w 2>/dev/null || true)
