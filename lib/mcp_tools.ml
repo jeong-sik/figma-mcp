@@ -126,7 +126,7 @@ let tool_figma_list_screens : tool_def = {
 
 let tool_figma_get_node : tool_def = {
   name = "figma_get_node";
-  description = "특정 노드 ID의 데이터를 가져와 Fidelity DSL로 변환합니다. (전체 재귀는 gRPC GetNodeStream recursive 사용 권장)";
+  description = "🎯 CORE: Figma 노드를 Fidelity DSL로 변환. UI 구현의 첫 단계로 사용. URL 또는 file_key+node_id 지정. 대형 노드는 depth 제한 권장. 반환: DSL 문자열 + 구조 정보. (전체 재귀는 gRPC GetNodeStream recursive 사용)";
   input_schema = object_schema [
     ("file_key", string_prop "Figma 파일 키");
     ("node_id", string_prop "노드 ID (예: 123:456)");
@@ -142,7 +142,7 @@ let tool_figma_get_node : tool_def = {
 
 let tool_figma_get_node_bundle : tool_def = {
   name = "figma_get_node_bundle";
-  description = "정확도 극대화 번들: 노드 DSL + 렌더 이미지 + 메타/변수/이미지 fills/플러그인 보강을 한번에 반환합니다.";
+  description = "📦 RECOMMENDED: 구현에 필요한 모든 정보를 한번에. DSL + 렌더 이미지 + 변수 + 이미지 fills. Visual Verification 전 사용 권장. download=true로 에셋 저장. 반환: 번들 JSON.";
   input_schema = object_schema [
     ("file_key", string_prop "Figma 파일 키");
     ("node_id", string_prop "노드 ID (예: 123:456)");
@@ -178,7 +178,7 @@ let tool_figma_get_node_bundle : tool_def = {
 (** 경량 구조 요약 - 큰 노드를 탐색할 때 전체 로드 없이 구조 파악 *)
 let tool_figma_get_node_summary : tool_def = {
   name = "figma_get_node_summary";
-  description = "노드의 경량 구조 요약을 반환합니다. 전체 콘텐츠 없이 자식 노드 목록, 타입, 예상 크기만 포함하여 대형 노드 탐색에 적합합니다.";
+  description = "📋 QUICK: 대형 노드 탐색 전 구조 파악. 전체 로드 없이 자식 목록/타입/크기만. Outside-In 패턴의 첫 단계. 반환: children 배열 (id, name, type, size).";
   input_schema = object_schema [
     ("file_key", string_prop "Figma 파일 키");
     ("node_id", string_prop "노드 ID (예: 123:456)");
@@ -290,7 +290,7 @@ let tool_figma_image_similarity : tool_def = {
 (** Visual Feedback Loop - 코드 생성 및 시각적 검증 *)
 let tool_figma_verify_visual : tool_def = {
   name = "figma_verify_visual";
-  description = "코드를 생성하고 Figma 렌더와 비교하여 시각적 정확도(SSIM)와 텍스트 정확도를 검증합니다. SSIM과 TEXT 모두 통과해야 overall_passed=true. SSIM < target_ssim이면 자동으로 CSS를 조정합니다. 진화 과정은 자동으로 /tmp/figma-evolution/run_*에 저장됩니다. html_screenshot 제공 시 Playwright 대신 외부 렌더링 이미지를 사용합니다 (Chrome MCP 등).";
+  description = "✅ VERIFY: HTML을 Figma 렌더와 SSIM 비교. target_ssim=0.95 기본. 미달 시 CSS 자동 조정 (max 3회). html_screenshot으로 Chrome MCP 연동 가능. 반환: ssim_score, text_match, overall_passed, evolution_dir.";
   input_schema = object_schema [
     ("file_key", string_prop "Figma 파일 키");
     ("node_id", string_prop "노드 ID (예: 123:456)");
@@ -447,7 +447,7 @@ let tool_figma_get_file_components : tool_def = {
 
 let tool_figma_get_team_components : tool_def = {
   name = "figma_get_team_components";
-  description = "팀의 컴포넌트 목록을 조회합니다.";
+  description = "[Advanced] 팀 전체 컴포넌트 목록. 디자인 시스템 감사용. 대부분 figma_get_file_components로 충분.";
   input_schema = object_schema [
     ("team_id", string_prop "팀 ID");
     ("token", string_prop "Figma Personal Access Token (optional if FIGMA_TOKEN env var is set)");
@@ -465,7 +465,7 @@ let tool_figma_get_file_component_sets : tool_def = {
 
 let tool_figma_get_team_component_sets : tool_def = {
   name = "figma_get_team_component_sets";
-  description = "팀의 컴포넌트 셋 목록을 조회합니다.";
+  description = "[Advanced] 팀 전체 컴포넌트 셋 목록. 변형(Variants) 관리용. 대부분 figma_get_file_component_sets로 충분.";
   input_schema = object_schema [
     ("team_id", string_prop "팀 ID");
     ("token", string_prop "Figma Personal Access Token (optional if FIGMA_TOKEN env var is set)");
@@ -483,7 +483,7 @@ let tool_figma_get_file_styles : tool_def = {
 
 let tool_figma_get_team_styles : tool_def = {
   name = "figma_get_team_styles";
-  description = "팀의 스타일 목록을 조회합니다.";
+  description = "[Advanced] 팀 전체 스타일 목록. 디자인 토큰 감사용. 대부분 figma_get_file_styles 또는 figma_export_tokens로 충분.";
   input_schema = object_schema [
     ("team_id", string_prop "팀 ID");
     ("token", string_prop "Figma Personal Access Token (optional if FIGMA_TOKEN env var is set)");
@@ -645,7 +645,7 @@ let tool_figma_get_variables : tool_def = {
 
 let tool_figma_query : tool_def = {
   name = "figma_query";
-  description = "노드를 조건으로 필터링합니다. SQL WHERE처럼 type, 크기, 색상 등으로 검색합니다.";
+  description = "🎛️ CORE: SQL WHERE처럼 조건 필터링. type=FRAME, width_min=300, color=#FF0000 등 조합. 특정 크기 버튼, 특정 색상 요소 찾기. 반환: 매칭 노드 목록 (id, name, bounds).";
   input_schema = object_schema [
     ("file_key", string_prop "Figma 파일 키");
     ("token", string_prop "Figma Personal Access Token (optional if FIGMA_TOKEN env var is set)");
@@ -664,7 +664,7 @@ let tool_figma_query : tool_def = {
 
 let tool_figma_search : tool_def = {
   name = "figma_search";
-  description = "텍스트 내용이나 이름으로 노드를 검색합니다.";
+  description = "🔍 CORE: 파일 내 노드를 텍스트/이름으로 검색. '버튼', 'Header' 등 키워드로 관련 노드 찾기. 반환: node_id, name, type, 좌표 목록. figma_get_node로 상세 조회 연계.";
   input_schema = object_schema [
     ("file_key", string_prop "Figma 파일 키");
     ("token", string_prop "Figma Personal Access Token (optional if FIGMA_TOKEN env var is set)");
@@ -690,7 +690,7 @@ let tool_figma_compare : tool_def = {
 
 let tool_figma_tree : tool_def = {
   name = "figma_tree";
-  description = "Figma 노드 트리를 시각적으로 표시합니다. ASCII 트리, 들여쓰기, 압축 포맷 지원.";
+  description = "🌳 CORE: 노드 계층 구조를 ASCII 트리로 시각화. 파일/노드 구조 파악에 필수. style: ascii(기본), indent, compact. max_depth로 깊이 제한. 반환: 트리 문자열 + 노드 수 통계.";
   input_schema = object_schema [
     ("file_key", string_prop "Figma 파일 키");
     ("token", string_prop "Figma Personal Access Token (optional if FIGMA_TOKEN env var is set)");
