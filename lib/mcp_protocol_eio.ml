@@ -231,6 +231,19 @@ let broadcast_sse_shutdown reason =
       with _ -> ()
   ) sse_clients
 
+(** Close all SSE connections gracefully - for shutdown *)
+let close_all_sse_connections () =
+  let client_ids = Hashtbl.fold (fun k _ acc -> k :: acc) sse_clients [] in
+  List.iter (fun id ->
+    (match Hashtbl.find_opt sse_clients id with
+     | Some client ->
+         client.connected <- false;
+         (try Httpun.Body.Writer.close client.body with _ -> ())
+     | None -> ());
+    Hashtbl.remove sse_clients id
+  ) client_ids;
+  eprintf "🎨 Figma MCP: Closed %d SSE connections\n%!" (List.length client_ids)
+
 let find_sse_client client_id =
   match client_id with
   | None -> None
@@ -773,8 +786,14 @@ let start_server ?(config = default_config) server =
       broadcast_sse_shutdown signal_name;
       eprintf "🎨 %s: Sent shutdown notification to %d SSE clients\n%!" Mcp_protocol.server_name (Hashtbl.length sse_clients);
 
-      (* Give clients 500ms to receive the notification *)
-      Unix.sleepf 0.5;
+      (* Give clients 200ms to receive the notification *)
+      Unix.sleepf 0.2;
+
+      (* Gracefully close all SSE connections before Switch.fail *)
+      close_all_sse_connections ();
+
+      (* Give connections 200ms to complete close handshake *)
+      Unix.sleepf 0.2;
 
       match !switch_ref with
       | Some sw -> Eio.Switch.fail sw Shutdown

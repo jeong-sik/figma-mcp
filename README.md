@@ -147,7 +147,40 @@ security add-generic-password -s "figma-mcp" -a "FIGMA_TOKEN" -w "YOUR_TOKEN"
 }
 ```
 
-## Figma Plugin Bridge (고정밀 스냅샷)
+## Figma Plugin Bridge (실시간 동기화 + 드로잉)
+
+### 🚀 Quick Setup (3단계)
+
+```bash
+# Step 1: 서버 시작
+./start-figma-mcp-http.sh --port 8940
+
+# Step 2: Figma Desktop에서 플러그인 Import
+# Figma → Plugins → Development → Import plugin from manifest…
+# → 이 저장소의 plugin/manifest.json 선택
+
+# Step 3: 플러그인 UI에서 Connect 클릭 → Channel ID 복사
+```
+
+이제 MCP에서 `figma_plugin action=connect`로 연결하세요!
+
+### 📝 Drawing 예시 (vectorPaths)
+
+```json
+{
+  "action": "create",
+  "node_type": "VECTOR",
+  "properties": {
+    "name": "Triangle",
+    "vectorPaths": [{"windingRule": "EVENODD", "data": "M 0 100 L 100 100 L 50 0 Z"}],
+    "fills": [{"type": "SOLID", "color": {"r": 1, "g": 0, "b": 0}}]
+  }
+}
+```
+
+---
+
+### 상세 설치 가이드
 
 REST API만으로 부족한 레이아웃/스타일 정보를 보강하려면 플러그인 브릿지를 함께 사용하세요.
 

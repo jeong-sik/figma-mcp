@@ -4,224 +4,983 @@
     <meta charset="utf-8" />
     <title>Figma MCP Bridge</title>
     <style>
-      body {
-        font-family: "IBM Plex Sans", "Arial", sans-serif;
-        font-size: 12px;
-        margin: 16px;
-        color: #111;
+      :root {
+        --bg: #ffffff;
+        --bg-secondary: #f5f5f5;
+        --bg-tertiary: #ebebeb;
+        --text: #111111;
+        --text-muted: #666666;
+        --border: #e0e0e0;
+        --accent: #0d99ff;
+        --accent-hover: #0b85e0;
+        --success: #14ae5c;
+        --error: #f24822;
+        --warning: #ffb800;
       }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #2c2c2c;
+          --bg-secondary: #383838;
+          --bg-tertiary: #444444;
+          --text: #ffffff;
+          --text-muted: #b3b3b3;
+          --border: #444444;
+        }
+      }
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+      body {
+        font-family: "Inter", "SF Pro", -apple-system, sans-serif;
+        font-size: 11px;
+        background: var(--bg);
+        color: var(--text);
+        overflow-x: hidden;
+      }
+      .container {
+        padding: 12px;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
+      .header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding-bottom: 8px;
+        border-bottom: 1px solid var(--border);
+      }
+      .header h1 {
+        font-size: 13px;
+        font-weight: 600;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .header-right {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .version { font-size: 10px; color: var(--text-muted); }
+      .ping {
+        font-size: 9px;
+        color: var(--text-muted);
+        padding: 2px 6px;
+        background: var(--bg-secondary);
+        border-radius: 4px;
+      }
+      .ping.good { color: var(--success); }
+      .ping.slow { color: var(--warning); }
+      .ping.bad { color: var(--error); }
+      .status-dot {
+        width: 8px; height: 8px;
+        border-radius: 50%;
+        background: var(--text-muted);
+        flex-shrink: 0;
+      }
+      .status-dot.connected { background: var(--success); }
+      .status-dot.error { background: var(--error); }
+      .status-dot.polling { background: var(--accent); animation: pulse 1.5s infinite; }
+      .status-dot.connecting { background: var(--warning); animation: pulse 0.8s infinite; }
+      @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+      @keyframes spin { to { transform: rotate(360deg); } }
+      .status-text { font-size: 10px; color: var(--text-muted); margin-left: 4px; }
+
       label {
         display: block;
-        margin-top: 8px;
-        font-weight: 600;
+        font-weight: 500;
+        color: var(--text-muted);
+        font-size: 10px;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        margin-bottom: 4px;
       }
-      input {
-        width: 100%;
-        box-sizing: border-box;
-        padding: 6px 8px;
-        margin-top: 4px;
-        border: 1px solid #ccc;
-        border-radius: 6px;
-        font-size: 12px;
-      }
-      button {
-        margin-top: 12px;
-        padding: 6px 10px;
-        border: none;
-        border-radius: 6px;
-        background: #111;
-        color: #fff;
-        cursor: pointer;
-      }
-      .status {
-        margin-top: 12px;
-        padding: 8px;
-        background: #f3f3f3;
+      .input-row { display: flex; gap: 4px; }
+      input, select {
+        flex: 1;
+        padding: 7px 10px;
+        border: 1px solid var(--border);
         border-radius: 6px;
         font-size: 11px;
-        line-height: 1.4;
+        background: var(--bg-secondary);
+        color: var(--text);
+        outline: none;
       }
-      .muted {
-        color: #666;
+      input:focus, select:focus { border-color: var(--accent); }
+      input:disabled, select:disabled { opacity: 0.5; cursor: not-allowed; }
+
+      .icon-btn {
+        padding: 7px;
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        cursor: pointer;
+        color: var(--text-muted);
+        font-size: 11px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        min-width: 30px;
       }
+      .icon-btn:hover:not(:disabled) { background: var(--bg-tertiary); color: var(--text); }
+      .icon-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+
+      .btn-row { display: flex; gap: 6px; }
+      button {
+        flex: 1;
+        padding: 7px 10px;
+        border: none;
+        border-radius: 6px;
+        font-size: 11px;
+        font-weight: 500;
+        cursor: pointer;
+        transition: all 0.15s;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 4px;
+      }
+      button:hover:not(:disabled) { opacity: 0.85; }
+      button:active:not(:disabled) { transform: scale(0.98); }
+      button:disabled { opacity: 0.5; cursor: not-allowed; }
+      .btn-primary { background: var(--accent); color: #fff; }
+      .btn-primary:hover:not(:disabled) { background: var(--accent-hover); }
+      .btn-secondary { background: var(--bg-secondary); color: var(--text); border: 1px solid var(--border); }
+      .btn-danger { background: var(--error); color: #fff; }
+      .btn-sm { padding: 4px 8px; font-size: 9px; flex: 0 0 auto; }
+      .spinner { width: 12px; height: 12px; border: 2px solid transparent; border-top-color: currentColor; border-radius: 50%; animation: spin 0.8s linear infinite; }
+
+      .stats {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 6px;
+        padding: 8px;
+        background: var(--bg-secondary);
+        border-radius: 6px;
+      }
+      .stat { text-align: center; }
+      .stat-value { font-size: 16px; font-weight: 600; color: var(--accent); }
+      .stat-value.success { color: var(--success); }
+      .stat-value.error { color: var(--error); }
+      .stat-label { font-size: 8px; color: var(--text-muted); text-transform: uppercase; }
+
+      .section {
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        overflow: hidden;
+      }
+      .section-header {
+        padding: 6px 10px;
+        background: var(--bg-secondary);
+        font-weight: 500;
+        font-size: 10px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        cursor: pointer;
+        user-select: none;
+      }
+      .section-header:hover { background: var(--bg-tertiary); }
+      .section-left { display: flex; align-items: center; gap: 6px; }
+      .section-actions { display: flex; gap: 6px; align-items: center; }
+      .section-action { color: var(--text-muted); cursor: pointer; font-size: 10px; }
+      .section-action:hover { color: var(--accent); }
+      .section-content { max-height: 120px; overflow-y: auto; transition: max-height 0.2s; }
+      .section-content.collapsed { max-height: 0; overflow: hidden; }
+
+      .log-content, .inspector-content, .history-content {
+        padding: 6px;
+        font-family: "SF Mono", "Menlo", monospace;
+        font-size: 10px;
+      }
+      .log-entry, .history-entry {
+        padding: 3px 0;
+        border-bottom: 1px solid var(--border);
+        display: flex;
+        gap: 6px;
+        align-items: flex-start;
+      }
+      .log-entry:last-child, .history-entry:last-child { border-bottom: none; }
+      .log-time { color: var(--text-muted); min-width: 45px; flex-shrink: 0; }
+      .log-action { color: var(--accent); min-width: 80px; flex-shrink: 0; }
+      .log-result { flex: 1; word-break: break-word; }
+      .log-result.ok { color: var(--success); }
+      .log-result.error { color: var(--error); }
+
+      .quick-actions { display: flex; flex-wrap: wrap; gap: 4px; padding: 6px; }
+      .quick-btn {
+        padding: 4px 8px;
+        font-size: 9px;
+        background: var(--bg-tertiary);
+        border: none;
+        border-radius: 4px;
+        color: var(--text);
+        cursor: pointer;
+      }
+      .quick-btn:hover { background: var(--accent); color: #fff; }
+
+      .filter-btns { display: flex; gap: 3px; }
+      .filter-btn {
+        padding: 2px 5px;
+        font-size: 8px;
+        border-radius: 3px;
+        background: transparent;
+        border: 1px solid var(--border);
+        color: var(--text-muted);
+        cursor: pointer;
+      }
+      .filter-btn.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+
+      .toggle-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 6px 10px;
+        background: var(--bg-secondary);
+        border-radius: 6px;
+        font-size: 10px;
+      }
+      .toggle {
+        width: 32px; height: 18px;
+        background: var(--border);
+        border-radius: 9px;
+        position: relative;
+        cursor: pointer;
+        transition: background 0.2s;
+      }
+      .toggle.on { background: var(--success); }
+      .toggle::after {
+        content: "";
+        position: absolute;
+        width: 14px; height: 14px;
+        background: #fff;
+        border-radius: 50%;
+        top: 2px; left: 2px;
+        transition: left 0.2s;
+      }
+      .toggle.on::after { left: 16px; }
+
+      .inspector-row {
+        display: flex;
+        justify-content: space-between;
+        padding: 3px 0;
+        border-bottom: 1px solid var(--border);
+      }
+      .inspector-row:last-child { border-bottom: none; }
+      .inspector-key { color: var(--text-muted); }
+      .inspector-value { color: var(--text); font-weight: 500; max-width: 180px; overflow: hidden; text-overflow: ellipsis; }
+
+      .token-grid {
+        display: grid;
+        grid-template-columns: repeat(6, 1fr);
+        gap: 4px;
+        padding: 6px;
+      }
+      .token-swatch {
+        width: 100%; aspect-ratio: 1;
+        border-radius: 4px;
+        cursor: pointer;
+        position: relative;
+        border: 1px solid var(--border);
+      }
+      .token-swatch:hover::after {
+        content: attr(data-color);
+        position: absolute;
+        bottom: -18px; left: 50%;
+        transform: translateX(-50%);
+        font-size: 8px;
+        background: var(--text);
+        color: var(--bg);
+        padding: 2px 4px;
+        border-radius: 2px;
+        white-space: nowrap;
+        z-index: 10;
+      }
+
+      .empty-state { color: var(--text-muted); text-align: center; padding: 15px; font-size: 10px; }
+      .badge {
+        display: inline-block;
+        padding: 1px 5px;
+        font-size: 8px;
+        border-radius: 3px;
+        background: var(--bg-tertiary);
+        color: var(--text-muted);
+      }
+      .kbd { padding: 1px 4px; background: var(--bg-tertiary); border-radius: 3px; font-size: 9px; font-family: "SF Mono", monospace; }
+
+      .test-progress {
+        padding: 6px 10px;
+        background: var(--bg-secondary);
+        border-radius: 6px;
+        font-size: 10px;
+      }
+      .progress-bar { height: 3px; background: var(--border); border-radius: 2px; margin-top: 4px; overflow: hidden; }
+      .progress-fill { height: 100%; background: var(--accent); transition: width 0.3s; }
+
+      .session-bar {
+        display: flex;
+        justify-content: space-between;
+        padding: 4px 10px;
+        background: var(--bg-secondary);
+        border-radius: 6px;
+        font-size: 9px;
+        color: var(--text-muted);
+      }
+
+      .tabs { display: flex; gap: 2px; margin-bottom: 6px; }
+      .tab {
+        padding: 4px 8px;
+        font-size: 9px;
+        background: var(--bg-secondary);
+        border: none;
+        border-radius: 4px 4px 0 0;
+        color: var(--text-muted);
+        cursor: pointer;
+      }
+      .tab.active { background: var(--accent); color: #fff; }
+      .tab-content { display: none; }
+      .tab-content.active { display: block; }
     </style>
   </head>
   <body>
-    <label for="server">Server URL</label>
-    <input id="server" value="http://localhost:8940" />
+    <div class="container">
+      <div class="header">
+        <h1>
+          <span class="status-dot" id="statusDot"></span>
+          Figma MCP
+          <span class="status-text" id="statusText">Disconnected</span>
+        </h1>
+        <div class="header-right">
+          <span class="ping" id="pingDisplay" style="display:none;">--ms</span>
+          <span class="version">v0.3.18</span>
+        </div>
+      </div>
 
-    <label for="channel">Channel ID (optional)</label>
-    <input id="channel" placeholder="Leave empty to auto-generate" />
+      <div>
+        <label>Server URL <span class="kbd">↵</span></label>
+        <div class="input-row">
+          <input id="server" value="http://localhost:8940" />
+        </div>
+      </div>
 
-    <button id="connect">Connect</button>
+      <div>
+        <label>Channel ID</label>
+        <div class="input-row">
+          <input id="channel" placeholder="Auto-generated" />
+          <button class="icon-btn" id="copyChannel" disabled title="Copy">📋</button>
+        </div>
+      </div>
 
-    <div class="status" id="status">
-      <div>Not connected</div>
-      <div class="muted">Plugin polls /plugin/poll and sends results to /plugin/result.</div>
+      <div class="btn-row">
+        <button class="btn-primary" id="connect">
+          <span id="connectText">Connect</span>
+          <span class="spinner" id="connectSpinner" style="display:none;"></span>
+        </button>
+        <button class="btn-danger" id="disconnect" style="display:none;">Disconnect</button>
+        <button class="btn-secondary" id="selfTest" disabled>Test</button>
+      </div>
+
+      <div class="toggle-row">
+        <span>Auto-reconnect</span>
+        <div class="toggle on" id="autoReconnect"></div>
+      </div>
+
+      <div class="session-bar" id="sessionBar" style="display:none;">
+        <span>⏱ <span id="sessionDuration">0:00</span></span>
+        <span>📊 <span id="successRate">-</span></span>
+        <span>🔄 <span id="cmdPerMin">0</span>/min</span>
+      </div>
+
+      <div class="stats">
+        <div class="stat">
+          <div class="stat-value" id="cmdCount">0</div>
+          <div class="stat-label">Cmds</div>
+        </div>
+        <div class="stat">
+          <div class="stat-value success" id="okCount">0</div>
+          <div class="stat-label">OK</div>
+        </div>
+        <div class="stat">
+          <div class="stat-value error" id="errCount">0</div>
+          <div class="stat-label">Err</div>
+        </div>
+        <div class="stat">
+          <div class="stat-value" id="avgPing">-</div>
+          <div class="stat-label">Ping</div>
+        </div>
+      </div>
+
+      <div id="testProgress" class="test-progress" style="display:none;">
+        <span>Testing: <span id="testName">-</span> <span id="testCount"></span></span>
+        <div class="progress-bar"><div class="progress-fill" id="testBar"></div></div>
+      </div>
+
+      <!-- Selection Inspector -->
+      <div class="section" id="inspectorSection">
+        <div class="section-header" id="inspectorHeader">
+          <span class="section-left">
+            <span>🔍 Selection</span>
+            <span class="badge" id="selectionCount">0</span>
+          </span>
+          <span class="section-action" id="toggleInspector">▼</span>
+        </div>
+        <div class="section-content" id="inspectorContent">
+          <div class="inspector-content" id="inspectorData">
+            <div class="empty-state">Select something in Figma</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Quick Actions -->
+      <div class="section" id="quickSection" style="display:none;">
+        <div class="section-header">
+          <span>⚡ Quick Actions</span>
+          <span class="section-action" id="toggleQuick">▼</span>
+        </div>
+        <div class="section-content" id="quickContent">
+          <div class="quick-actions">
+            <button class="quick-btn" data-action="read_selection">Selection</button>
+            <button class="quick-btn" data-action="list_pages">Pages</button>
+            <button class="quick-btn" data-action="get_viewport">Viewport</button>
+            <button class="quick-btn" data-action="get_doc_info">Doc Info</button>
+            <button class="quick-btn" data-action="list_components">Components</button>
+            <button class="quick-btn" data-action="get_local_styles">Styles</button>
+            <button class="quick-btn" data-action="get_fonts">Fonts</button>
+            <button class="quick-btn" data-action="get_layer_list">Layers</button>
+            <button class="quick-btn" data-action="get_variables">Variables</button>
+            <button class="quick-btn" data-action="export_tokens">Tokens</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Command History -->
+      <div class="section" id="historySection" style="display:none;">
+        <div class="section-header" id="historyHeader">
+          <span class="section-left">
+            <span>📜 History</span>
+            <span class="badge" id="historyCount">0</span>
+          </span>
+          <div class="section-actions">
+            <span class="section-action" id="clearHistory" title="Clear">✕</span>
+            <span class="section-action" id="toggleHistory">▼</span>
+          </div>
+        </div>
+        <div class="section-content" id="historyContent">
+          <div class="history-content" id="historyData">
+            <div class="empty-state">No commands yet</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Design Tokens -->
+      <div class="section" id="tokensSection" style="display:none;">
+        <div class="section-header" id="tokensHeader">
+          <span class="section-left">
+            <span>🎨 Tokens</span>
+            <span class="badge" id="tokenCount">0</span>
+          </span>
+          <div class="section-actions">
+            <span class="section-action" id="exportTokens" title="Export">↗</span>
+            <span class="section-action" id="toggleTokens">▼</span>
+          </div>
+        </div>
+        <div class="section-content" id="tokensContent">
+          <div class="token-grid" id="tokenGrid">
+            <div class="empty-state" style="grid-column: 1/-1;">Extract tokens from styles</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Activity Log -->
+      <div class="section">
+        <div class="section-header" id="logHeader">
+          <span class="section-left">
+            <span>📋 Log</span>
+            <span class="badge" id="logBadge">0</span>
+          </span>
+          <div class="section-actions">
+            <div class="filter-btns">
+              <button class="filter-btn active" data-filter="all">All</button>
+              <button class="filter-btn" data-filter="ok">OK</button>
+              <button class="filter-btn" data-filter="err">Err</button>
+            </div>
+            <span class="section-action" id="exportLogs" title="Export">↗</span>
+            <span class="section-action" id="logClear" title="Clear">✕</span>
+            <span class="section-action" id="toggleLog">▼</span>
+          </div>
+        </div>
+        <div class="section-content" id="logWrapper">
+          <div class="log-content" id="logContent">
+            <div class="empty-state">Waiting for connection...</div>
+          </div>
+        </div>
+      </div>
     </div>
 
     <script>
-      const serverInput = document.getElementById("server");
-      const channelInput = document.getElementById("channel");
-      const statusEl = document.getElementById("status");
-      const connectBtn = document.getElementById("connect");
+      // DOM refs
+      var $ = function(id) { return document.getElementById(id); };
+      var serverInput = $("server"), channelInput = $("channel"), copyChannelBtn = $("copyChannel");
+      var connectBtn = $("connect"), connectText = $("connectText"), connectSpinner = $("connectSpinner");
+      var disconnectBtn = $("disconnect"), selfTestBtn = $("selfTest");
+      var statusDot = $("statusDot"), statusText = $("statusText"), pingDisplay = $("pingDisplay");
+      var cmdCount = $("cmdCount"), okCount = $("okCount"), errCount = $("errCount"), avgPingEl = $("avgPing");
+      var sessionBar = $("sessionBar"), sessionDuration = $("sessionDuration");
+      var successRate = $("successRate"), cmdPerMin = $("cmdPerMin");
+      var autoReconnectToggle = $("autoReconnect");
+      var testProgress = $("testProgress"), testName = $("testName"), testCount = $("testCount"), testBar = $("testBar");
+      var logContent = $("logContent"), logWrapper = $("logWrapper"), logBadge = $("logBadge");
+      var inspectorData = $("inspectorData"), selectionCountBadge = $("selectionCount");
+      var historyData = $("historyData"), historyCountBadge = $("historyCount");
+      var tokenGrid = $("tokenGrid"), tokenCountBadge = $("tokenCount");
+      var quickSection = $("quickSection"), historySection = $("historySection"), tokensSection = $("tokensSection");
 
-      const STORAGE_KEY = "figmaMcpBridgeState";
+      // State
+      var STORAGE_KEY = "figmaMcpBridgeState";
+      var serverUrl = "", channelId = "", polling = false;
+      var stats = { cmd: 0, ok: 0, err: 0 };
+      var logs = [], cmdHistory = [], tokens = [];
+      var MAX_LOGS = 100, MAX_HISTORY = 20;
+      var sessionStart = null, sessionTimer = null;
+      var currentFilter = "all";
+      var pings = [], reconnectAttempts = 0, MAX_RECONNECT = 5;
+      var autoReconnect = true;
+      var lastSelection = null;
 
-      let serverUrl = serverInput.value.trim();
-      let channelId = "";
-      let polling = false;
-      const pollWaitMs = 15000;
-      const pollDelayMs = 50;
-      const errorDelayMs = 2000;
-
-      function normalizeServerUrl(raw) {
+      // Utility
+      function normalizeUrl(raw) {
         if (!raw) return "";
-        let value = raw.trim();
-        if (!value) return "";
-        if (!/^https?:\/\//i.test(value)) {
-          value = "http://" + value;
+        var v = raw.trim();
+        if (!v) return "";
+        if (!/^https?:\/\//i.test(v)) v = "http://" + v;
+        if (v.charAt(v.length - 1) === "/") v = v.slice(0, -1);
+        return v;
+      }
+      function loadState() { try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) || {}; } catch(e) { return {}; } }
+      function saveState(s) { try { localStorage.setItem(STORAGE_KEY, JSON.stringify(s)); } catch(e) {} }
+      function escapeHtml(s) { return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
+      function truncate(s, n) { return s.length > n ? s.substring(0, n-3) + "..." : s; }
+      function timeStr() {
+        var d = new Date();
+        return String(d.getHours()).padStart(2,"0") + ":" + String(d.getMinutes()).padStart(2,"0") + ":" + String(d.getSeconds()).padStart(2,"0");
+      }
+
+      // Status
+      function setStatus(st, txt) {
+        statusDot.className = "status-dot " + st;
+        statusText.textContent = txt || st.charAt(0).toUpperCase() + st.slice(1);
+      }
+
+      // Stats
+      function updateStats() {
+        cmdCount.textContent = stats.cmd;
+        okCount.textContent = stats.ok;
+        errCount.textContent = stats.err;
+        var total = stats.ok + stats.err;
+        if (total > 0) {
+          var rate = Math.round((stats.ok / total) * 100);
+          successRate.textContent = rate + "%";
+          successRate.style.color = rate >= 90 ? "var(--success)" : rate >= 70 ? "var(--warning)" : "var(--error)";
         }
-        if (value.endsWith("/")) {
-          value = value.slice(0, -1);
+        if (pings.length > 0) {
+          var avg = Math.round(pings.reduce(function(a,b){return a+b;},0) / pings.length);
+          avgPingEl.textContent = avg + "ms";
         }
-        return value;
-      }
-
-      function loadState() {
-        try {
-          const raw = localStorage.getItem(STORAGE_KEY);
-          if (!raw) return null;
-          const parsed = JSON.parse(raw);
-          if (!parsed || typeof parsed !== "object") return null;
-          return parsed;
-        } catch (err) {
-          return null;
+        if (sessionStart) {
+          var mins = (Date.now() - sessionStart) / 60000;
+          cmdPerMin.textContent = mins > 0 ? Math.round(stats.cmd / mins) : 0;
         }
       }
 
-      function saveState(state) {
-        try {
-          localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-        } catch (err) {
-          // Ignore storage failures.
-        }
+      function updatePing(ms) {
+        pings.push(ms);
+        if (pings.length > 20) pings.shift();
+        pingDisplay.style.display = "inline";
+        pingDisplay.textContent = ms + "ms";
+        pingDisplay.className = "ping " + (ms < 100 ? "good" : ms < 500 ? "slow" : "bad");
+        updateStats();
       }
 
-      function setStatus(text) {
-        statusEl.innerHTML = text;
+      function updateSessionDuration() {
+        if (!sessionStart) return;
+        var elapsed = Math.floor((Date.now() - sessionStart) / 1000);
+        var m = Math.floor(elapsed / 60), s = elapsed % 60;
+        sessionDuration.textContent = m + ":" + String(s).padStart(2, "0");
       }
 
-      const state = loadState();
-      if (state && typeof state.serverUrl === "string") {
-        serverInput.value = state.serverUrl;
-      }
-      if (state && typeof state.channelId === "string") {
-        channelInput.value = state.channelId;
+      // Logs
+      function addLog(action, result, isOk) {
+        logs.unshift({ time: timeStr(), action: action, result: result, ok: isOk });
+        if (logs.length > MAX_LOGS) logs.pop();
+        logBadge.textContent = logs.length;
+        renderLogs();
       }
 
-      async function connect() {
-        serverUrl = normalizeServerUrl(serverInput.value);
-        channelId = channelInput.value.trim();
-
-        if (!serverUrl) {
-          setStatus("<div>Error</div><div class=\"muted\">Server URL is required.</div>");
+      function renderLogs() {
+        var filtered = logs;
+        if (currentFilter === "ok") filtered = logs.filter(function(l) { return l.ok; });
+        else if (currentFilter === "err") filtered = logs.filter(function(l) { return !l.ok; });
+        if (filtered.length === 0) {
+          logContent.innerHTML = '<div class="empty-state">' + (logs.length === 0 ? "No activity" : "No matches") + '</div>';
           return;
         }
+        logContent.innerHTML = filtered.map(function(l) {
+          return '<div class="log-entry"><span class="log-time">' + l.time + '</span><span class="log-action">' +
+            escapeHtml(l.action) + '</span><span class="log-result ' + (l.ok ? "ok" : "error") + '" title="' +
+            escapeHtml(l.result) + '">' + escapeHtml(truncate(l.result, 40)) + '</span></div>';
+        }).join("");
+      }
 
+      // History
+      function addHistory(action, payload) {
+        cmdHistory.unshift({ action: action, payload: payload, time: timeStr() });
+        if (cmdHistory.length > MAX_HISTORY) cmdHistory.pop();
+        historyCountBadge.textContent = cmdHistory.length;
+        renderHistory();
+      }
+
+      function renderHistory() {
+        if (cmdHistory.length === 0) {
+          historyData.innerHTML = '<div class="empty-state">No commands yet</div>';
+          return;
+        }
+        historyData.innerHTML = cmdHistory.map(function(h, i) {
+          return '<div class="history-entry"><span class="log-time">' + h.time + '</span><span class="log-action">' +
+            h.action + '</span><button class="btn-sm btn-secondary" data-replay="' + i + '">▶</button></div>';
+        }).join("");
+      }
+
+      // Inspector
+      function updateInspector(sel) {
+        lastSelection = sel;
+        selectionCountBadge.textContent = sel ? sel.count : 0;
+        if (!sel || sel.count === 0) {
+          inspectorData.innerHTML = '<div class="empty-state">Select something in Figma</div>';
+          return;
+        }
+        var n = sel.nodes[0];
+        var rows = [
+          { k: "Name", v: n.name },
+          { k: "Type", v: n.type },
+          { k: "ID", v: truncate(n.id, 20) },
+          { k: "Size", v: Math.round(n.width) + " × " + Math.round(n.height) },
+          { k: "Position", v: Math.round(n.x) + ", " + Math.round(n.y) }
+        ];
+        if (n.fills) rows.push({ k: "Fills", v: n.fills + " fill(s)" });
+        if (n.opacity !== undefined) rows.push({ k: "Opacity", v: Math.round(n.opacity * 100) + "%" });
+        inspectorData.innerHTML = rows.map(function(r) {
+          return '<div class="inspector-row"><span class="inspector-key">' + r.k + '</span><span class="inspector-value">' + escapeHtml(String(r.v)) + '</span></div>';
+        }).join("");
+      }
+
+      // Tokens
+      function updateTokens(t) {
+        tokens = t || [];
+        tokenCountBadge.textContent = tokens.length;
+        if (tokens.length === 0) {
+          tokenGrid.innerHTML = '<div class="empty-state" style="grid-column:1/-1;">No tokens</div>';
+          return;
+        }
+        tokenGrid.innerHTML = tokens.slice(0, 18).map(function(c) {
+          return '<div class="token-swatch" style="background:' + c + ';" data-color="' + c + '"></div>';
+        }).join("");
+      }
+
+      // Connected state
+      function setConnected(connected) {
+        connectBtn.style.display = connected ? "none" : "flex";
+        disconnectBtn.style.display = connected ? "flex" : "none";
+        selfTestBtn.disabled = !connected;
+        copyChannelBtn.disabled = !connected;
+        serverInput.disabled = connected;
+        channelInput.disabled = connected;
+        quickSection.style.display = connected ? "block" : "none";
+        historySection.style.display = connected ? "block" : "none";
+        tokensSection.style.display = connected ? "block" : "none";
+        sessionBar.style.display = connected ? "flex" : "none";
+        if (connected) {
+          sessionStart = Date.now();
+          sessionTimer = setInterval(updateSessionDuration, 1000);
+          requestSelectionUpdate();
+        } else {
+          if (sessionTimer) clearInterval(sessionTimer);
+          sessionTimer = null;
+          sessionStart = null;
+          pingDisplay.style.display = "none";
+        }
+      }
+
+      function setConnecting(c) {
+        connectText.textContent = c ? "Connecting" : "Connect";
+        connectSpinner.style.display = c ? "inline-block" : "none";
+        connectBtn.disabled = c;
+      }
+
+      // Request selection update from plugin
+      function requestSelectionUpdate() {
+        parent.postMessage({ pluginMessage: { type: "request_selection" } }, "*");
+      }
+
+      // Connect
+      function connect() {
+        serverUrl = normalizeUrl(serverInput.value);
+        channelId = channelInput.value.trim();
+        if (!serverUrl) { addLog("connect", "URL required", false); setStatus("error", "URL Required"); return Promise.reject(); }
         serverInput.value = serverUrl;
-
-        const payload = channelId ? { channel_id: channelId } : {};
-        const resp = await fetch(serverUrl + "/plugin/connect", {
+        setStatus("connecting", "Connecting...");
+        setConnecting(true);
+        var startTime = Date.now();
+        var payload = channelId ? { channel_id: channelId } : {};
+        return fetch(serverUrl + "/plugin/connect", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload)
+        }).then(function(r) {
+          updatePing(Date.now() - startTime);
+          if (!r.ok) throw new Error("HTTP " + r.status);
+          return r.json();
+        }).then(function(d) {
+          channelId = d.channel_id || channelId;
+          channelInput.value = channelId;
+          saveState({ serverUrl: serverUrl, channelId: channelId });
+          setStatus("connected", "Connected");
+          setConnected(true);
+          setConnecting(false);
+          reconnectAttempts = 0;
+          addLog("connect", "Channel: " + channelId.slice(0, 8) + "...", true);
+          if (!polling) { polling = true; pollLoop(); }
+        }).catch(function(e) {
+          setStatus("error", "Failed");
+          setConnecting(false);
+          addLog("connect", String(e), false);
         });
-        if (!resp.ok) {
-          throw new Error("HTTP " + resp.status);
-        }
-        const data = await resp.json();
-        channelId = data.channel_id || channelId;
-        channelInput.value = channelId;
-
-        saveState({ serverUrl, channelId });
-
-        setStatus(
-          "<div>Connected</div>" +
-          "<div class=\"muted\">Channel: " + channelId + "</div>"
-        );
-
-        if (!polling) {
-          polling = true;
-          pollLoop();
-        }
       }
 
-      async function pollLoop() {
-        if (!channelId) {
-          polling = false;
-          return;
-        }
-        try {
-          const resp = await fetch(serverUrl + "/plugin/poll", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              channel_id: channelId,
-              max_commands: 5,
-              wait_ms: pollWaitMs
-            })
-          });
-          if (!resp.ok) {
-            throw new Error("HTTP " + resp.status);
-          }
-          const data = await resp.json();
-          const commands = Array.isArray(data.commands) ? data.commands : [];
-          for (const cmd of commands) {
-            parent.postMessage({ pluginMessage: { type: "command", command: cmd } }, "*");
-          }
-          setTimeout(pollLoop, pollDelayMs);
-        } catch (err) {
-          setStatus(
-            "<div>Error</div>" +
-            "<div class=\"muted\">" + String(err) + "</div>" +
-            "<div class=\"muted\">Check server: ./start-figma-mcp-http.sh --port 8940</div>"
-          );
-          setTimeout(pollLoop, errorDelayMs);
-        }
+      function disconnect() {
+        polling = false;
+        channelId = "";
+        setStatus("", "Disconnected");
+        setConnected(false);
+        addLog("disconnect", "User disconnected", true);
       }
 
-      window.onmessage = async (event) => {
-        const msg = event.data.pluginMessage;
-        if (!msg || msg.type !== "command_result") return;
-        if (!channelId) return;
-
-        let payload = msg.payload;
-        if (typeof msg.payload_json === "string") {
-          try {
-            payload = JSON.parse(msg.payload_json);
-          } catch (err) {
-            payload = { error: "Invalid payload_json", details: String(err) };
-          }
-        }
-
-        await fetch(serverUrl + "/plugin/result", {
+      function pollLoop() {
+        if (!channelId || !polling) { polling = false; return; }
+        setStatus("polling", "Listening...");
+        var startTime = Date.now();
+        fetch(serverUrl + "/plugin/poll", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            channel_id: channelId,
-            command_id: msg.command_id,
-            ok: msg.ok,
-            payload
-          })
+          body: JSON.stringify({ channel_id: channelId, max_commands: 5, wait_ms: 15000 })
+        }).then(function(r) {
+          updatePing(Date.now() - startTime);
+          if (!r.ok) throw new Error("HTTP " + r.status);
+          return r.json();
+        }).then(function(d) {
+          setStatus("connected", "Connected");
+          reconnectAttempts = 0;
+          var cmds = Array.isArray(d.commands) ? d.commands : [];
+          for (var i = 0; i < cmds.length; i++) {
+            var cmd = cmds[i];
+            stats.cmd++; updateStats();
+            addLog(cmd.name || "unknown", "executing...", true);
+            addHistory(cmd.name, cmd.payload);
+            parent.postMessage({ pluginMessage: { type: "command", command: cmd } }, "*");
+          }
+          if (polling) setTimeout(pollLoop, 50);
+        }).catch(function(e) {
+          reconnectAttempts++;
+          var delay = Math.min(2000 * reconnectAttempts, 10000);
+          if (autoReconnect && reconnectAttempts < MAX_RECONNECT) {
+            setStatus("error", "Retry " + reconnectAttempts + "/" + MAX_RECONNECT);
+            addLog("poll", String(e), false);
+            if (polling) setTimeout(pollLoop, delay);
+          } else {
+            polling = false;
+            setStatus("error", "Disconnected");
+            setConnected(false);
+            addLog("disconnect", autoReconnect ? "Max retries" : "Connection lost", false);
+          }
         });
+      }
+
+      // Message handler
+      window.onmessage = function(ev) {
+        var msg = ev.data.pluginMessage;
+        if (!msg) return;
+
+        if (msg.type === "command_result") {
+          if (!channelId) return;
+          var payload = msg.payload;
+          if (typeof msg.payload_json === "string") {
+            try { payload = JSON.parse(msg.payload_json); } catch(e) { payload = { error: "Parse error" }; }
+          }
+          if (msg.ok) stats.ok++; else stats.err++;
+          updateStats();
+          addLog(msg.action || "result", msg.ok ? "OK" : (payload && payload.error ? payload.error : "Error"), msg.ok);
+          fetch(serverUrl + "/plugin/result", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ channel_id: channelId, command_id: msg.command_id, ok: msg.ok, payload: payload })
+          });
+        }
+
+        if (msg.type === "selection_update") {
+          updateInspector(msg.selection);
+        }
+
+        if (msg.type === "tokens_update") {
+          updateTokens(msg.tokens);
+        }
       };
 
-      connectBtn.onclick = () => {
-        connect().catch((err) => {
-          setStatus("<div>Error</div><div class=\"muted\">" + String(err) + "</div>");
-        });
+      // Event handlers
+      connectBtn.onclick = function() { connect(); };
+      disconnectBtn.onclick = disconnect;
+      serverInput.onkeydown = function(e) { if (e.key === "Enter" && !connectBtn.disabled) connect(); };
+      copyChannelBtn.onclick = function() {
+        if (channelId) navigator.clipboard.writeText(channelId).then(function() { addLog("copy", "Copied", true); });
       };
+
+      autoReconnectToggle.onclick = function() {
+        autoReconnect = !autoReconnect;
+        autoReconnectToggle.className = "toggle" + (autoReconnect ? " on" : "");
+      };
+
+      // Filters
+      document.querySelectorAll(".filter-btn").forEach(function(b) {
+        b.onclick = function(e) {
+          e.stopPropagation();
+          document.querySelectorAll(".filter-btn").forEach(function(x) { x.classList.remove("active"); });
+          b.classList.add("active");
+          currentFilter = b.getAttribute("data-filter");
+          renderLogs();
+        };
+      });
+
+      // Quick actions
+      document.querySelectorAll(".quick-btn").forEach(function(b) {
+        b.onclick = function() {
+          var action = b.getAttribute("data-action");
+          if (!channelId) return;
+          var cmd = { id: "quick-" + Date.now(), name: action, payload: {} };
+          parent.postMessage({ pluginMessage: { type: "command", command: cmd } }, "*");
+          addLog(action, "executing...", true);
+          addHistory(action, {});
+          stats.cmd++; updateStats();
+        };
+      });
+
+      // History replay
+      historyData.onclick = function(e) {
+        var btn = e.target.closest("[data-replay]");
+        if (!btn || !channelId) return;
+        var idx = parseInt(btn.getAttribute("data-replay"));
+        var h = cmdHistory[idx];
+        if (h) {
+          var cmd = { id: "replay-" + Date.now(), name: h.action, payload: h.payload };
+          parent.postMessage({ pluginMessage: { type: "command", command: cmd } }, "*");
+          addLog(h.action, "replay...", true);
+          stats.cmd++; updateStats();
+        }
+      };
+
+      // Section toggles
+      function setupToggle(toggleId, contentId) {
+        var toggle = $(toggleId), content = $(contentId);
+        if (toggle && content) {
+          toggle.onclick = function(e) {
+            e.stopPropagation();
+            content.classList.toggle("collapsed");
+            toggle.textContent = content.classList.contains("collapsed") ? "▶" : "▼";
+          };
+        }
+      }
+      setupToggle("toggleLog", "logWrapper");
+      setupToggle("toggleQuick", "quickContent");
+      setupToggle("toggleHistory", "historyContent");
+      setupToggle("toggleInspector", "inspectorContent");
+      setupToggle("toggleTokens", "tokensContent");
+
+      // Clear buttons
+      $("logClear").onclick = function(e) { e.stopPropagation(); logs = []; logBadge.textContent = "0"; renderLogs(); };
+      $("clearHistory").onclick = function(e) { e.stopPropagation(); cmdHistory = []; historyCountBadge.textContent = "0"; renderHistory(); };
+
+      // Export logs
+      $("exportLogs").onclick = function(e) {
+        e.stopPropagation();
+        var data = logs.map(function(l) { return l.time + " | " + l.action + " | " + (l.ok ? "OK" : "ERR") + " | " + l.result; }).join("\n");
+        var blob = new Blob([data], { type: "text/plain" });
+        var url = URL.createObjectURL(blob);
+        var a = document.createElement("a"); a.href = url; a.download = "figma-mcp-logs.txt"; a.click();
+        URL.revokeObjectURL(url);
+        addLog("export", "Logs exported", true);
+      };
+
+      // Export tokens
+      $("exportTokens").onclick = function(e) {
+        e.stopPropagation();
+        if (tokens.length === 0) return;
+        var data = JSON.stringify({ colors: tokens }, null, 2);
+        var blob = new Blob([data], { type: "application/json" });
+        var url = URL.createObjectURL(blob);
+        var a = document.createElement("a"); a.href = url; a.download = "design-tokens.json"; a.click();
+        URL.revokeObjectURL(url);
+        addLog("export", "Tokens exported", true);
+      };
+
+      // Token swatches click to copy
+      tokenGrid.onclick = function(e) {
+        var swatch = e.target.closest(".token-swatch");
+        if (swatch) {
+          var color = swatch.getAttribute("data-color");
+          navigator.clipboard.writeText(color).then(function() { addLog("copy", color, true); });
+        }
+      };
+
+      // Self-test
+      var SELF_TESTS = [
+        { name: "list_pages", payload: {} },
+        { name: "get_viewport", payload: {} },
+        { name: "read_selection", payload: {} },
+        { name: "get_doc_info", payload: {} },
+        { name: "list_components", payload: {} },
+        { name: "find_all", payload: { type: "FRAME" } },
+        { name: "get_local_styles", payload: {} },
+        { name: "get_fonts", payload: {} },
+        { name: "get_layer_list", payload: {} },
+        { name: "get_selection_colors", payload: {} }
+      ];
+
+      selfTestBtn.onclick = function() {
+        if (!channelId) return;
+        selfTestBtn.disabled = true;
+        testProgress.style.display = "block";
+        runSelfTests(0);
+      };
+
+      function runSelfTests(idx) {
+        if (idx >= SELF_TESTS.length) {
+          testProgress.style.display = "none";
+          selfTestBtn.disabled = false;
+          addLog("self-test", "Done " + SELF_TESTS.length + "/" + SELF_TESTS.length, true);
+          return;
+        }
+        var test = SELF_TESTS[idx];
+        testName.textContent = test.name;
+        testCount.textContent = "(" + (idx + 1) + "/" + SELF_TESTS.length + ")";
+        testBar.style.width = ((idx + 1) / SELF_TESTS.length * 100) + "%";
+        var cmd = { id: "test-" + Date.now() + "-" + idx, name: test.name, payload: test.payload };
+        parent.postMessage({ pluginMessage: { type: "command", command: cmd } }, "*");
+        setTimeout(function() { runSelfTests(idx + 1); }, 300);
+      }
+
+      // Selection polling
+      setInterval(function() { if (channelId) requestSelectionUpdate(); }, 2000);
+
+      // Load saved state
+      var state = loadState();
+      if (state.serverUrl) serverInput.value = state.serverUrl;
+      if (state.channelId) channelInput.value = state.channelId;
     </script>
   </body>
 </html>
