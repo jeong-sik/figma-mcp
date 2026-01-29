@@ -1850,6 +1850,56 @@ let make_error_content msg : Yojson.Safe.t =
     ])
   ]
 
+(** ============== Generic Plugin Handler Builders ============== *)
+
+(** Execute plugin command and return result *)
+let plugin_exec ~channel_id ~name ~payload ~timeout_ms =
+  let command_id = Figma_plugin_bridge.enqueue_command ~channel_id ~name ~payload in
+  match plugin_wait ~channel_id ~command_id ~timeout_ms with
+  | Error err -> Error err
+  | Ok result -> Ok (make_text_content (Yojson.Safe.pretty_to_string result.payload))
+
+(** Simple handler - just needs channel_id *)
+let plugin_simple ~name ?(default_timeout=10000) ~build_payload args =
+  match resolve_channel_id args with
+  | Error msg -> Error msg
+  | Ok channel_id ->
+      let timeout_ms = get_int "timeout_ms" args |> Option.value ~default:default_timeout in
+      let payload = build_payload args in
+      plugin_exec ~channel_id ~name ~payload ~timeout_ms
+
+(** Node handler - needs node_id + channel_id *)
+let plugin_node ~name ?(default_timeout=10000) ~build_payload args =
+  match (resolve_node_id args, resolve_channel_id args) with
+  | (None, _) -> Error "Missing required parameter: node_id (or url)"
+  | (_, Error msg) -> Error msg
+  | (Some node_id, Ok channel_id) ->
+      let timeout_ms = get_int "timeout_ms" args |> Option.value ~default:default_timeout in
+      let payload = build_payload node_id args in
+      plugin_exec ~channel_id ~name ~payload ~timeout_ms
+
+(** Nodes handler - needs node_ids array + channel_id *)
+let plugin_nodes ~name ?(default_timeout=10000) ~build_payload args =
+  match (get_string_list "node_ids" args, resolve_channel_id args) with
+  | (None, _) | (Some [], _) -> Error "Missing required parameter: node_ids"
+  | (_, Error msg) -> Error msg
+  | (Some ids, Ok channel_id) ->
+      let timeout_ms = get_int "timeout_ms" args |> Option.value ~default:default_timeout in
+      let payload = build_payload ids args in
+      plugin_exec ~channel_id ~name ~payload ~timeout_ms
+
+(** Custom handler - for special cases requiring custom validation *)
+let plugin_custom ~name ?(default_timeout=10000) ~validate ~build_payload args =
+  match resolve_channel_id args with
+  | Error msg -> Error msg
+  | Ok channel_id ->
+      (match validate args with
+       | Error msg -> Error msg
+       | Ok validated ->
+           let timeout_ms = get_int "timeout_ms" args |> Option.value ~default:default_timeout in
+           let payload = build_payload validated args in
+           plugin_exec ~channel_id ~name ~payload ~timeout_ms)
+
 let command_ok cmd =
   Sys.command (cmd ^ " >/dev/null 2>&1") = 0
 
@@ -4503,38 +4553,20 @@ let handle_plugin_apply_ops args : (Yojson.Safe.t, string) result =
 
 (* list_pages 핸들러 *)
 let handle_plugin_list_pages args : (Yojson.Safe.t, string) result =
-  match resolve_channel_id args with
-  | Error msg -> Error msg
-  | Ok channel_id ->
-      let timeout_ms = get_int "timeout_ms" args |> Option.value ~default:10000 in
-      let command_id = Figma_plugin_bridge.enqueue_command ~channel_id ~name:"list_pages" ~payload:`Null in
-      (match plugin_wait ~channel_id ~command_id ~timeout_ms with
-       | Error err -> Error err
-       | Ok result -> Ok (make_text_content (Yojson.Safe.pretty_to_string result.payload)))
+  plugin_simple ~name:"list_pages" ~build_payload:(fun _ -> `Null) args
 
 (* switch_page 핸들러 *)
 let handle_plugin_switch_page args : (Yojson.Safe.t, string) result =
-  match (get_string "page_id" args, resolve_channel_id args) with
-  | (None, _) -> Error "Missing required parameter: page_id"
-  | (_, Error msg) -> Error msg
-  | (Some page_id, Ok channel_id) ->
-      let timeout_ms = get_int "timeout_ms" args |> Option.value ~default:10000 in
-      let payload = `Assoc [("page_id", `String page_id)] in
-      let command_id = Figma_plugin_bridge.enqueue_command ~channel_id ~name:"switch_page" ~payload in
-      (match plugin_wait ~channel_id ~command_id ~timeout_ms with
-       | Error err -> Error err
-       | Ok result -> Ok (make_text_content (Yojson.Safe.pretty_to_string result.payload)))
+  plugin_custom ~name:"switch_page"
+    ~validate:(fun args -> match get_string "page_id" args with
+      | None -> Error "Missing required parameter: page_id"
+      | Some id -> Ok id)
+    ~build_payload:(fun page_id _ -> `Assoc [("page_id", `String page_id)])
+    args
 
 (* list_components 핸들러 *)
 let handle_plugin_list_components args : (Yojson.Safe.t, string) result =
-  match resolve_channel_id args with
-  | Error msg -> Error msg
-  | Ok channel_id ->
-      let timeout_ms = get_int "timeout_ms" args |> Option.value ~default:20000 in
-      let command_id = Figma_plugin_bridge.enqueue_command ~channel_id ~name:"list_components" ~payload:`Null in
-      (match plugin_wait ~channel_id ~command_id ~timeout_ms with
-       | Error err -> Error err
-       | Ok result -> Ok (make_text_content (Yojson.Safe.pretty_to_string result.payload)))
+  plugin_simple ~name:"list_components" ~default_timeout:20000 ~build_payload:(fun _ -> `Null) args
 
 (* clone 핸들러 *)
 let handle_plugin_clone args : (Yojson.Safe.t, string) result =
@@ -4576,103 +4608,66 @@ let handle_plugin_group args : (Yojson.Safe.t, string) result =
 
 (* ungroup 핸들러 *)
 let handle_plugin_ungroup args : (Yojson.Safe.t, string) result =
-  match (get_string "node_id" args, resolve_channel_id args) with
-  | (None, _) -> Error "Missing required parameter: node_id"
-  | (_, Error msg) -> Error msg
-  | (Some node_id, Ok channel_id) ->
-      let timeout_ms = get_int "timeout_ms" args |> Option.value ~default:10000 in
-      let payload = `Assoc [("node_id", `String node_id)] in
-      let command_id = Figma_plugin_bridge.enqueue_command ~channel_id ~name:"ungroup" ~payload in
-      (match plugin_wait ~channel_id ~command_id ~timeout_ms with
-       | Error err -> Error err
-       | Ok result -> Ok (make_text_content (Yojson.Safe.pretty_to_string result.payload)))
+  plugin_custom ~name:"ungroup"
+    ~validate:(fun args -> match get_string "node_id" args with
+      | None -> Error "Missing required parameter: node_id"
+      | Some id -> Ok id)
+    ~build_payload:(fun node_id _ -> `Assoc [("node_id", `String node_id)])
+    args
 
 (* set_selection 핸들러 *)
 let handle_plugin_set_selection args : (Yojson.Safe.t, string) result =
-  match resolve_channel_id args with
-  | Error msg -> Error msg
-  | Ok channel_id ->
-      let timeout_ms = get_int "timeout_ms" args |> Option.value ~default:10000 in
-      let node_ids = get_string_list "node_ids" args in
-      let payload = match node_ids with
-        | Some ids -> `Assoc [("node_ids", `List (List.map (fun s -> `String s) ids))]
-        | None -> `Assoc [("node_ids", `List [])] in
-      let command_id = Figma_plugin_bridge.enqueue_command ~channel_id ~name:"set_selection" ~payload in
-      (match plugin_wait ~channel_id ~command_id ~timeout_ms with
-       | Error err -> Error err
-       | Ok result -> Ok (make_text_content (Yojson.Safe.pretty_to_string result.payload)))
+  plugin_simple ~name:"set_selection" ~build_payload:(fun args ->
+    match get_string_list "node_ids" args with
+    | Some ids -> `Assoc [("node_ids", `List (List.map (fun s -> `String s) ids))]
+    | None -> `Assoc [("node_ids", `List [])]) args
 
 (* zoom_to 핸들러 *)
 let handle_plugin_zoom_to args : (Yojson.Safe.t, string) result =
-  match resolve_channel_id args with
-  | Error msg -> Error msg
-  | Ok channel_id ->
-      let timeout_ms = get_int "timeout_ms" args |> Option.value ~default:10000 in
-      let node_ids = get_string_list "node_ids" args in
-      let node_id = get_string "node_id" args in
-      let payload_fields =
-        (match node_ids with Some ids -> [("node_ids", `List (List.map (fun s -> `String s) ids))] | None -> []) @
-        (match node_id with Some id -> [("node_id", `String id)] | None -> []) in
-      let payload = `Assoc payload_fields in
-      let command_id = Figma_plugin_bridge.enqueue_command ~channel_id ~name:"zoom_to" ~payload in
-      (match plugin_wait ~channel_id ~command_id ~timeout_ms with
-       | Error err -> Error err
-       | Ok result -> Ok (make_text_content (Yojson.Safe.pretty_to_string result.payload)))
+  plugin_simple ~name:"zoom_to" ~build_payload:(fun args ->
+    let node_ids = get_string_list "node_ids" args in
+    let node_id = get_string "node_id" args in
+    `Assoc (
+      (match node_ids with Some ids -> [("node_ids", `List (List.map (fun s -> `String s) ids))] | None -> []) @
+      (match node_id with Some id -> [("node_id", `String id)] | None -> []))) args
 
 (* reorder 핸들러 *)
 let handle_plugin_reorder args : (Yojson.Safe.t, string) result =
-  match (get_string "node_id" args, get_string "direction" args, resolve_channel_id args) with
-  | (None, _, _) -> Error "Missing required parameter: node_id"
-  | (_, None, _) -> Error "Missing required parameter: direction (front|back|forward|backward)"
-  | (_, _, Error msg) -> Error msg
-  | (Some node_id, Some direction, Ok channel_id) ->
-      let timeout_ms = get_int "timeout_ms" args |> Option.value ~default:10000 in
-      let payload = `Assoc [("node_id", `String node_id); ("direction", `String direction)] in
-      let command_id = Figma_plugin_bridge.enqueue_command ~channel_id ~name:"reorder" ~payload in
-      (match plugin_wait ~channel_id ~command_id ~timeout_ms with
-       | Error err -> Error err
-       | Ok result -> Ok (make_text_content (Yojson.Safe.pretty_to_string result.payload)))
+  plugin_custom ~name:"reorder"
+    ~validate:(fun args ->
+      match (get_string "node_id" args, get_string "direction" args) with
+      | (None, _) -> Error "Missing required parameter: node_id"
+      | (_, None) -> Error "Missing required parameter: direction"
+      | (Some n, Some d) -> Ok (n, d))
+    ~build_payload:(fun (node_id, direction) _ ->
+      `Assoc [("node_id", `String node_id); ("direction", `String direction)])
+    args
 
 (* set_locked 핸들러 *)
 let handle_plugin_set_locked args : (Yojson.Safe.t, string) result =
-  match (get_string "node_id" args, resolve_channel_id args) with
-  | (None, _) -> Error "Missing required parameter: node_id"
-  | (_, Error msg) -> Error msg
-  | (Some node_id, Ok channel_id) ->
-      let timeout_ms = get_int "timeout_ms" args |> Option.value ~default:10000 in
-      let locked = get_bool "locked" args |> Option.value ~default:true in
-      let payload = `Assoc [("node_id", `String node_id); ("locked", `Bool locked)] in
-      let command_id = Figma_plugin_bridge.enqueue_command ~channel_id ~name:"set_locked" ~payload in
-      (match plugin_wait ~channel_id ~command_id ~timeout_ms with
-       | Error err -> Error err
-       | Ok result -> Ok (make_text_content (Yojson.Safe.pretty_to_string result.payload)))
+  plugin_custom ~name:"set_locked"
+    ~validate:(fun args -> match get_string "node_id" args with
+      | None -> Error "Missing required parameter: node_id" | Some id -> Ok id)
+    ~build_payload:(fun node_id args ->
+      `Assoc [("node_id", `String node_id); ("locked", `Bool (get_bool "locked" args |> Option.value ~default:true))])
+    args
 
 (* set_visible 핸들러 *)
 let handle_plugin_set_visible args : (Yojson.Safe.t, string) result =
-  match (get_string "node_id" args, resolve_channel_id args) with
-  | (None, _) -> Error "Missing required parameter: node_id"
-  | (_, Error msg) -> Error msg
-  | (Some node_id, Ok channel_id) ->
-      let timeout_ms = get_int "timeout_ms" args |> Option.value ~default:10000 in
-      let visible = get_bool "visible" args |> Option.value ~default:true in
-      let payload = `Assoc [("node_id", `String node_id); ("visible", `Bool visible)] in
-      let command_id = Figma_plugin_bridge.enqueue_command ~channel_id ~name:"set_visible" ~payload in
-      (match plugin_wait ~channel_id ~command_id ~timeout_ms with
-       | Error err -> Error err
-       | Ok result -> Ok (make_text_content (Yojson.Safe.pretty_to_string result.payload)))
+  plugin_custom ~name:"set_visible"
+    ~validate:(fun args -> match get_string "node_id" args with
+      | None -> Error "Missing required parameter: node_id" | Some id -> Ok id)
+    ~build_payload:(fun node_id args ->
+      `Assoc [("node_id", `String node_id); ("visible", `Bool (get_bool "visible" args |> Option.value ~default:true))])
+    args
 
 (* flatten 핸들러 *)
 let handle_plugin_flatten args : (Yojson.Safe.t, string) result =
-  match (get_string "node_id" args, resolve_channel_id args) with
-  | (None, _) -> Error "Missing required parameter: node_id"
-  | (_, Error msg) -> Error msg
-  | (Some node_id, Ok channel_id) ->
-      let timeout_ms = get_int "timeout_ms" args |> Option.value ~default:10000 in
-      let payload = `Assoc [("node_id", `String node_id)] in
-      let command_id = Figma_plugin_bridge.enqueue_command ~channel_id ~name:"flatten" ~payload in
-      (match plugin_wait ~channel_id ~command_id ~timeout_ms with
-       | Error err -> Error err
-       | Ok result -> Ok (make_text_content (Yojson.Safe.pretty_to_string result.payload)))
+  plugin_custom ~name:"flatten"
+    ~validate:(fun args -> match get_string "node_id" args with
+      | None -> Error "Missing required parameter: node_id" | Some id -> Ok id)
+    ~build_payload:(fun node_id _ -> `Assoc [("node_id", `String node_id)])
+    args
 
 (* set_auto_layout 핸들러 *)
 let handle_plugin_set_auto_layout args : (Yojson.Safe.t, string) result =
@@ -4700,97 +4695,60 @@ let handle_plugin_set_auto_layout args : (Yojson.Safe.t, string) result =
 
 (* get_viewport 핸들러 *)
 let handle_plugin_get_viewport args : (Yojson.Safe.t, string) result =
-  match resolve_channel_id args with
-  | Error msg -> Error msg
-  | Ok channel_id ->
-      let timeout_ms = get_int "timeout_ms" args |> Option.value ~default:10000 in
-      let command_id = Figma_plugin_bridge.enqueue_command ~channel_id ~name:"get_viewport" ~payload:`Null in
-      (match plugin_wait ~channel_id ~command_id ~timeout_ms with
-       | Error err -> Error err
-       | Ok result -> Ok (make_text_content (Yojson.Safe.pretty_to_string result.payload)))
+  plugin_simple ~name:"get_viewport" ~build_payload:(fun _ -> `Null) args
 
 (* set_viewport 핸들러 *)
 let handle_plugin_set_viewport args : (Yojson.Safe.t, string) result =
-  match resolve_channel_id args with
-  | Error msg -> Error msg
-  | Ok channel_id ->
-      let timeout_ms = get_int "timeout_ms" args |> Option.value ~default:10000 in
-      let center_x = get_float "center_x" args in
-      let center_y = get_float "center_y" args in
-      let zoom = get_float "zoom" args in
-      let payload_fields =
-        (match center_x with Some x -> [("center_x", `Float x)] | None -> []) @
-        (match center_y with Some y -> [("center_y", `Float y)] | None -> []) @
-        (match zoom with Some z -> [("zoom", `Float z)] | None -> []) in
-      let payload = `Assoc payload_fields in
-      let command_id = Figma_plugin_bridge.enqueue_command ~channel_id ~name:"set_viewport" ~payload in
-      (match plugin_wait ~channel_id ~command_id ~timeout_ms with
-       | Error err -> Error err
-       | Ok result -> Ok (make_text_content (Yojson.Safe.pretty_to_string result.payload)))
+  plugin_simple ~name:"set_viewport" ~build_payload:(fun args ->
+    `Assoc (
+      (match get_float "center_x" args with Some x -> [("center_x", `Float x)] | None -> []) @
+      (match get_float "center_y" args with Some y -> [("center_y", `Float y)] | None -> []) @
+      (match get_float "zoom" args with Some z -> [("zoom", `Float z)] | None -> []))) args
 
 (* rename 핸들러 *)
 let handle_plugin_rename args : (Yojson.Safe.t, string) result =
-  match (get_string "node_id" args, get_string "name" args, resolve_channel_id args) with
-  | (None, _, _) -> Error "Missing required parameter: node_id"
-  | (_, None, _) -> Error "Missing required parameter: name"
-  | (_, _, Error msg) -> Error msg
-  | (Some node_id, Some name, Ok channel_id) ->
-      let timeout_ms = get_int "timeout_ms" args |> Option.value ~default:10000 in
-      let payload = `Assoc [("node_id", `String node_id); ("name", `String name)] in
-      let command_id = Figma_plugin_bridge.enqueue_command ~channel_id ~name:"rename" ~payload in
-      (match plugin_wait ~channel_id ~command_id ~timeout_ms with
-       | Error err -> Error err
-       | Ok result -> Ok (make_text_content (Yojson.Safe.pretty_to_string result.payload)))
+  plugin_custom ~name:"rename"
+    ~validate:(fun args ->
+      match (get_string "node_id" args, get_string "name" args) with
+      | (None, _) -> Error "Missing required parameter: node_id"
+      | (_, None) -> Error "Missing required parameter: name"
+      | (Some n, Some name) -> Ok (n, name))
+    ~build_payload:(fun (node_id, name) _ -> `Assoc [("node_id", `String node_id); ("name", `String name)])
+    args
 
 (* resize 핸들러 *)
 let handle_plugin_resize args : (Yojson.Safe.t, string) result =
-  match (get_string "node_id" args, resolve_channel_id args) with
-  | (None, _) -> Error "Missing required parameter: node_id"
-  | (_, Error msg) -> Error msg
-  | (Some node_id, Ok channel_id) ->
-      let timeout_ms = get_int "timeout_ms" args |> Option.value ~default:10000 in
-      let width = get_float "width" args in
-      let height = get_float "height" args in
-      let payload_fields = [("node_id", `String node_id)] @
-        (match width with Some w -> [("width", `Float w)] | None -> []) @
-        (match height with Some h -> [("height", `Float h)] | None -> []) in
-      let payload = `Assoc payload_fields in
-      let command_id = Figma_plugin_bridge.enqueue_command ~channel_id ~name:"resize" ~payload in
-      (match plugin_wait ~channel_id ~command_id ~timeout_ms with
-       | Error err -> Error err
-       | Ok result -> Ok (make_text_content (Yojson.Safe.pretty_to_string result.payload)))
+  plugin_custom ~name:"resize"
+    ~validate:(fun args -> match get_string "node_id" args with
+      | None -> Error "Missing required parameter: node_id" | Some id -> Ok id)
+    ~build_payload:(fun node_id args ->
+      `Assoc ([("node_id", `String node_id)] @
+        (match get_float "width" args with Some w -> [("width", `Float w)] | None -> []) @
+        (match get_float "height" args with Some h -> [("height", `Float h)] | None -> [])))
+    args
 
 (* move 핸들러 *)
 let handle_plugin_move args : (Yojson.Safe.t, string) result =
-  match (get_string "node_id" args, resolve_channel_id args) with
-  | (None, _) -> Error "Missing required parameter: node_id"
-  | (_, Error msg) -> Error msg
-  | (Some node_id, Ok channel_id) ->
-      let timeout_ms = get_int "timeout_ms" args |> Option.value ~default:10000 in
-      let x = get_float "x" args in
-      let y = get_float "y" args in
-      let payload_fields = [("node_id", `String node_id)] @
-        (match x with Some v -> [("x", `Float v)] | None -> []) @
-        (match y with Some v -> [("y", `Float v)] | None -> []) in
-      let payload = `Assoc payload_fields in
-      let command_id = Figma_plugin_bridge.enqueue_command ~channel_id ~name:"move" ~payload in
-      (match plugin_wait ~channel_id ~command_id ~timeout_ms with
-       | Error err -> Error err
-       | Ok result -> Ok (make_text_content (Yojson.Safe.pretty_to_string result.payload)))
+  plugin_custom ~name:"move"
+    ~validate:(fun args -> match get_string "node_id" args with
+      | None -> Error "Missing required parameter: node_id" | Some id -> Ok id)
+    ~build_payload:(fun node_id args ->
+      `Assoc ([("node_id", `String node_id)] @
+        (match get_float "x" args with Some v -> [("x", `Float v)] | None -> []) @
+        (match get_float "y" args with Some v -> [("y", `Float v)] | None -> [])))
+    args
 
 (* set_opacity 핸들러 *)
 let handle_plugin_set_opacity args : (Yojson.Safe.t, string) result =
-  match (get_string "node_id" args, get_float "opacity" args, resolve_channel_id args) with
-  | (None, _, _) -> Error "Missing required parameter: node_id"
-  | (_, None, _) -> Error "Missing required parameter: opacity"
-  | (_, _, Error msg) -> Error msg
-  | (Some node_id, Some opacity, Ok channel_id) ->
-      let timeout_ms = get_int "timeout_ms" args |> Option.value ~default:10000 in
-      let payload = `Assoc [("node_id", `String node_id); ("opacity", `Float opacity)] in
-      let command_id = Figma_plugin_bridge.enqueue_command ~channel_id ~name:"set_opacity" ~payload in
-      (match plugin_wait ~channel_id ~command_id ~timeout_ms with
-       | Error err -> Error err
-       | Ok result -> Ok (make_text_content (Yojson.Safe.pretty_to_string result.payload)))
+  plugin_custom ~name:"set_opacity"
+    ~validate:(fun args ->
+      match (get_string "node_id" args, get_float "opacity" args) with
+      | (None, _) -> Error "Missing required parameter: node_id"
+      | (_, None) -> Error "Missing required parameter: opacity"
+      | (Some n, Some o) -> Ok (n, o))
+    ~build_payload:(fun (node_id, opacity) _ ->
+      `Assoc [("node_id", `String node_id); ("opacity", `Float opacity)])
+    args
 
 (* set_corner_radius 핸들러 *)
 let handle_plugin_set_corner_radius args : (Yojson.Safe.t, string) result =
@@ -4860,163 +4818,96 @@ let handle_plugin_set_stroke args : (Yojson.Safe.t, string) result =
 
 (* set_effects 핸들러 *)
 let handle_plugin_set_effects args : (Yojson.Safe.t, string) result =
-  match (get_string "node_id" args, resolve_channel_id args) with
-  | (None, _) -> Error "Missing required parameter: node_id"
-  | (_, Error msg) -> Error msg
-  | (Some node_id, Ok channel_id) ->
-      let timeout_ms = get_int "timeout_ms" args |> Option.value ~default:10000 in
+  plugin_custom ~name:"set_effects"
+    ~validate:(fun args -> match get_string "node_id" args with
+      | None -> Error "Missing required parameter: node_id" | Some id -> Ok id)
+    ~build_payload:(fun node_id args ->
       let effects = match args with
         | `Assoc fields -> (match List.assoc_opt "effects" fields with Some e -> e | None -> `List [])
         | _ -> `List [] in
-      let payload = `Assoc [("node_id", `String node_id); ("effects", effects)] in
-      let command_id = Figma_plugin_bridge.enqueue_command ~channel_id ~name:"set_effects" ~payload in
-      (match plugin_wait ~channel_id ~command_id ~timeout_ms with
-       | Error err -> Error err
-       | Ok result -> Ok (make_text_content (Yojson.Safe.pretty_to_string result.payload)))
+      `Assoc [("node_id", `String node_id); ("effects", effects)])
+    args
 
 (* create_component 핸들러 *)
 let handle_plugin_create_component args : (Yojson.Safe.t, string) result =
-  match (get_string "node_id" args, resolve_channel_id args) with
-  | (None, _) -> Error "Missing required parameter: node_id"
-  | (_, Error msg) -> Error msg
-  | (Some node_id, Ok channel_id) ->
-      let timeout_ms = get_int "timeout_ms" args |> Option.value ~default:10000 in
-      let payload = `Assoc [("node_id", `String node_id)] in
-      let command_id = Figma_plugin_bridge.enqueue_command ~channel_id ~name:"create_component" ~payload in
-      (match plugin_wait ~channel_id ~command_id ~timeout_ms with
-       | Error err -> Error err
-       | Ok result -> Ok (make_text_content (Yojson.Safe.pretty_to_string result.payload)))
+  plugin_custom ~name:"create_component"
+    ~validate:(fun args -> match get_string "node_id" args with
+      | None -> Error "Missing required parameter: node_id" | Some id -> Ok id)
+    ~build_payload:(fun node_id _ -> `Assoc [("node_id", `String node_id)])
+    args
 
 (* detach_instance 핸들러 *)
 let handle_plugin_detach_instance args : (Yojson.Safe.t, string) result =
-  match (get_string "node_id" args, resolve_channel_id args) with
-  | (None, _) -> Error "Missing required parameter: node_id"
-  | (_, Error msg) -> Error msg
-  | (Some node_id, Ok channel_id) ->
-      let timeout_ms = get_int "timeout_ms" args |> Option.value ~default:10000 in
-      let payload = `Assoc [("node_id", `String node_id)] in
-      let command_id = Figma_plugin_bridge.enqueue_command ~channel_id ~name:"detach_instance" ~payload in
-      (match plugin_wait ~channel_id ~command_id ~timeout_ms with
-       | Error err -> Error err
-       | Ok result -> Ok (make_text_content (Yojson.Safe.pretty_to_string result.payload)))
+  plugin_custom ~name:"detach_instance"
+    ~validate:(fun args -> match get_string "node_id" args with
+      | None -> Error "Missing required parameter: node_id" | Some id -> Ok id)
+    ~build_payload:(fun node_id _ -> `Assoc [("node_id", `String node_id)])
+    args
 
 (* set_text 핸들러 *)
 let handle_plugin_set_text args : (Yojson.Safe.t, string) result =
-  match (get_string "node_id" args, get_string "text" args, resolve_channel_id args) with
-  | (None, _, _) -> Error "Missing required parameter: node_id"
-  | (_, None, _) -> Error "Missing required parameter: text"
-  | (_, _, Error msg) -> Error msg
-  | (Some node_id, Some text, Ok channel_id) ->
-      let timeout_ms = get_int "timeout_ms" args |> Option.value ~default:10000 in
-      let payload = `Assoc [("node_id", `String node_id); ("text", `String text)] in
-      let command_id = Figma_plugin_bridge.enqueue_command ~channel_id ~name:"set_text" ~payload in
-      (match plugin_wait ~channel_id ~command_id ~timeout_ms with
-       | Error err -> Error err
-       | Ok result -> Ok (make_text_content (Yojson.Safe.pretty_to_string result.payload)))
+  plugin_custom ~name:"set_text"
+    ~validate:(fun args ->
+      match (get_string "node_id" args, get_string "text" args) with
+      | (None, _) -> Error "Missing required parameter: node_id"
+      | (_, None) -> Error "Missing required parameter: text"
+      | (Some n, Some t) -> Ok (n, t))
+    ~build_payload:(fun (node_id, text) _ ->
+      `Assoc [("node_id", `String node_id); ("text", `String text)])
+    args
 
 (* find_all 핸들러 *)
 let handle_plugin_find_all args : (Yojson.Safe.t, string) result =
-  match resolve_channel_id args with
-  | Error msg -> Error msg
-  | Ok channel_id ->
-      let timeout_ms = get_int "timeout_ms" args |> Option.value ~default:20000 in
-      let node_type = get_string "type" args in
-      let name = get_string "find_name" args in
-      let name_contains = get_string "name_contains" args in
-      let payload_fields =
-        (match node_type with Some t -> [("type", `String t)] | None -> []) @
-        (match name with Some n -> [("name", `String n)] | None -> []) @
-        (match name_contains with Some n -> [("name_contains", `String n)] | None -> []) in
-      let payload = `Assoc payload_fields in
-      let command_id = Figma_plugin_bridge.enqueue_command ~channel_id ~name:"find_all" ~payload in
-      (match plugin_wait ~channel_id ~command_id ~timeout_ms with
-       | Error err -> Error err
-       | Ok result -> Ok (make_text_content (Yojson.Safe.pretty_to_string result.payload)))
+  plugin_simple ~name:"find_all" ~default_timeout:20000 ~build_payload:(fun args ->
+    `Assoc (
+      (match get_string "type" args with Some t -> [("type", `String t)] | None -> []) @
+      (match get_string "find_name" args with Some n -> [("name", `String n)] | None -> []) @
+      (match get_string "name_contains" args with Some n -> [("name_contains", `String n)] | None -> [])))
+  args
 
 (* notify 핸들러 *)
 let handle_plugin_notify args : (Yojson.Safe.t, string) result =
-  match (get_string "message" args, resolve_channel_id args) with
-  | (None, _) -> Error "Missing required parameter: message"
-  | (_, Error msg) -> Error msg
-  | (Some message, Ok channel_id) ->
-      let timeout_ms = get_int "timeout_ms" args |> Option.value ~default:10000 in
-      let notify_timeout = get_int "notify_timeout" args |> Option.value ~default:3000 in
-      let payload = `Assoc [("message", `String message); ("timeout", `Int notify_timeout)] in
-      let command_id = Figma_plugin_bridge.enqueue_command ~channel_id ~name:"notify" ~payload in
-      (match plugin_wait ~channel_id ~command_id ~timeout_ms with
-       | Error err -> Error err
-       | Ok result -> Ok (make_text_content (Yojson.Safe.pretty_to_string result.payload)))
+  plugin_custom ~name:"notify"
+    ~validate:(fun args -> match get_string "message" args with
+      | None -> Error "Missing required parameter: message" | Some m -> Ok m)
+    ~build_payload:(fun message args ->
+      `Assoc [("message", `String message);
+              ("timeout", `Int (get_int "notify_timeout" args |> Option.value ~default:3000))])
+    args
 
 (* create_frame 핸들러 *)
 let handle_plugin_create_frame args : (Yojson.Safe.t, string) result =
-  match resolve_channel_id args with
-  | Error msg -> Error msg
-  | Ok channel_id ->
-      let timeout_ms = get_int "timeout_ms" args |> Option.value ~default:10000 in
-      let name = get_string "name" args in
-      let x = get_float "x" args in
-      let y = get_float "y" args in
-      let width = get_float "width" args in
-      let height = get_float "height" args in
-      let payload_fields =
-        (match name with Some n -> [("name", `String n)] | None -> []) @
-        (match x with Some v -> [("x", `Float v)] | None -> []) @
-        (match y with Some v -> [("y", `Float v)] | None -> []) @
-        (match width with Some v -> [("width", `Float v)] | None -> []) @
-        (match height with Some v -> [("height", `Float v)] | None -> []) in
-      let payload = `Assoc payload_fields in
-      let command_id = Figma_plugin_bridge.enqueue_command ~channel_id ~name:"create_frame" ~payload in
-      (match plugin_wait ~channel_id ~command_id ~timeout_ms with
-       | Error err -> Error err
-       | Ok result -> Ok (make_text_content (Yojson.Safe.pretty_to_string result.payload)))
+  plugin_simple ~name:"create_frame" ~build_payload:(fun args ->
+    `Assoc (
+      (match get_string "name" args with Some n -> [("name", `String n)] | None -> []) @
+      (match get_float "x" args with Some v -> [("x", `Float v)] | None -> []) @
+      (match get_float "y" args with Some v -> [("y", `Float v)] | None -> []) @
+      (match get_float "width" args with Some v -> [("width", `Float v)] | None -> []) @
+      (match get_float "height" args with Some v -> [("height", `Float v)] | None -> [])))
+  args
 
 (* create_rectangle 핸들러 *)
 let handle_plugin_create_rectangle args : (Yojson.Safe.t, string) result =
-  match resolve_channel_id args with
-  | Error msg -> Error msg
-  | Ok channel_id ->
-      let timeout_ms = get_int "timeout_ms" args |> Option.value ~default:10000 in
-      let name = get_string "name" args in
-      let x = get_float "x" args in
-      let y = get_float "y" args in
-      let width = get_float "width" args in
-      let height = get_float "height" args in
-      let corner_radius = get_float "radius" args in
-      let payload_fields =
-        (match name with Some n -> [("name", `String n)] | None -> []) @
-        (match x with Some v -> [("x", `Float v)] | None -> []) @
-        (match y with Some v -> [("y", `Float v)] | None -> []) @
-        (match width with Some v -> [("width", `Float v)] | None -> []) @
-        (match height with Some v -> [("height", `Float v)] | None -> []) @
-        (match corner_radius with Some v -> [("cornerRadius", `Float v)] | None -> []) in
-      let payload = `Assoc payload_fields in
-      let command_id = Figma_plugin_bridge.enqueue_command ~channel_id ~name:"create_rectangle" ~payload in
-      (match plugin_wait ~channel_id ~command_id ~timeout_ms with
-       | Error err -> Error err
-       | Ok result -> Ok (make_text_content (Yojson.Safe.pretty_to_string result.payload)))
+  plugin_simple ~name:"create_rectangle" ~build_payload:(fun args ->
+    `Assoc (
+      (match get_string "name" args with Some n -> [("name", `String n)] | None -> []) @
+      (match get_float "x" args with Some v -> [("x", `Float v)] | None -> []) @
+      (match get_float "y" args with Some v -> [("y", `Float v)] | None -> []) @
+      (match get_float "width" args with Some v -> [("width", `Float v)] | None -> []) @
+      (match get_float "height" args with Some v -> [("height", `Float v)] | None -> []) @
+      (match get_float "radius" args with Some v -> [("cornerRadius", `Float v)] | None -> [])))
+  args
 
 (* create_ellipse 핸들러 *)
 let handle_plugin_create_ellipse args : (Yojson.Safe.t, string) result =
-  match resolve_channel_id args with
-  | Error msg -> Error msg
-  | Ok channel_id ->
-      let timeout_ms = get_int "timeout_ms" args |> Option.value ~default:10000 in
-      let name = get_string "name" args in
-      let x = get_float "x" args in
-      let y = get_float "y" args in
-      let width = get_float "width" args in
-      let height = get_float "height" args in
-      let payload_fields =
-        (match name with Some n -> [("name", `String n)] | None -> []) @
-        (match x with Some v -> [("x", `Float v)] | None -> []) @
-        (match y with Some v -> [("y", `Float v)] | None -> []) @
-        (match width with Some v -> [("width", `Float v)] | None -> []) @
-        (match height with Some v -> [("height", `Float v)] | None -> []) in
-      let payload = `Assoc payload_fields in
-      let command_id = Figma_plugin_bridge.enqueue_command ~channel_id ~name:"create_ellipse" ~payload in
-      (match plugin_wait ~channel_id ~command_id ~timeout_ms with
-       | Error err -> Error err
-       | Ok result -> Ok (make_text_content (Yojson.Safe.pretty_to_string result.payload)))
+  plugin_simple ~name:"create_ellipse" ~build_payload:(fun args ->
+    `Assoc (
+      (match get_string "name" args with Some n -> [("name", `String n)] | None -> []) @
+      (match get_float "x" args with Some v -> [("x", `Float v)] | None -> []) @
+      (match get_float "y" args with Some v -> [("y", `Float v)] | None -> []) @
+      (match get_float "width" args with Some v -> [("width", `Float v)] | None -> []) @
+      (match get_float "height" args with Some v -> [("height", `Float v)] | None -> [])))
+  args
 
 (* create_text 핸들러 *)
 let handle_plugin_create_text args : (Yojson.Safe.t, string) result =
