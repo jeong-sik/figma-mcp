@@ -598,7 +598,7 @@ let tool_figma_plugin_apply_ops : tool_def = {
 (* STRAP 통합: plugin 도구 통합 (8→14 actions) *)
 let tool_figma_plugin : tool_def = {
   name = "figma_plugin";
-  description = "🔌 PLUGIN: Figma Desktop 앱과 실시간 연동. action으로 세부 동작 선택. 52개 action 지원.";
+  description = "🔌 PLUGIN: Figma Desktop 앱과 실시간 연동. action으로 세부 동작 선택. 63개 action 지원.";
   input_schema = object_schema [
     ("action", enum_prop [
       "connect"; "use_channel"; "status";
@@ -616,8 +616,13 @@ let tool_figma_plugin : tool_def = {
       "create_line"; "create_polygon"; "create_star";
       "delete_node"; "duplicate"; "align"; "distribute";
       "boolean_union"; "boolean_subtract"; "boolean_intersect"; "boolean_exclude";
-      "get_local_styles"; "set_constraints"
-    ] "52개 action: 연결(connect/use_channel/status), 생성(create_frame/rectangle/ellipse/text/line/polygon/star), 조회(read_selection/get_node/list_pages/list_components/find_all/get_local_styles/get_viewport), 편집(clone/duplicate/delete_node/group/ungroup/flatten/create_component/detach_instance), 불리언(boolean_union/subtract/intersect/exclude), 정렬(align/distribute), 속성(rename/resize/move/set_opacity/set_corner_radius/set_fill/set_stroke/set_effects/set_auto_layout/set_locked/set_visible/reorder/set_text/set_constraints)");
+      "get_local_styles"; "set_constraints";
+      "create_page"; "delete_page"; "rotate"; "flip";
+      "outline_stroke"; "set_blend_mode"; "get_selection_colors";
+      "swap_fill_stroke"; "copy_style"; "get_fonts"; "set_parent";
+      "create_vector"; "set_image_fill"; "get_plugin_data"; "set_plugin_data";
+      "get_doc_info"; "get_absolute_bounds"; "create_component_set"; "remove_auto_layout"
+    ] "72개 action: 연결(3), 페이지(4), 문서(get_doc_info), 생성(frame/rectangle/ellipse/text/line/polygon/star/vector/component/component_set), 조회(node/selection/components/styles/colors/fonts/viewport/absolute_bounds/plugin_data), 편집(clone/duplicate/delete/group/ungroup/flatten/detach/set_parent), 변형(resize/move/rotate/flip/reorder), 불리언(4), 정렬(2), 스타일(fill/stroke/effects/opacity/corner_radius/blend_mode/copy_style/swap_fill_stroke/outline_stroke/image_fill), 레이아웃(set_auto_layout/remove_auto_layout)");
     ("channel_id", string_prop "채널 ID");
     ("node_id", string_prop "노드 ID");
     ("url", string_prop "Figma URL (node_id 자동 추출)");
@@ -677,6 +682,18 @@ let tool_figma_plugin : tool_def = {
     ("distribute_direction", enum_prop ["horizontal"; "vertical"] "분배 방향 (distribute)");
     ("constraint_horizontal", enum_prop ["MIN"; "CENTER"; "MAX"; "STRETCH"; "SCALE"] "수평 제약 (set_constraints)");
     ("constraint_vertical", enum_prop ["MIN"; "CENTER"; "MAX"; "STRETCH"; "SCALE"] "수직 제약 (set_constraints)");
+    ("angle", number_prop "회전 각도 (rotate)");
+    ("flip_direction", enum_prop ["horizontal"; "vertical"] "뒤집기 방향 (flip)");
+    ("blend_mode", enum_prop ["NORMAL"; "DARKEN"; "MULTIPLY"; "COLOR_BURN"; "LIGHTEN"; "SCREEN"; "COLOR_DODGE"; "OVERLAY"; "SOFT_LIGHT"; "HARD_LIGHT"; "DIFFERENCE"; "EXCLUSION"; "HUE"; "SATURATION"; "COLOR"; "LUMINOSITY"] "블렌드 모드 (set_blend_mode)");
+    ("source_id", string_prop "소스 노드 ID (copy_style)");
+    ("target_id", string_prop "타겟 노드 ID (copy_style)");
+    ("parent_id", string_prop "부모 노드 ID (set_parent)");
+    ("image_hash", string_prop "이미지 해시 (set_image_fill)");
+    ("base64", string_prop "Base64 인코딩된 이미지 데이터 (set_image_fill)");
+    ("scale_mode", enum_prop ["FILL"; "FIT"; "CROP"; "TILE"] "이미지 스케일 모드 (set_image_fill)");
+    ("data_key", string_prop "플러그인 데이터 키 (get/set_plugin_data)");
+    ("data_value", string_prop "플러그인 데이터 값 (set_plugin_data)");
+    ("component_ids", array_prop "컴포넌트 ID 배열 (create_component_set, 최소 2개)");
   ] ["action"];
 }
 
@@ -5218,6 +5235,285 @@ let handle_plugin_set_constraints args : (Yojson.Safe.t, string) result =
        | Error err -> Error err
        | Ok result -> Ok (make_text_content (Yojson.Safe.pretty_to_string result.payload)))
 
+(* create_page 핸들러 *)
+let handle_plugin_create_page args : (Yojson.Safe.t, string) result =
+  match resolve_channel_id args with
+  | Error msg -> Error msg
+  | Ok channel_id ->
+      let timeout_ms = get_int "timeout_ms" args |> Option.value ~default:10000 in
+      let name = get_string "name" args in
+      let payload = match name with
+        | Some n -> `Assoc [("name", `String n)]
+        | None -> `Assoc [] in
+      let command_id = Figma_plugin_bridge.enqueue_command ~channel_id ~name:"create_page" ~payload in
+      (match plugin_wait ~channel_id ~command_id ~timeout_ms with
+       | Error err -> Error err
+       | Ok result -> Ok (make_text_content (Yojson.Safe.pretty_to_string result.payload)))
+
+(* delete_page 핸들러 *)
+let handle_plugin_delete_page args : (Yojson.Safe.t, string) result =
+  match (get_string "page_id" args, resolve_channel_id args) with
+  | (None, _) -> Error "Missing required parameter: page_id"
+  | (_, Error msg) -> Error msg
+  | (Some page_id, Ok channel_id) ->
+      let timeout_ms = get_int "timeout_ms" args |> Option.value ~default:10000 in
+      let payload = `Assoc [("page_id", `String page_id)] in
+      let command_id = Figma_plugin_bridge.enqueue_command ~channel_id ~name:"delete_page" ~payload in
+      (match plugin_wait ~channel_id ~command_id ~timeout_ms with
+       | Error err -> Error err
+       | Ok result -> Ok (make_text_content (Yojson.Safe.pretty_to_string result.payload)))
+
+(* rotate 핸들러 *)
+let handle_plugin_rotate args : (Yojson.Safe.t, string) result =
+  match (get_string "node_id" args, get_float "angle" args, resolve_channel_id args) with
+  | (None, _, _) -> Error "Missing required parameter: node_id"
+  | (_, None, _) -> Error "Missing required parameter: angle"
+  | (_, _, Error msg) -> Error msg
+  | (Some node_id, Some angle, Ok channel_id) ->
+      let timeout_ms = get_int "timeout_ms" args |> Option.value ~default:10000 in
+      let payload = `Assoc [("node_id", `String node_id); ("angle", `Float angle)] in
+      let command_id = Figma_plugin_bridge.enqueue_command ~channel_id ~name:"rotate" ~payload in
+      (match plugin_wait ~channel_id ~command_id ~timeout_ms with
+       | Error err -> Error err
+       | Ok result -> Ok (make_text_content (Yojson.Safe.pretty_to_string result.payload)))
+
+(* flip 핸들러 *)
+let handle_plugin_flip args : (Yojson.Safe.t, string) result =
+  match (get_string "node_id" args, get_string "flip_direction" args, resolve_channel_id args) with
+  | (None, _, _) -> Error "Missing required parameter: node_id"
+  | (_, None, _) -> Error "Missing required parameter: flip_direction (horizontal/vertical)"
+  | (_, _, Error msg) -> Error msg
+  | (Some node_id, Some direction, Ok channel_id) ->
+      let timeout_ms = get_int "timeout_ms" args |> Option.value ~default:10000 in
+      let payload = `Assoc [("node_id", `String node_id); ("direction", `String direction)] in
+      let command_id = Figma_plugin_bridge.enqueue_command ~channel_id ~name:"flip" ~payload in
+      (match plugin_wait ~channel_id ~command_id ~timeout_ms with
+       | Error err -> Error err
+       | Ok result -> Ok (make_text_content (Yojson.Safe.pretty_to_string result.payload)))
+
+(* outline_stroke 핸들러 *)
+let handle_plugin_outline_stroke args : (Yojson.Safe.t, string) result =
+  match (get_string "node_id" args, resolve_channel_id args) with
+  | (None, _) -> Error "Missing required parameter: node_id"
+  | (_, Error msg) -> Error msg
+  | (Some node_id, Ok channel_id) ->
+      let timeout_ms = get_int "timeout_ms" args |> Option.value ~default:10000 in
+      let payload = `Assoc [("node_id", `String node_id)] in
+      let command_id = Figma_plugin_bridge.enqueue_command ~channel_id ~name:"outline_stroke" ~payload in
+      (match plugin_wait ~channel_id ~command_id ~timeout_ms with
+       | Error err -> Error err
+       | Ok result -> Ok (make_text_content (Yojson.Safe.pretty_to_string result.payload)))
+
+(* set_blend_mode 핸들러 *)
+let handle_plugin_set_blend_mode args : (Yojson.Safe.t, string) result =
+  match (get_string "node_id" args, get_string "blend_mode" args, resolve_channel_id args) with
+  | (None, _, _) -> Error "Missing required parameter: node_id"
+  | (_, None, _) -> Error "Missing required parameter: blend_mode"
+  | (_, _, Error msg) -> Error msg
+  | (Some node_id, Some blend_mode, Ok channel_id) ->
+      let timeout_ms = get_int "timeout_ms" args |> Option.value ~default:10000 in
+      let payload = `Assoc [("node_id", `String node_id); ("blend_mode", `String blend_mode)] in
+      let command_id = Figma_plugin_bridge.enqueue_command ~channel_id ~name:"set_blend_mode" ~payload in
+      (match plugin_wait ~channel_id ~command_id ~timeout_ms with
+       | Error err -> Error err
+       | Ok result -> Ok (make_text_content (Yojson.Safe.pretty_to_string result.payload)))
+
+(* get_selection_colors 핸들러 *)
+let handle_plugin_get_selection_colors args : (Yojson.Safe.t, string) result =
+  match resolve_channel_id args with
+  | Error msg -> Error msg
+  | Ok channel_id ->
+      let timeout_ms = get_int "timeout_ms" args |> Option.value ~default:10000 in
+      let command_id = Figma_plugin_bridge.enqueue_command ~channel_id ~name:"get_selection_colors" ~payload:`Null in
+      (match plugin_wait ~channel_id ~command_id ~timeout_ms with
+       | Error err -> Error err
+       | Ok result -> Ok (make_text_content (Yojson.Safe.pretty_to_string result.payload)))
+
+(* swap_fill_stroke 핸들러 *)
+let handle_plugin_swap_fill_stroke args : (Yojson.Safe.t, string) result =
+  match (get_string "node_id" args, resolve_channel_id args) with
+  | (None, _) -> Error "Missing required parameter: node_id"
+  | (_, Error msg) -> Error msg
+  | (Some node_id, Ok channel_id) ->
+      let timeout_ms = get_int "timeout_ms" args |> Option.value ~default:10000 in
+      let payload = `Assoc [("node_id", `String node_id)] in
+      let command_id = Figma_plugin_bridge.enqueue_command ~channel_id ~name:"swap_fill_stroke" ~payload in
+      (match plugin_wait ~channel_id ~command_id ~timeout_ms with
+       | Error err -> Error err
+       | Ok result -> Ok (make_text_content (Yojson.Safe.pretty_to_string result.payload)))
+
+(* copy_style 핸들러 *)
+let handle_plugin_copy_style args : (Yojson.Safe.t, string) result =
+  match (get_string "source_id" args, get_string "target_id" args, resolve_channel_id args) with
+  | (None, _, _) -> Error "Missing required parameter: source_id"
+  | (_, None, _) -> Error "Missing required parameter: target_id"
+  | (_, _, Error msg) -> Error msg
+  | (Some source_id, Some target_id, Ok channel_id) ->
+      let timeout_ms = get_int "timeout_ms" args |> Option.value ~default:10000 in
+      let payload = `Assoc [("source_id", `String source_id); ("target_id", `String target_id)] in
+      let command_id = Figma_plugin_bridge.enqueue_command ~channel_id ~name:"copy_style" ~payload in
+      (match plugin_wait ~channel_id ~command_id ~timeout_ms with
+       | Error err -> Error err
+       | Ok result -> Ok (make_text_content (Yojson.Safe.pretty_to_string result.payload)))
+
+(* get_fonts 핸들러 *)
+let handle_plugin_get_fonts args : (Yojson.Safe.t, string) result =
+  match resolve_channel_id args with
+  | Error msg -> Error msg
+  | Ok channel_id ->
+      let timeout_ms = get_int "timeout_ms" args |> Option.value ~default:15000 in
+      let command_id = Figma_plugin_bridge.enqueue_command ~channel_id ~name:"get_fonts" ~payload:`Null in
+      (match plugin_wait ~channel_id ~command_id ~timeout_ms with
+       | Error err -> Error err
+       | Ok result -> Ok (make_text_content (Yojson.Safe.pretty_to_string result.payload)))
+
+(* set_parent 핸들러 *)
+let handle_plugin_set_parent args : (Yojson.Safe.t, string) result =
+  match (get_string "node_id" args, get_string "parent_id" args, resolve_channel_id args) with
+  | (None, _, _) -> Error "Missing required parameter: node_id"
+  | (_, None, _) -> Error "Missing required parameter: parent_id"
+  | (_, _, Error msg) -> Error msg
+  | (Some node_id, Some parent_id, Ok channel_id) ->
+      let timeout_ms = get_int "timeout_ms" args |> Option.value ~default:10000 in
+      let payload = `Assoc [("node_id", `String node_id); ("parent_id", `String parent_id)] in
+      let command_id = Figma_plugin_bridge.enqueue_command ~channel_id ~name:"set_parent" ~payload in
+      (match plugin_wait ~channel_id ~command_id ~timeout_ms with
+       | Error err -> Error err
+       | Ok result -> Ok (make_text_content (Yojson.Safe.pretty_to_string result.payload)))
+
+(* create_vector 핸들러 *)
+let handle_plugin_create_vector args : (Yojson.Safe.t, string) result =
+  match resolve_channel_id args with
+  | Error msg -> Error msg
+  | Ok channel_id ->
+      let timeout_ms = get_int "timeout_ms" args |> Option.value ~default:10000 in
+      let name = get_string "name" args in
+      let x = get_float "x" args in
+      let y = get_float "y" args in
+      let width = get_float "width" args in
+      let height = get_float "height" args in
+      let fields = [] in
+      let fields = match name with Some v -> ("name", `String v) :: fields | None -> fields in
+      let fields = match x with Some v -> ("x", `Float v) :: fields | None -> fields in
+      let fields = match y with Some v -> ("y", `Float v) :: fields | None -> fields in
+      let fields = match width with Some v -> ("width", `Float v) :: fields | None -> fields in
+      let fields = match height with Some v -> ("height", `Float v) :: fields | None -> fields in
+      let payload = `Assoc fields in
+      let command_id = Figma_plugin_bridge.enqueue_command ~channel_id ~name:"create_vector" ~payload in
+      (match plugin_wait ~channel_id ~command_id ~timeout_ms with
+       | Error err -> Error err
+       | Ok result -> Ok (make_text_content (Yojson.Safe.pretty_to_string result.payload)))
+
+(* set_image_fill 핸들러 *)
+let handle_plugin_set_image_fill args : (Yojson.Safe.t, string) result =
+  match resolve_channel_id args with
+  | Error msg -> Error msg
+  | Ok channel_id ->
+      let timeout_ms = get_int "timeout_ms" args |> Option.value ~default:15000 in
+      let node_id = get_string "node_id" args in
+      let image_hash = get_string "image_hash" args in
+      let base64 = get_string "base64" args in
+      let scale_mode = get_string "scale_mode" args in
+      let fields = [] in
+      let fields = match node_id with Some v -> ("node_id", `String v) :: fields | None -> fields in
+      let fields = match image_hash with Some v -> ("image_hash", `String v) :: fields | None -> fields in
+      let fields = match base64 with Some v -> ("base64", `String v) :: fields | None -> fields in
+      let fields = match scale_mode with Some v -> ("scale_mode", `String v) :: fields | None -> fields in
+      let payload = `Assoc fields in
+      let command_id = Figma_plugin_bridge.enqueue_command ~channel_id ~name:"set_image_fill" ~payload in
+      (match plugin_wait ~channel_id ~command_id ~timeout_ms with
+       | Error err -> Error err
+       | Ok result -> Ok (make_text_content (Yojson.Safe.pretty_to_string result.payload)))
+
+(* get_plugin_data 핸들러 *)
+let handle_plugin_get_plugin_data args : (Yojson.Safe.t, string) result =
+  match resolve_channel_id args with
+  | Error msg -> Error msg
+  | Ok channel_id ->
+      let timeout_ms = get_int "timeout_ms" args |> Option.value ~default:10000 in
+      let node_id = get_string "node_id" args in
+      let key = get_string "data_key" args in
+      let fields = [] in
+      let fields = match node_id with Some v -> ("node_id", `String v) :: fields | None -> fields in
+      let fields = match key with Some v -> ("key", `String v) :: fields | None -> fields in
+      let payload = `Assoc fields in
+      let command_id = Figma_plugin_bridge.enqueue_command ~channel_id ~name:"get_plugin_data" ~payload in
+      (match plugin_wait ~channel_id ~command_id ~timeout_ms with
+       | Error err -> Error err
+       | Ok result -> Ok (make_text_content (Yojson.Safe.pretty_to_string result.payload)))
+
+(* set_plugin_data 핸들러 *)
+let handle_plugin_set_plugin_data args : (Yojson.Safe.t, string) result =
+  match (get_string "data_key" args, resolve_channel_id args) with
+  | (None, _) -> Error "Missing required parameter: data_key"
+  | (_, Error msg) -> Error msg
+  | (Some key, Ok channel_id) ->
+      let timeout_ms = get_int "timeout_ms" args |> Option.value ~default:10000 in
+      let node_id = get_string "node_id" args in
+      let value = get_string "data_value" args |> Option.value ~default:"" in
+      let fields = [("key", `String key); ("value", `String value)] in
+      let fields = match node_id with Some v -> ("node_id", `String v) :: fields | None -> fields in
+      let payload = `Assoc fields in
+      let command_id = Figma_plugin_bridge.enqueue_command ~channel_id ~name:"set_plugin_data" ~payload in
+      (match plugin_wait ~channel_id ~command_id ~timeout_ms with
+       | Error err -> Error err
+       | Ok result -> Ok (make_text_content (Yojson.Safe.pretty_to_string result.payload)))
+
+(* get_doc_info 핸들러 *)
+let handle_plugin_get_doc_info args : (Yojson.Safe.t, string) result =
+  match resolve_channel_id args with
+  | Error msg -> Error msg
+  | Ok channel_id ->
+      let timeout_ms = get_int "timeout_ms" args |> Option.value ~default:10000 in
+      let command_id = Figma_plugin_bridge.enqueue_command ~channel_id ~name:"get_doc_info" ~payload:`Null in
+      (match plugin_wait ~channel_id ~command_id ~timeout_ms with
+       | Error err -> Error err
+       | Ok result -> Ok (make_text_content (Yojson.Safe.pretty_to_string result.payload)))
+
+(* get_absolute_bounds 핸들러 *)
+let handle_plugin_get_absolute_bounds args : (Yojson.Safe.t, string) result =
+  match resolve_channel_id args with
+  | Error msg -> Error msg
+  | Ok channel_id ->
+      let timeout_ms = get_int "timeout_ms" args |> Option.value ~default:10000 in
+      let node_id = get_string "node_id" args in
+      let fields = match node_id with Some v -> [("node_id", `String v)] | None -> [] in
+      let payload = `Assoc fields in
+      let command_id = Figma_plugin_bridge.enqueue_command ~channel_id ~name:"get_absolute_bounds" ~payload in
+      (match plugin_wait ~channel_id ~command_id ~timeout_ms with
+       | Error err -> Error err
+       | Ok result -> Ok (make_text_content (Yojson.Safe.pretty_to_string result.payload)))
+
+(* create_component_set 핸들러 *)
+let handle_plugin_create_component_set args : (Yojson.Safe.t, string) result =
+  match resolve_channel_id args with
+  | Error msg -> Error msg
+  | Ok channel_id ->
+      let timeout_ms = get_int "timeout_ms" args |> Option.value ~default:15000 in
+      let component_ids = get_string_list "component_ids" args |> Option.value ~default:[] in
+      let name = get_string "name" args in
+      let fields = [("component_ids", `List (List.map (fun s -> `String s) component_ids))] in
+      let fields = match name with Some v -> ("name", `String v) :: fields | None -> fields in
+      let payload = `Assoc fields in
+      let command_id = Figma_plugin_bridge.enqueue_command ~channel_id ~name:"create_component_set" ~payload in
+      (match plugin_wait ~channel_id ~command_id ~timeout_ms with
+       | Error err -> Error err
+       | Ok result -> Ok (make_text_content (Yojson.Safe.pretty_to_string result.payload)))
+
+(* remove_auto_layout 핸들러 *)
+let handle_plugin_remove_auto_layout args : (Yojson.Safe.t, string) result =
+  match resolve_channel_id args with
+  | Error msg -> Error msg
+  | Ok channel_id ->
+      let timeout_ms = get_int "timeout_ms" args |> Option.value ~default:10000 in
+      let node_id = get_string "node_id" args in
+      let fields = match node_id with Some v -> [("node_id", `String v)] | None -> [] in
+      let payload = `Assoc fields in
+      let command_id = Figma_plugin_bridge.enqueue_command ~channel_id ~name:"remove_auto_layout" ~payload in
+      (match plugin_wait ~channel_id ~command_id ~timeout_ms with
+       | Error err -> Error err
+       | Ok result -> Ok (make_text_content (Yojson.Safe.pretty_to_string result.payload)))
+
 (* STRAP 통합 핸들러: action으로 라우팅, 기존 핸들러 재사용 *)
 let handle_figma_plugin args : (Yojson.Safe.t, string) result =
   match get_string "action" args with
@@ -5277,7 +5573,26 @@ let handle_figma_plugin args : (Yojson.Safe.t, string) result =
       | "boolean_exclude" -> handle_plugin_boolean_exclude args
       | "get_local_styles" -> handle_plugin_get_local_styles args
       | "set_constraints" -> handle_plugin_set_constraints args
-      | _ -> Error (sprintf "Unknown action: %s. 52 actions available." action)
+      | "create_page" -> handle_plugin_create_page args
+      | "delete_page" -> handle_plugin_delete_page args
+      | "rotate" -> handle_plugin_rotate args
+      | "flip" -> handle_plugin_flip args
+      | "outline_stroke" -> handle_plugin_outline_stroke args
+      | "set_blend_mode" -> handle_plugin_set_blend_mode args
+      | "get_selection_colors" -> handle_plugin_get_selection_colors args
+      | "swap_fill_stroke" -> handle_plugin_swap_fill_stroke args
+      | "copy_style" -> handle_plugin_copy_style args
+      | "get_fonts" -> handle_plugin_get_fonts args
+      | "set_parent" -> handle_plugin_set_parent args
+      | "create_vector" -> handle_plugin_create_vector args
+      | "set_image_fill" -> handle_plugin_set_image_fill args
+      | "get_plugin_data" -> handle_plugin_get_plugin_data args
+      | "set_plugin_data" -> handle_plugin_set_plugin_data args
+      | "get_doc_info" -> handle_plugin_get_doc_info args
+      | "get_absolute_bounds" -> handle_plugin_get_absolute_bounds args
+      | "create_component_set" -> handle_plugin_create_component_set args
+      | "remove_auto_layout" -> handle_plugin_remove_auto_layout args
+      | _ -> Error (sprintf "Unknown action: %s. 72 actions available." action)
 
 (** ============== LLM Bridge 핸들러 ============== *)
 

@@ -1451,6 +1451,405 @@ figma.ui.onmessage = async (msg) => {
         if (vertical) node.constraints = { ...node.constraints, vertical };
         payload = { node_id: node.id, constraints: node.constraints };
       }
+    } else if (command.name === "create_page") {
+      // Create a new page
+      const p = command.payload || {};
+      const page = figma.createPage();
+      page.name = p.name || "New Page";
+      payload = { page_id: page.id, page_name: page.name };
+    } else if (command.name === "delete_page") {
+      // Delete a page (cannot delete last page)
+      const pageId = command.payload && command.payload.page_id;
+      const page = pageId ? figma.root.findChild(n => n.id === pageId && n.type === "PAGE") : null;
+      if (!page) {
+        ok = false;
+        payload = { error: "Page not found" };
+      } else if (figma.root.children.length <= 1) {
+        ok = false;
+        payload = { error: "Cannot delete the last page" };
+      } else {
+        const pageName = page.name;
+        page.remove();
+        payload = { deleted: true, page_id: pageId, page_name: pageName };
+      }
+    } else if (command.name === "rotate") {
+      // Rotate a node
+      const nodeId = command.payload && command.payload.node_id;
+      const angle = command.payload && command.payload.angle;
+      const node = nodeId ? await getNodeById(nodeId) : null;
+      if (!node) {
+        ok = false;
+        payload = { error: "Node not found" };
+      } else if (!("rotation" in node)) {
+        ok = false;
+        payload = { error: "Node does not support rotation" };
+      } else if (typeof angle !== "number") {
+        ok = false;
+        payload = { error: "angle is required (degrees)" };
+      } else {
+        const oldRotation = node.rotation;
+        node.rotation = angle;
+        payload = { node_id: node.id, old_rotation: oldRotation, new_rotation: node.rotation };
+      }
+    } else if (command.name === "flip") {
+      // Flip a node horizontally or vertically
+      const nodeId = command.payload && command.payload.node_id;
+      const direction = command.payload && command.payload.direction; // "horizontal" or "vertical"
+      const node = nodeId ? await getNodeById(nodeId) : null;
+      if (!node) {
+        ok = false;
+        payload = { error: "Node not found" };
+      } else if (!("rescale" in node)) {
+        ok = false;
+        payload = { error: "Node does not support flip" };
+      } else if (!direction || (direction !== "horizontal" && direction !== "vertical")) {
+        ok = false;
+        payload = { error: "direction required: horizontal or vertical" };
+      } else {
+        if (direction === "horizontal") {
+          node.rescale(-1, 1);
+        } else {
+          node.rescale(1, -1);
+        }
+        payload = { node_id: node.id, flipped: direction };
+      }
+    } else if (command.name === "outline_stroke") {
+      // Convert stroke to outlines
+      const nodeId = command.payload && command.payload.node_id;
+      const node = nodeId ? await getNodeById(nodeId) : null;
+      if (!node) {
+        ok = false;
+        payload = { error: "Node not found" };
+      } else if (!("outlineStroke" in node) || typeof node.outlineStroke !== "function") {
+        ok = false;
+        payload = { error: "Node does not support outline stroke" };
+      } else {
+        const outlined = node.outlineStroke();
+        if (!outlined) {
+          ok = false;
+          payload = { error: "Failed to outline stroke (no stroke or unsupported)" };
+        } else {
+          payload = { original_id: node.id, outlined_id: outlined.id, outlined_name: outlined.name };
+        }
+      }
+    } else if (command.name === "set_blend_mode") {
+      // Set blend mode on a node
+      const nodeId = command.payload && command.payload.node_id;
+      const blendMode = command.payload && command.payload.blend_mode;
+      const node = nodeId ? await getNodeById(nodeId) : null;
+      if (!node) {
+        ok = false;
+        payload = { error: "Node not found" };
+      } else if (!("blendMode" in node)) {
+        ok = false;
+        payload = { error: "Node does not support blend mode" };
+      } else if (!blendMode) {
+        ok = false;
+        payload = { error: "blend_mode required" };
+      } else {
+        const oldMode = node.blendMode;
+        node.blendMode = blendMode;
+        payload = { node_id: node.id, old_blend_mode: oldMode, new_blend_mode: node.blendMode };
+      }
+    } else if (command.name === "get_selection_colors") {
+      // Extract all colors from selection
+      const selection = figma.currentPage.selection;
+      if (selection.length === 0) {
+        ok = false;
+        payload = { error: "No nodes selected" };
+      } else {
+        const colors = [];
+        const extractColors = (node) => {
+          if ("fills" in node && Array.isArray(node.fills)) {
+            for (const fill of node.fills) {
+              if (fill.type === "SOLID" && fill.color) {
+                colors.push({ type: "fill", color: fill.color, nodeId: node.id, nodeName: node.name });
+              }
+            }
+          }
+          if ("strokes" in node && Array.isArray(node.strokes)) {
+            for (const stroke of node.strokes) {
+              if (stroke.type === "SOLID" && stroke.color) {
+                colors.push({ type: "stroke", color: stroke.color, nodeId: node.id, nodeName: node.name });
+              }
+            }
+          }
+        };
+        for (const node of selection) {
+          extractColors(node);
+          if ("children" in node) {
+            for (const child of node.children) {
+              extractColors(child);
+            }
+          }
+        }
+        payload = { count: colors.length, colors: colors.slice(0, 50) };
+      }
+    } else if (command.name === "swap_fill_stroke") {
+      // Swap fill and stroke colors
+      const nodeId = command.payload && command.payload.node_id;
+      const node = nodeId ? await getNodeById(nodeId) : null;
+      if (!node) {
+        ok = false;
+        payload = { error: "Node not found" };
+      } else if (!("fills" in node) || !("strokes" in node)) {
+        ok = false;
+        payload = { error: "Node does not support fills/strokes" };
+      } else {
+        const oldFills = [...node.fills];
+        const oldStrokes = [...node.strokes];
+        // Convert fills to strokes and vice versa
+        node.fills = oldStrokes.map(s => ({ ...s }));
+        node.strokes = oldFills.map(f => ({ ...f }));
+        payload = { node_id: node.id, swapped: true };
+      }
+    } else if (command.name === "copy_style") {
+      // Copy style from one node to another
+      const sourceId = command.payload && command.payload.source_id;
+      const targetId = command.payload && command.payload.target_id;
+      const source = sourceId ? await getNodeById(sourceId) : null;
+      const target = targetId ? await getNodeById(targetId) : null;
+      if (!source || !target) {
+        ok = false;
+        payload = { error: "Source or target node not found" };
+      } else {
+        // Copy fills
+        if ("fills" in source && "fills" in target) {
+          target.fills = [...source.fills];
+        }
+        // Copy strokes
+        if ("strokes" in source && "strokes" in target) {
+          target.strokes = [...source.strokes];
+          if ("strokeWeight" in source && "strokeWeight" in target) {
+            target.strokeWeight = source.strokeWeight;
+          }
+        }
+        // Copy effects
+        if ("effects" in source && "effects" in target) {
+          target.effects = [...source.effects];
+        }
+        // Copy corner radius
+        if ("cornerRadius" in source && "cornerRadius" in target) {
+          target.cornerRadius = source.cornerRadius;
+        }
+        // Copy opacity
+        if ("opacity" in source && "opacity" in target) {
+          target.opacity = source.opacity;
+        }
+        payload = { source_id: source.id, target_id: target.id, copied: true };
+      }
+    } else if (command.name === "get_fonts") {
+      // Get all fonts used in the document
+      const fonts = new Set();
+      const collectFonts = (node) => {
+        if (node.type === "TEXT") {
+          const fontName = node.fontName;
+          if (fontName && fontName !== figma.mixed) {
+            fonts.add(JSON.stringify(fontName));
+          }
+        }
+        if ("children" in node) {
+          for (const child of node.children) {
+            collectFonts(child);
+          }
+        }
+      };
+      collectFonts(figma.currentPage);
+      const fontList = Array.from(fonts).map(f => JSON.parse(f));
+      payload = { count: fontList.length, fonts: fontList };
+    } else if (command.name === "set_parent") {
+      // Move a node to a new parent
+      const nodeId = command.payload && command.payload.node_id;
+      const parentId = command.payload && command.payload.parent_id;
+      const node = nodeId ? await getNodeById(nodeId) : null;
+      const newParent = parentId ? await getNodeById(parentId) : null;
+      if (!node) {
+        ok = false;
+        payload = { error: "Node not found" };
+      } else if (!newParent) {
+        ok = false;
+        payload = { error: "Parent node not found" };
+      } else if (!("children" in newParent)) {
+        ok = false;
+        payload = { error: "Target parent cannot contain children" };
+      } else {
+        const oldParentId = node.parent ? node.parent.id : null;
+        newParent.appendChild(node);
+        payload = { node_id: node.id, old_parent_id: oldParentId, new_parent_id: newParent.id };
+      }
+    } else if (command.name === "create_vector") {
+      // Create a vector node with optional path data
+      const p = command.payload || {};
+      const vector = figma.createVector();
+      if (p.name) vector.name = p.name;
+      if (p.x !== undefined) vector.x = p.x;
+      if (p.y !== undefined) vector.y = p.y;
+      // vectorPaths is readonly in recent API, use vectorNetwork instead
+      if (p.path_data) {
+        try {
+          // SVG path data to vectorNetwork conversion would require complex parsing
+          // For now, just set basic properties
+          vector.resize(p.width || 100, p.height || 100);
+        } catch (e) {
+          // Ignore path parsing errors
+        }
+      }
+      payload = { node_id: vector.id, name: vector.name };
+    } else if (command.name === "set_image_fill") {
+      // Set an image fill from base64 or image hash
+      const p = command.payload || {};
+      const nodeId = p.node_id || p.nodeId;
+      const node = nodeId ? await getNodeById(nodeId) : null;
+      if (!node) {
+        ok = false;
+        payload = { error: "Node not found" };
+      } else if (!("fills" in node)) {
+        ok = false;
+        payload = { error: "Node does not support fills" };
+      } else {
+        try {
+          let imageHash = p.image_hash || p.imageHash;
+          if (!imageHash && (p.base64 || p.image_base64)) {
+            // Decode base64 to Uint8Array
+            const base64Data = p.base64 || p.image_base64;
+            const binaryString = atob(base64Data);
+            const bytes = new Uint8Array(binaryString.length);
+            for (let i = 0; i < binaryString.length; i++) {
+              bytes[i] = binaryString.charCodeAt(i);
+            }
+            const image = figma.createImage(bytes);
+            imageHash = image.hash;
+          }
+          if (imageHash) {
+            const imageFill = {
+              type: "IMAGE",
+              imageHash: imageHash,
+              scaleMode: p.scale_mode || p.scaleMode || "FILL"
+            };
+            node.fills = [imageFill];
+            payload = { node_id: node.id, image_hash: imageHash };
+          } else {
+            ok = false;
+            payload = { error: "No image_hash or base64 provided" };
+          }
+        } catch (e) {
+          ok = false;
+          payload = { error: String(e) };
+        }
+      }
+    } else if (command.name === "get_plugin_data") {
+      // Get plugin data from a node
+      const p = command.payload || {};
+      const nodeId = p.node_id || p.nodeId;
+      const key = p.key;
+      const node = nodeId ? await getNodeById(nodeId) : figma.currentPage;
+      if (!node) {
+        ok = false;
+        payload = { error: "Node not found" };
+      } else if (!key) {
+        // Get all plugin data keys
+        const keys = node.getPluginDataKeys();
+        const data = {};
+        for (const k of keys) {
+          data[k] = node.getPluginData(k);
+        }
+        payload = { node_id: node.id, data: data };
+      } else {
+        const value = node.getPluginData(key);
+        payload = { node_id: node.id, key: key, value: value };
+      }
+    } else if (command.name === "set_plugin_data") {
+      // Set plugin data on a node
+      const p = command.payload || {};
+      const nodeId = p.node_id || p.nodeId;
+      const key = p.key;
+      const value = p.value || "";
+      const node = nodeId ? await getNodeById(nodeId) : figma.currentPage;
+      if (!node) {
+        ok = false;
+        payload = { error: "Node not found" };
+      } else if (!key) {
+        ok = false;
+        payload = { error: "Missing required parameter: key" };
+      } else {
+        node.setPluginData(key, value);
+        payload = { node_id: node.id, key: key, value: value };
+      }
+    } else if (command.name === "get_doc_info") {
+      // Get document information
+      const doc = figma.root;
+      payload = {
+        name: doc.name,
+        id: doc.id,
+        type: doc.type,
+        page_count: doc.children.length,
+        pages: doc.children.map(p => ({ id: p.id, name: p.name })),
+        current_page: { id: figma.currentPage.id, name: figma.currentPage.name }
+      };
+    } else if (command.name === "get_absolute_bounds") {
+      // Get absolute bounding box of a node
+      const p = command.payload || {};
+      const nodeId = p.node_id || p.nodeId;
+      const node = nodeId ? await getNodeById(nodeId) : (figma.currentPage.selection[0] || null);
+      if (!node) {
+        ok = false;
+        payload = { error: "Node not found" };
+      } else if (!("absoluteBoundingBox" in node)) {
+        ok = false;
+        payload = { error: "Node does not have absoluteBoundingBox" };
+      } else {
+        const bounds = node.absoluteBoundingBox;
+        const transform = node.absoluteTransform;
+        payload = {
+          node_id: node.id,
+          absolute_bounds: bounds ? { x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height } : null,
+          absolute_transform: transform ? [[transform[0][0], transform[0][1], transform[0][2]], [transform[1][0], transform[1][1], transform[1][2]]] : null
+        };
+      }
+    } else if (command.name === "create_component_set") {
+      // Create a component set from existing components (for variants)
+      const p = command.payload || {};
+      const componentIds = p.component_ids || p.componentIds || [];
+      if (componentIds.length < 2) {
+        ok = false;
+        payload = { error: "At least 2 component IDs required to create a component set" };
+      } else {
+        const components = [];
+        for (const id of componentIds) {
+          const node = await getNodeById(id);
+          if (node && node.type === "COMPONENT") {
+            components.push(node);
+          }
+        }
+        if (components.length < 2) {
+          ok = false;
+          payload = { error: "At least 2 valid components required" };
+        } else {
+          const componentSet = figma.combineAsVariants(components, figma.currentPage);
+          if (p.name) componentSet.name = p.name;
+          payload = {
+            component_set_id: componentSet.id,
+            name: componentSet.name,
+            variant_count: componentSet.children.length
+          };
+        }
+      }
+    } else if (command.name === "remove_auto_layout") {
+      // Remove auto layout from a frame
+      const p = command.payload || {};
+      const nodeId = p.node_id || p.nodeId;
+      const node = nodeId ? await getNodeById(nodeId) : (figma.currentPage.selection[0] || null);
+      if (!node) {
+        ok = false;
+        payload = { error: "Node not found" };
+      } else if (node.type !== "FRAME" && node.type !== "COMPONENT" && node.type !== "INSTANCE") {
+        ok = false;
+        payload = { error: "Node must be a frame, component, or instance" };
+      } else {
+        // Setting layoutMode to NONE removes auto layout
+        node.layoutMode = "NONE";
+        payload = { node_id: node.id, layout_mode: "NONE" };
+      }
     } else {
       ok = false;
       payload = { error: "Unknown command" };
