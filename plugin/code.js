@@ -216,12 +216,18 @@ const handlers = {
     bounds: figma.viewport.bounds
   })),
 
-  get_local_styles: H.simple(() => ({
-    paint: figma.getLocalPaintStyles().map(s => ({ id: s.id, name: s.name })),
-    text: figma.getLocalTextStyles().map(s => ({ id: s.id, name: s.name })),
-    effect: figma.getLocalEffectStyles().map(s => ({ id: s.id, name: s.name })),
-    grid: figma.getLocalGridStyles().map(s => ({ id: s.id, name: s.name }))
-  })),
+  get_local_styles: H.simple(() => {
+    var safeMap = function(fn) {
+      try { return fn().map(function(s) { return { id: s.id, name: s.name }; }); }
+      catch (e) { return []; }
+    };
+    return {
+      paint: safeMap(function() { return figma.getLocalPaintStyles(); }),
+      text: safeMap(function() { return figma.getLocalTextStyles(); }),
+      effect: safeMap(function() { return figma.getLocalEffectStyles(); }),
+      grid: safeMap(function() { return figma.getLocalGridStyles(); })
+    };
+  }),
 
   get_selection_colors: H.simple(() => {
     const colors = [];
@@ -293,11 +299,12 @@ const handlers = {
     overrides: node.overrides || []
   }), { type: "INSTANCE" }),
 
-  get_layer_list: H.node((node) => {
-    if (!("children" in node)) return { error: "Node has no children" };
+  get_layer_list: H.simple((p) => {
+    var node = p.node_id ? figma.getNodeById(p.node_id) : figma.currentPage;
+    if (!node || !("children" in node)) return { error: "Node has no children" };
     return {
       parent_id: node.id,
-      layers: node.children.map((c, i) => ({ index: i, id: c.id, name: c.name, type: c.type, visible: c.visible }))
+      layers: node.children.map(function(c, i) { return { index: i, id: c.id, name: c.name, type: c.type, visible: c.visible }; })
     };
   }),
 
