@@ -1,2 +1,2 @@
 (** Version from dune-project *)
-let version = "0.3.17"
+let version = "0.3.18"
