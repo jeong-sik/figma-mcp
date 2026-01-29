@@ -16,13 +16,7 @@ let test_string_prop () =
         (match List.assoc_opt "description" fields with Some (`String s) -> Some s | _ -> None)
   | _ -> fail "Expected Assoc"
 
-let test_string_prop_with_required () =
-  let result = Mcp_tools.string_prop ~required:true "Required field" in
-  match result with
-  | `Assoc fields ->
-      check (option string) "type" (Some "string")
-        (match List.assoc_opt "type" fields with Some (`String s) -> Some s | _ -> None)
-  | _ -> fail "Expected Assoc"
+(* Note: test_string_prop_with_required removed - ~required parameter was removed in v0.3.14 *)
 
 let test_number_prop () =
   let result = Mcp_tools.number_prop "A number" in
@@ -96,7 +90,6 @@ let test_object_schema_empty_required () =
 
 let schema_helper_tests = [
   "string_prop basic", `Quick, test_string_prop;
-  "string_prop with required", `Quick, test_string_prop_with_required;
   "number_prop", `Quick, test_number_prop;
   "bool_prop", `Quick, test_bool_prop;
   "enum_prop", `Quick, test_enum_prop;
