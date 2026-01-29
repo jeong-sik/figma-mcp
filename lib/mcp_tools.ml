@@ -594,6 +594,29 @@ let tool_figma_plugin_apply_ops : tool_def = {
     ("timeout_ms", number_prop "응답 대기 시간 (기본값: 20000)");
   ] ["ops"];
 }
+
+(* STRAP 통합: 8개 plugin 도구 → 1개 (56→49 도구) *)
+let tool_figma_plugin : tool_def = {
+  name = "figma_plugin";
+  description = "🔌 PLUGIN: Figma Desktop 앱과 실시간 연동. action으로 세부 동작 선택.";
+  input_schema = object_schema [
+    ("action", enum_prop [
+      "connect"; "use_channel"; "status";
+      "read_selection"; "get_node"; "export_image";
+      "get_variables"; "apply_ops"
+    ] "수행할 동작: connect(채널 생성), use_channel(기본 채널 설정), status(상태 확인), read_selection(선택 노드), get_node(노드 정보), export_image(이미지 내보내기), get_variables(변수 조회), apply_ops(노드 편집)");
+    ("channel_id", string_prop "채널 ID (옵션, connect/use_channel에서 사용)");
+    ("node_id", string_prop "노드 ID (get_node/export_image에서 사용)");
+    ("url", string_prop "Figma URL (node_id 자동 추출)");
+    ("depth", number_prop "자식 탐색 깊이 (기본값: 6)");
+    ("include_geometry", bool_prop "벡터/지오메트리 포함 여부 (기본값: true)");
+    ("format", enum_prop ["png"; "jpg"; "svg"; "pdf"] "이미지 포맷 (export_image, 기본값: png)");
+    ("scale", number_prop "스케일 (export_image, 기본값: 1)");
+    ("ops", array_prop "작업 목록 (apply_ops에서 사용)");
+    ("timeout_ms", number_prop "응답 대기 시간 (기본값: 20000)");
+  ] ["action"];
+}
+
 (** ============== Phase 1: 탐색 도구 ============== *)
 
 let tool_figma_parse_url : tool_def = {
@@ -788,14 +811,8 @@ let all_tools = [
   tool_figma_get_component;
   tool_figma_get_component_set;
   tool_figma_get_style;
-  tool_figma_plugin_connect;
-  tool_figma_plugin_use_channel;
-  tool_figma_plugin_status;
-  tool_figma_plugin_read_selection;
-  tool_figma_plugin_get_node;
-  tool_figma_plugin_export_node_image;
-  tool_figma_plugin_get_variables;
-  tool_figma_plugin_apply_ops;
+  (* STRAP 통합: 8개 plugin 도구 → 1개 *)
+  tool_figma_plugin;
   (* Phase 1: 탐색 도구 *)
   tool_figma_parse_url;
   tool_figma_get_me;
@@ -4367,6 +4384,22 @@ let handle_plugin_apply_ops args : (Yojson.Safe.t, string) result =
             ] in
            Ok (make_text_content (Yojson.Safe.pretty_to_string response)))
 
+(* STRAP 통합 핸들러: action으로 라우팅, 기존 핸들러 재사용 *)
+let handle_figma_plugin args : (Yojson.Safe.t, string) result =
+  match get_string "action" args with
+  | None -> Error "Missing required parameter: action"
+  | Some action ->
+      match action with
+      | "connect" -> handle_plugin_connect args
+      | "use_channel" -> handle_plugin_use_channel args
+      | "status" -> handle_plugin_status args
+      | "read_selection" -> handle_plugin_read_selection args
+      | "get_node" -> handle_plugin_get_node args
+      | "export_image" -> handle_plugin_export_node_image args
+      | "get_variables" -> handle_plugin_get_variables args
+      | "apply_ops" -> handle_plugin_apply_ops args
+      | _ -> Error (sprintf "Unknown action: %s. Available: connect, use_channel, status, read_selection, get_node, export_image, get_variables, apply_ops" action)
+
 (** ============== LLM Bridge 핸들러 ============== *)
 
 let has_field key fields =
@@ -5344,14 +5377,8 @@ let all_handlers_sync : (string * tool_handler_sync) list = [
   ("figma_get_component", wrap_sync_pure handle_get_component);
   ("figma_get_component_set", wrap_sync_pure handle_get_component_set);
   ("figma_get_style", wrap_sync_pure handle_get_style);
-  ("figma_plugin_connect", wrap_sync_pure handle_plugin_connect);
-  ("figma_plugin_use_channel", wrap_sync_pure handle_plugin_use_channel);
-  ("figma_plugin_status", wrap_sync_pure handle_plugin_status);
-  ("figma_plugin_read_selection", wrap_sync_pure handle_plugin_read_selection);
-  ("figma_plugin_get_node", wrap_sync_pure handle_plugin_get_node);
-  ("figma_plugin_export_node_image", wrap_sync_pure handle_plugin_export_node_image);
-  ("figma_plugin_get_variables", wrap_sync_pure handle_plugin_get_variables);
-  ("figma_plugin_apply_ops", wrap_sync_pure handle_plugin_apply_ops);
+  (* STRAP 통합: 8개 plugin 핸들러 → 1개 라우터 *)
+  ("figma_plugin", wrap_sync_pure handle_figma_plugin);
   (* Phase 1: 탐색 도구 *)
   ("figma_parse_url", wrap_sync_pure handle_parse_url);
   ("figma_get_me", wrap_sync_pure handle_get_me);
