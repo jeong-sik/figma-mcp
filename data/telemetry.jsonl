@@ -219,3 +219,32 @@
 {"timestamp":1769679666.196101,"event":["Tool_called",{"tool_name":"figma_plugin","success":true,"duration_ms":51,"agent_id":null,"error":null}]}
 {"timestamp":1769679666.265622,"event":["Tool_called",{"tool_name":"figma_plugin","success":true,"duration_ms":50,"agent_id":null,"error":null}]}
 {"timestamp":1769679673.632723,"event":["Tool_called",{"tool_name":"figma_plugin","success":true,"duration_ms":50,"agent_id":null,"error":null}]}
+{"timestamp":1769680509.788923,"event":["Tool_called",{"tool_name":"figma_plugin","success":true,"duration_ms":0,"agent_id":null,"error":null}]}
+{"timestamp":1769681355.337058,"event":["Tool_called",{"tool_name":"figma_parse_url","success":true,"duration_ms":0,"agent_id":null,"error":null}]}
+{"timestamp":1769681368.275935,"event":["Tool_called",{"tool_name":"figma_get_node","success":true,"duration_ms":3033,"agent_id":null,"error":null}]}
+{"timestamp":1769681883.55644,"event":["Tool_called",{"tool_name":"figma_parse_url","success":true,"duration_ms":0,"agent_id":null,"error":null}]}
+{"timestamp":1769681901.313167,"event":["Tool_called",{"tool_name":"figma_get_node_summary","success":true,"duration_ms":2804,"agent_id":null,"error":null}]}
+{"timestamp":1769681918.709182,"event":["Tool_called",{"tool_name":"figma_get_node","success":true,"duration_ms":2088,"agent_id":null,"error":null}]}
+{"timestamp":1769682005.941494,"event":["Tool_called",{"tool_name":"figma_get_node","success":true,"duration_ms":3003,"agent_id":null,"error":null}]}
+{"timestamp":1769682009.936514,"event":["Tool_called",{"tool_name":"figma_get_node","success":true,"duration_ms":2904,"agent_id":null,"error":null}]}
+{"timestamp":1769682119.362429,"event":["Tool_called",{"tool_name":"figma_parse_url","success":true,"duration_ms":0,"agent_id":null,"error":null}]}
+{"timestamp":1769682119.435258,"event":["Tool_called",{"tool_name":"figma_parse_url","success":true,"duration_ms":0,"agent_id":null,"error":null}]}
+{"timestamp":1769682130.380209,"event":["Tool_called",{"tool_name":"figma_get_node","success":true,"duration_ms":2965,"agent_id":null,"error":null}]}
+{"timestamp":1769682130.534293,"event":["Tool_called",{"tool_name":"figma_get_node_summary","success":true,"duration_ms":2336,"agent_id":null,"error":null}]}
+{"timestamp":1769682133.128158,"event":["Tool_called",{"tool_name":"figma_get_node_summary","success":true,"duration_ms":2485,"agent_id":null,"error":null}]}
+{"timestamp":1769682144.514108,"event":["Tool_called",{"tool_name":"figma_get_node","success":true,"duration_ms":2677,"agent_id":null,"error":null}]}
+{"timestamp":1769682340.790895,"event":["Tool_called",{"tool_name":"figma_get_node","success":false,"duration_ms":860,"agent_id":null,"error":"Invalid request: Invalid request parameters. Check file_key and node_id are correct. [API response: <html>\r\n<head><title>400 Bad Request</title></head>\r\n<body>\r\n<center><h1>400 Bad Request</h1></center>\r\n</body>\r\n</html>\r\n]"}]}
+{"timestamp":1769682342.077744,"event":["Tool_called",{"tool_name":"figma_plugin","success":false,"duration_ms":0,"agent_id":null,"error":"Unknown action: get_selection. 100 actions available."}]}
+{"timestamp":1769682342.520543,"event":["Tool_called",{"tool_name":"figma_plugin","success":false,"duration_ms":0,"agent_id":null,"error":"Unknown action: get_document_info. 100 actions available."}]}
+{"timestamp":1769682349.082902,"event":["Tool_called",{"tool_name":"figma_parse_url","success":true,"duration_ms":0,"agent_id":null,"error":null}]}
+{"timestamp":1769682353.886179,"event":["Tool_called",{"tool_name":"figma_get_node","success":false,"duration_ms":603,"agent_id":null,"error":"Invalid request: Invalid request parameters. Check file_key and node_id are correct. [API response: <html>\r\n<head><title>400 Bad Request</title></head>\r\n<body>\r\n<center><h1>400 Bad Request</h1></center>\r\n</body>\r\n</html>\r\n]"}]}
+{"timestamp":1769682394.682755,"event":["Tool_called",{"tool_name":"figma_plugin","success":false,"duration_ms":0,"agent_id":null,"error":"Missing channel_id. Run figma_plugin_connect or figma_plugin_use_channel."}]}
+{"timestamp":1769682395.155684,"event":["Tool_called",{"tool_name":"figma_plugin","success":false,"duration_ms":0,"agent_id":null,"error":"Missing channel_id. Run figma_plugin_connect or figma_plugin_use_channel."}]}
+{"timestamp":1769682401.661735,"event":["Tool_called",{"tool_name":"figma_plugin","success":true,"duration_ms":0,"agent_id":null,"error":null}]}
+{"timestamp":1769683640.1987,"event":["Tool_called",{"tool_name":"figma_get_node","success":false,"duration_ms":811,"agent_id":null,"error":"Invalid request: Invalid request parameters. Check file_key and node_id are correct. [API response: <html>\r\n<head><title>400 Bad Request</title></head>\r\n<body>\r\n<center><h1>400 Bad Request</h1></center>\r\n</body>\r\n</html>\r\n]"}]}
+{"timestamp":1769683696.350964,"event":["Tool_called",{"tool_name":"figma_get_node_bundle","success":true,"duration_ms":18372,"agent_id":null,"error":null}]}
+{"timestamp":1769683702.586222,"event":["Tool_called",{"tool_name":"figma_parse_url","success":true,"duration_ms":0,"agent_id":null,"error":null}]}
+{"timestamp":1769683716.256464,"event":["Tool_called",{"tool_name":"figma_get_node_summary","success":true,"duration_ms":2725,"agent_id":null,"error":null}]}
+{"timestamp":1769683729.78071,"event":["Tool_called",{"tool_name":"figma_get_node","success":true,"duration_ms":3643,"agent_id":null,"error":null}]}
+{"timestamp":1769683747.35304,"event":["Tool_called",{"tool_name":"figma_parse_url","success":true,"duration_ms":0,"agent_id":null,"error":null}]}
+{"timestamp":1769683755.636691,"event":["Tool_called",{"tool_name":"figma_get_node","success":true,"duration_ms":2721,"agent_id":null,"error":null}]}
