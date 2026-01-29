@@ -623,8 +623,10 @@ let tool_figma_plugin : tool_def = {
       "create_vector"; "set_image_fill"; "get_plugin_data"; "set_plugin_data";
       "get_doc_info"; "get_absolute_bounds"; "create_component_set"; "remove_auto_layout";
       "create_slice"; "set_export_settings"; "get_reactions"; "set_reactions";
-      "rasterize"; "get_shared_plugin_data"; "set_shared_plugin_data"
-    ] "79개 action: 연결(3), 페이지(4), 문서(1), 생성(frame/rectangle/ellipse/text/line/polygon/star/vector/component/component_set/slice), 조회(node/selection/components/styles/colors/fonts/viewport/absolute_bounds/plugin_data/reactions/shared_data), 편집(clone/duplicate/delete/group/ungroup/flatten/detach/set_parent), 변형(resize/move/rotate/flip/reorder), 불리언(4), 정렬(2), 스타일(17), 레이아웃(2), 내보내기(export_settings/rasterize), 프로토타입(get/set_reactions)");
+      "rasterize"; "get_shared_plugin_data"; "set_shared_plugin_data";
+      "swap_component"; "resize_to_fit"; "get_characters"; "set_range_fills";
+      "set_range_font_size"; "insert_child"; "get_all_local_variables"
+    ] "86개 action: 연결(3), 페이지(4), 문서(1), 생성(11), 조회(15+characters/variables), 편집(clone/duplicate/delete/group/ungroup/flatten/detach/set_parent/insert_child), 변형(resize/move/rotate/flip/reorder/resize_to_fit), 불리언(4), 정렬(2), 스타일(17), 텍스트(set_text/get_characters/set_range_fills/set_range_font_size), 레이아웃(2), 컴포넌트(swap_component), 내보내기(2), 프로토타입(2)");
     ("channel_id", string_prop "채널 ID");
     ("node_id", string_prop "노드 ID");
     ("url", string_prop "Figma URL (node_id 자동 추출)");
@@ -703,6 +705,17 @@ let tool_figma_plugin : tool_def = {
     ("navigation", enum_prop ["NAVIGATE"; "SWAP"; "OVERLAY"; "SCROLL_TO"; "CHANGE_TO"] "네비게이션 타입 (set_reactions)");
     ("preserve_scroll", bool_prop "스크롤 위치 유지 (set_reactions)");
     ("namespace", string_prop "공유 플러그인 데이터 네임스페이스 (get/set_shared_plugin_data)");
+    ("component_id", string_prop "교체할 컴포넌트 ID (swap_component)");
+    ("axis", enum_prop ["horizontal"; "vertical"; "both"] "리사이즈 방향 (resize_to_fit)");
+    ("padding", number_prop "패딩 (resize_to_fit)");
+    ("start", number_prop "텍스트 범위 시작 인덱스 (set_range_fills/set_range_font_size)");
+    ("end", number_prop "텍스트 범위 끝 인덱스 (set_range_fills/set_range_font_size)");
+    ("r", number_prop "빨강 0-1 (set_range_fills)");
+    ("g", number_prop "초록 0-1 (set_range_fills)");
+    ("b", number_prop "파랑 0-1 (set_range_fills)");
+    ("a", number_prop "알파 0-1 (set_range_fills)");
+    ("font_size", number_prop "폰트 크기 (set_range_font_size)");
+    ("index", number_prop "삽입 위치 (insert_child)");
   ] ["action"];
 }
 
@@ -5659,6 +5672,130 @@ let handle_plugin_set_shared_plugin_data args : (Yojson.Safe.t, string) result =
        | Error err -> Error err
        | Ok result -> Ok (make_text_content (Yojson.Safe.pretty_to_string result.payload)))
 
+(* swap_component 핸들러 *)
+let handle_plugin_swap_component args : (Yojson.Safe.t, string) result =
+  match (get_string "component_id" args, resolve_channel_id args) with
+  | (None, _) -> Error "Missing required parameter: component_id"
+  | (_, Error msg) -> Error msg
+  | (Some component_id, Ok channel_id) ->
+      let timeout_ms = get_int "timeout_ms" args |> Option.value ~default:10000 in
+      let node_id = get_string "node_id" args in
+      let fields = [("component_id", `String component_id)] in
+      let fields = match node_id with Some v -> ("node_id", `String v) :: fields | None -> fields in
+      let payload = `Assoc fields in
+      let command_id = Figma_plugin_bridge.enqueue_command ~channel_id ~name:"swap_component" ~payload in
+      (match plugin_wait ~channel_id ~command_id ~timeout_ms with
+       | Error err -> Error err
+       | Ok result -> Ok (make_text_content (Yojson.Safe.pretty_to_string result.payload)))
+
+(* resize_to_fit 핸들러 *)
+let handle_plugin_resize_to_fit args : (Yojson.Safe.t, string) result =
+  match resolve_channel_id args with
+  | Error msg -> Error msg
+  | Ok channel_id ->
+      let timeout_ms = get_int "timeout_ms" args |> Option.value ~default:10000 in
+      let node_id = get_string "node_id" args in
+      let axis = get_string "axis" args in
+      let padding = get_float "padding" args in
+      let fields = [] in
+      let fields = match node_id with Some v -> ("node_id", `String v) :: fields | None -> fields in
+      let fields = match axis with Some v -> ("axis", `String v) :: fields | None -> fields in
+      let fields = match padding with Some v -> ("padding", `Float v) :: fields | None -> fields in
+      let payload = `Assoc fields in
+      let command_id = Figma_plugin_bridge.enqueue_command ~channel_id ~name:"resize_to_fit" ~payload in
+      (match plugin_wait ~channel_id ~command_id ~timeout_ms with
+       | Error err -> Error err
+       | Ok result -> Ok (make_text_content (Yojson.Safe.pretty_to_string result.payload)))
+
+(* get_characters 핸들러 *)
+let handle_plugin_get_characters args : (Yojson.Safe.t, string) result =
+  match resolve_channel_id args with
+  | Error msg -> Error msg
+  | Ok channel_id ->
+      let timeout_ms = get_int "timeout_ms" args |> Option.value ~default:15000 in
+      let node_id = get_string "node_id" args in
+      let fields = match node_id with Some v -> [("node_id", `String v)] | None -> [] in
+      let payload = `Assoc fields in
+      let command_id = Figma_plugin_bridge.enqueue_command ~channel_id ~name:"get_characters" ~payload in
+      (match plugin_wait ~channel_id ~command_id ~timeout_ms with
+       | Error err -> Error err
+       | Ok result -> Ok (make_text_content (Yojson.Safe.pretty_to_string result.payload)))
+
+(* set_range_fills 핸들러 *)
+let handle_plugin_set_range_fills args : (Yojson.Safe.t, string) result =
+  match resolve_channel_id args with
+  | Error msg -> Error msg
+  | Ok channel_id ->
+      let timeout_ms = get_int "timeout_ms" args |> Option.value ~default:10000 in
+      let node_id = get_string "node_id" args in
+      let start_idx = get_int "start" args in
+      let end_idx = get_int "end" args in
+      let r = get_float "r" args in
+      let g = get_float "g" args in
+      let b = get_float "b" args in
+      let a = get_float "a" args in
+      let fields = [] in
+      let fields = match node_id with Some v -> ("node_id", `String v) :: fields | None -> fields in
+      let fields = match start_idx with Some v -> ("start", `Int v) :: fields | None -> fields in
+      let fields = match end_idx with Some v -> ("end", `Int v) :: fields | None -> fields in
+      let color_fields = [] in
+      let color_fields = match r with Some v -> ("r", `Float v) :: color_fields | None -> color_fields in
+      let color_fields = match g with Some v -> ("g", `Float v) :: color_fields | None -> color_fields in
+      let color_fields = match b with Some v -> ("b", `Float v) :: color_fields | None -> color_fields in
+      let color_fields = match a with Some v -> ("a", `Float v) :: color_fields | None -> color_fields in
+      let fields = if color_fields <> [] then ("color", `Assoc color_fields) :: fields else fields in
+      let payload = `Assoc fields in
+      let command_id = Figma_plugin_bridge.enqueue_command ~channel_id ~name:"set_range_fills" ~payload in
+      (match plugin_wait ~channel_id ~command_id ~timeout_ms with
+       | Error err -> Error err
+       | Ok result -> Ok (make_text_content (Yojson.Safe.pretty_to_string result.payload)))
+
+(* set_range_font_size 핸들러 *)
+let handle_plugin_set_range_font_size args : (Yojson.Safe.t, string) result =
+  match (get_float "font_size" args, resolve_channel_id args) with
+  | (None, _) -> Error "Missing required parameter: font_size"
+  | (_, Error msg) -> Error msg
+  | (Some font_size, Ok channel_id) ->
+      let timeout_ms = get_int "timeout_ms" args |> Option.value ~default:10000 in
+      let node_id = get_string "node_id" args in
+      let start_idx = get_int "start" args in
+      let end_idx = get_int "end" args in
+      let fields = [("font_size", `Float font_size)] in
+      let fields = match node_id with Some v -> ("node_id", `String v) :: fields | None -> fields in
+      let fields = match start_idx with Some v -> ("start", `Int v) :: fields | None -> fields in
+      let fields = match end_idx with Some v -> ("end", `Int v) :: fields | None -> fields in
+      let payload = `Assoc fields in
+      let command_id = Figma_plugin_bridge.enqueue_command ~channel_id ~name:"set_range_font_size" ~payload in
+      (match plugin_wait ~channel_id ~command_id ~timeout_ms with
+       | Error err -> Error err
+       | Ok result -> Ok (make_text_content (Yojson.Safe.pretty_to_string result.payload)))
+
+(* insert_child 핸들러 *)
+let handle_plugin_insert_child args : (Yojson.Safe.t, string) result =
+  match (get_string "node_id" args, get_string "parent_id" args, resolve_channel_id args) with
+  | (None, _, _) -> Error "Missing required parameter: node_id"
+  | (_, None, _) -> Error "Missing required parameter: parent_id"
+  | (_, _, Error msg) -> Error msg
+  | (Some node_id, Some parent_id, Ok channel_id) ->
+      let timeout_ms = get_int "timeout_ms" args |> Option.value ~default:10000 in
+      let index = get_int "index" args |> Option.value ~default:0 in
+      let payload = `Assoc [("node_id", `String node_id); ("parent_id", `String parent_id); ("index", `Int index)] in
+      let command_id = Figma_plugin_bridge.enqueue_command ~channel_id ~name:"insert_child" ~payload in
+      (match plugin_wait ~channel_id ~command_id ~timeout_ms with
+       | Error err -> Error err
+       | Ok result -> Ok (make_text_content (Yojson.Safe.pretty_to_string result.payload)))
+
+(* get_all_local_variables 핸들러 *)
+let handle_plugin_get_all_local_variables args : (Yojson.Safe.t, string) result =
+  match resolve_channel_id args with
+  | Error msg -> Error msg
+  | Ok channel_id ->
+      let timeout_ms = get_int "timeout_ms" args |> Option.value ~default:15000 in
+      let command_id = Figma_plugin_bridge.enqueue_command ~channel_id ~name:"get_all_local_variables" ~payload:`Null in
+      (match plugin_wait ~channel_id ~command_id ~timeout_ms with
+       | Error err -> Error err
+       | Ok result -> Ok (make_text_content (Yojson.Safe.pretty_to_string result.payload)))
+
 (* STRAP 통합 핸들러: action으로 라우팅, 기존 핸들러 재사용 *)
 let handle_figma_plugin args : (Yojson.Safe.t, string) result =
   match get_string "action" args with
@@ -5744,7 +5881,14 @@ let handle_figma_plugin args : (Yojson.Safe.t, string) result =
       | "rasterize" -> handle_plugin_rasterize args
       | "get_shared_plugin_data" -> handle_plugin_get_shared_plugin_data args
       | "set_shared_plugin_data" -> handle_plugin_set_shared_plugin_data args
-      | _ -> Error (sprintf "Unknown action: %s. 79 actions available." action)
+      | "swap_component" -> handle_plugin_swap_component args
+      | "resize_to_fit" -> handle_plugin_resize_to_fit args
+      | "get_characters" -> handle_plugin_get_characters args
+      | "set_range_fills" -> handle_plugin_set_range_fills args
+      | "set_range_font_size" -> handle_plugin_set_range_font_size args
+      | "insert_child" -> handle_plugin_insert_child args
+      | "get_all_local_variables" -> handle_plugin_get_all_local_variables args
+      | _ -> Error (sprintf "Unknown action: %s. 86 actions available." action)
 
 (** ============== LLM Bridge 핸들러 ============== *)
 

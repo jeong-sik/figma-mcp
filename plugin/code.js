@@ -1447,8 +1447,12 @@ figma.ui.onmessage = async (msg) => {
         ok = false;
         payload = { error: "Node does not support constraints" };
       } else {
-        if (horizontal) node.constraints = { ...node.constraints, horizontal };
-        if (vertical) node.constraints = { ...node.constraints, vertical };
+        const currentConstraints = node.constraints;
+        const newConstraints = {
+          horizontal: horizontal || currentConstraints.horizontal,
+          vertical: vertical || currentConstraints.vertical
+        };
+        node.constraints = newConstraints;
         payload = { node_id: node.id, constraints: node.constraints };
       }
     } else if (command.name === "create_page") {
@@ -2021,6 +2025,201 @@ figma.ui.onmessage = async (msg) => {
       } else {
         node.setSharedPluginData(namespace, key, value);
         payload = { node_id: node.id, namespace: namespace, key: key, value: value };
+      }
+    } else if (command.name === "swap_component") {
+      // Swap an instance's master component
+      const p = command.payload || {};
+      const nodeId = p.node_id || p.nodeId;
+      const componentId = p.component_id || p.componentId;
+      const node = nodeId ? await getNodeById(nodeId) : (figma.currentPage.selection[0] || null);
+      if (!node) {
+        ok = false;
+        payload = { error: "Node not found" };
+      } else if (node.type !== "INSTANCE") {
+        ok = false;
+        payload = { error: "Node must be an instance" };
+      } else if (!componentId) {
+        ok = false;
+        payload = { error: "component_id required" };
+      } else {
+        const newComponent = await getNodeById(componentId);
+        if (!newComponent || newComponent.type !== "COMPONENT") {
+          ok = false;
+          payload = { error: "Component not found" };
+        } else {
+          node.swapComponent(newComponent);
+          payload = { node_id: node.id, new_component_id: componentId };
+        }
+      }
+    } else if (command.name === "resize_to_fit") {
+      // Resize frame/auto-layout to fit contents
+      const p = command.payload || {};
+      const nodeId = p.node_id || p.nodeId;
+      const node = nodeId ? await getNodeById(nodeId) : (figma.currentPage.selection[0] || null);
+      if (!node) {
+        ok = false;
+        payload = { error: "Node not found" };
+      } else if (!("resize" in node)) {
+        ok = false;
+        payload = { error: "Node does not support resize" };
+      } else {
+        // For auto-layout frames, set sizing mode to HUG
+        if ("layoutMode" in node && node.layoutMode !== "NONE") {
+          if (p.axis === "horizontal" || p.axis === "both" || !p.axis) {
+            node.primaryAxisSizingMode = "AUTO";
+          }
+          if (p.axis === "vertical" || p.axis === "both" || !p.axis) {
+            node.counterAxisSizingMode = "AUTO";
+          }
+        }
+        // For regular frames, calculate bounds from children
+        if ("children" in node && node.children.length > 0 && (!("layoutMode" in node) || node.layoutMode === "NONE")) {
+          let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+          for (const child of node.children) {
+            if ("x" in child && "y" in child && "width" in child && "height" in child) {
+              minX = Math.min(minX, child.x);
+              minY = Math.min(minY, child.y);
+              maxX = Math.max(maxX, child.x + child.width);
+              maxY = Math.max(maxY, child.y + child.height);
+            }
+          }
+          if (minX !== Infinity) {
+            const padding = p.padding || 0;
+            node.resize(maxX - minX + padding * 2, maxY - minY + padding * 2);
+          }
+        }
+        payload = { node_id: node.id, width: node.width, height: node.height };
+      }
+    } else if (command.name === "get_characters") {
+      // Get text node characters with styles
+      const p = command.payload || {};
+      const nodeId = p.node_id || p.nodeId;
+      const node = nodeId ? await getNodeById(nodeId) : (figma.currentPage.selection[0] || null);
+      if (!node) {
+        ok = false;
+        payload = { error: "Node not found" };
+      } else if (node.type !== "TEXT") {
+        ok = false;
+        payload = { error: "Node must be a text node" };
+      } else {
+        const characters = node.characters;
+        const length = characters.length;
+        // Get unique styles by checking ranges
+        const styles = [];
+        let currentStyle = null;
+        let start = 0;
+        for (let i = 0; i <= length; i++) {
+          let style = null;
+          if (i < length) {
+            const fontSize = node.getRangeFontSize(i, i + 1);
+            const fontName = node.getRangeFontName(i, i + 1);
+            const fills = node.getRangeFills(i, i + 1);
+            style = {
+              fontSize: fontSize === figma.mixed ? "mixed" : fontSize,
+              fontFamily: fontName === figma.mixed ? "mixed" : fontName.family,
+              fontStyle: fontName === figma.mixed ? "mixed" : fontName.style,
+              fills: fills === figma.mixed ? "mixed" : fills
+            };
+          }
+          if (i === length || JSON.stringify(style) !== JSON.stringify(currentStyle)) {
+            if (currentStyle !== null) {
+              styles.push({ start: start, end: i, text: characters.substring(start, i), ...currentStyle });
+            }
+            currentStyle = style;
+            start = i;
+          }
+        }
+        payload = { node_id: node.id, characters: characters, length: length, styles: styles };
+      }
+    } else if (command.name === "set_range_fills") {
+      // Set fills for a text range
+      const p = command.payload || {};
+      const nodeId = p.node_id || p.nodeId;
+      const start = p.start || 0;
+      const end = p.end;
+      const node = nodeId ? await getNodeById(nodeId) : (figma.currentPage.selection[0] || null);
+      if (!node) {
+        ok = false;
+        payload = { error: "Node not found" };
+      } else if (node.type !== "TEXT") {
+        ok = false;
+        payload = { error: "Node must be a text node" };
+      } else {
+        const actualEnd = end !== undefined ? end : node.characters.length;
+        const color = p.color || { r: 0, g: 0, b: 0 };
+        const fills = [{ type: "SOLID", color: { r: color.r || 0, g: color.g || 0, b: color.b || 0 }, opacity: color.a !== undefined ? color.a : 1 }];
+        await figma.loadFontAsync(node.getRangeFontName(start, actualEnd));
+        node.setRangeFills(start, actualEnd, fills);
+        payload = { node_id: node.id, start: start, end: actualEnd, color: color };
+      }
+    } else if (command.name === "set_range_font_size") {
+      // Set font size for a text range
+      const p = command.payload || {};
+      const nodeId = p.node_id || p.nodeId;
+      const start = p.start || 0;
+      const end = p.end;
+      const fontSize = p.font_size || p.fontSize;
+      const node = nodeId ? await getNodeById(nodeId) : (figma.currentPage.selection[0] || null);
+      if (!node) {
+        ok = false;
+        payload = { error: "Node not found" };
+      } else if (node.type !== "TEXT") {
+        ok = false;
+        payload = { error: "Node must be a text node" };
+      } else if (!fontSize) {
+        ok = false;
+        payload = { error: "font_size required" };
+      } else {
+        const actualEnd = end !== undefined ? end : node.characters.length;
+        await figma.loadFontAsync(node.getRangeFontName(start, actualEnd));
+        node.setRangeFontSize(start, actualEnd, fontSize);
+        payload = { node_id: node.id, start: start, end: actualEnd, font_size: fontSize };
+      }
+    } else if (command.name === "insert_child") {
+      // Insert a node at specific index in parent
+      const p = command.payload || {};
+      const nodeId = p.node_id || p.nodeId;
+      const parentId = p.parent_id || p.parentId;
+      const index = p.index !== undefined ? p.index : 0;
+      const node = nodeId ? await getNodeById(nodeId) : null;
+      const parent = parentId ? await getNodeById(parentId) : null;
+      if (!node) {
+        ok = false;
+        payload = { error: "Node not found" };
+      } else if (!parent) {
+        ok = false;
+        payload = { error: "Parent not found" };
+      } else if (!("insertChild" in parent)) {
+        ok = false;
+        payload = { error: "Parent does not support insertChild" };
+      } else {
+        parent.insertChild(index, node);
+        payload = { node_id: node.id, parent_id: parent.id, index: index };
+      }
+    } else if (command.name === "get_all_local_variables") {
+      // Get all local variables in the document
+      try {
+        const variables = await figma.variables.getLocalVariablesAsync();
+        const collections = await figma.variables.getLocalVariableCollectionsAsync();
+        payload = {
+          variables: variables.map(v => ({
+            id: v.id,
+            name: v.name,
+            key: v.key,
+            resolvedType: v.resolvedType,
+            valuesByMode: v.valuesByMode
+          })),
+          collections: collections.map(c => ({
+            id: c.id,
+            name: c.name,
+            key: c.key,
+            modes: c.modes,
+            variableIds: c.variableIds
+          }))
+        };
+      } catch (e) {
+        ok = false;
+        payload = { error: String(e) };
       }
     } else {
       ok = false;
