@@ -26,8 +26,8 @@ let process_json_string ~format json_str =
 
 (** ============== JSON Schema 헬퍼 ============== *)
 
-let string_prop ?(required=false) desc : Yojson.Safe.t =
-  ignore required;
+(** Note: required parameter is not used - JSON Schema required is at object level *)
+let string_prop desc : Yojson.Safe.t =
   `Assoc [("type", `String "string"); ("description", `String desc)]
 
 let number_prop desc : Yojson.Safe.t =
@@ -1027,6 +1027,24 @@ let get_int key json =
   | Some (`Int i) -> Some i
   | Some (`Float f) -> Some (int_of_float f)
   | _ -> None
+
+(** Get int with default value *)
+let get_int_or key default json =
+  match get_int key json with
+  | Some i -> i
+  | None -> default
+
+(** Get int with default, requiring value > min (for positive constraints) *)
+let get_int_positive ?(min=0) key default json =
+  match get_int key json with
+  | Some i when i > min -> i
+  | _ -> default
+
+(** Get int with default, requiring value >= min (for non-negative constraints) *)
+let get_int_nonneg ?(min=0) key default json =
+  match get_int key json with
+  | Some i when i >= min -> i
+  | _ -> default
 
 let get_float_or key default json =
   match get_float key json with
@@ -2144,7 +2162,7 @@ let handle_get_node_bundle args : (Yojson.Safe.t, string) result =
 let handle_get_node_summary args : (Yojson.Safe.t, string) result =
   let (file_key, node_id) = resolve_file_key_node_id args in
   let token = resolve_token args in
-  let max_children = match get_int "max_children" args with Some n when n > 0 -> n | _ -> 50 in
+  let max_children = get_int_positive "max_children" 50 args in
   let version = get_string "version" args in
 
   match (file_key, node_id, token) with
@@ -2263,9 +2281,9 @@ let handle_select_nodes args : (Yojson.Safe.t, string) result =
     | _ -> "include"
   in
   let score_threshold = get_float_or "score_threshold" 2.0 args in
-  let max_parents = match get_int "max_parents" args with Some n when n > 0 -> n | _ -> 8 in
-  let notes_limit = match get_int "notes_limit" args with Some n when n > 0 -> n | _ -> 50 in
-  let excluded_limit = match get_int "excluded_limit" args with Some n when n > 0 -> n | _ -> 50 in
+  let max_parents = get_int_positive "max_parents" 8 args in
+  let notes_limit = get_int_positive "notes_limit" 50 args in
+  let excluded_limit = get_int_positive "excluded_limit" 50 args in
   let version = get_string "version" args in
   let exclude_patterns =
     get_string_list "exclude_patterns" args
@@ -2571,8 +2589,8 @@ let handle_select_nodes args : (Yojson.Safe.t, string) result =
 let handle_get_node_chunk args : (Yojson.Safe.t, string) result =
   let (file_key, node_id) = resolve_file_key_node_id args in
   let token = resolve_token args in
-  let depth_start = match get_int "depth_start" args with Some d when d >= 0 -> d | _ -> 0 in
-  let depth_end = match get_int "depth_end" args with Some d when d >= 0 -> d | _ -> 2 in
+  let depth_start = get_int_nonneg "depth_start" 0 args in
+  let depth_end = get_int_nonneg "depth_end" 2 args in
   let format = get_string_or "format" "fidelity" args in
   let max_children = get_int "max_children" args in
   let warn_large = get_bool_or "warn_large" true args in
@@ -2766,10 +2784,10 @@ let handle_fidelity_loop args : (Yojson.Safe.t, string) result =
   let token = resolve_token args in
   let format = get_string_or "format" "fidelity" args in
   let target_score = get_float_or "target_score" 0.92 args in
-  let start_depth = match get_int "start_depth" args with Some d when d > 0 -> d | _ -> 4 in
-  let depth_step = match get_int "depth_step" args with Some d when d > 0 -> d | _ -> 4 in
-  let max_depth = match get_int "max_depth" args with Some d when d > 0 -> d | _ -> 20 in
-  let max_attempts = match get_int "max_attempts" args with Some d when d > 0 -> d | _ -> 4 in
+  let start_depth = get_int_positive "start_depth" 4 args in
+  let depth_step = get_int_positive "depth_step" 4 args in
+  let max_depth = get_int_positive "max_depth" 20 args in
+  let max_attempts = get_int_positive "max_attempts" 4 args in
   let geometry = match get_string "geometry" args with Some g -> Some g | None -> Some "paths" in
   let plugin_data = get_string "plugin_data" args in
   let include_meta = get_bool_or "include_meta" true args in
@@ -2787,7 +2805,7 @@ let handle_fidelity_loop args : (Yojson.Safe.t, string) result =
   in
   let include_plugin_variables = get_bool_or "include_plugin_variables" false args in
   let plugin_channel_id = get_string "plugin_channel_id" args in
-  let plugin_depth = match get_int "plugin_depth" args with Some d when d > 0 -> d | _ -> 6 in
+  let plugin_depth = get_int_positive "plugin_depth" 6 args in
   let plugin_timeout_ms = get_int "plugin_timeout_ms" args |> Option.value ~default:20000 in
   let summary_only = get_bool_or "summary_only" false args in
   let max_inline_bytes =
@@ -3287,9 +3305,9 @@ let handle_verify_visual args : (Yojson.Safe.t, string) result =
   let html = get_string "html" args in
   let html_screenshot = get_string "html_screenshot" args in
   let target_ssim = get_float_or "target_ssim" 0.95 args in
-  let max_iterations = match get_int "max_iterations" args with Some i when i > 0 -> i | _ -> 3 in
-  let width = match get_int "width" args with Some w when w > 0 -> w | _ -> 375 in
-  let height = match get_int "height" args with Some h when h > 0 -> h | _ -> 812 in
+  let max_iterations = get_int_positive "max_iterations" 3 args in
+  let width = get_int_positive "width" 375 args in
+  let height = get_int_positive "height" 812 args in
   let version = get_string "version" args in
 
   match (file_key, node_id, token) with
