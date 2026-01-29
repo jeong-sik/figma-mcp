@@ -4,224 +4,479 @@
     <meta charset="utf-8" />
     <title>Figma MCP Bridge</title>
     <style>
+      :root {
+        --bg: #ffffff;
+        --bg-secondary: #f5f5f5;
+        --text: #111111;
+        --text-muted: #666666;
+        --border: #e0e0e0;
+        --accent: #0d99ff;
+        --success: #14ae5c;
+        --error: #f24822;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #2c2c2c;
+          --bg-secondary: #383838;
+          --text: #ffffff;
+          --text-muted: #b3b3b3;
+          --border: #444444;
+        }
+      }
+      * { box-sizing: border-box; }
       body {
-        font-family: "IBM Plex Sans", "Arial", sans-serif;
-        font-size: 12px;
-        margin: 16px;
-        color: #111;
+        font-family: "Inter", "SF Pro", -apple-system, sans-serif;
+        font-size: 11px;
+        margin: 0;
+        padding: 12px;
+        background: var(--bg);
+        color: var(--text);
+        min-height: 100vh;
+      }
+      .header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 12px;
+        padding-bottom: 8px;
+        border-bottom: 1px solid var(--border);
+      }
+      .header h1 {
+        font-size: 13px;
+        font-weight: 600;
+        margin: 0;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .version {
+        font-size: 10px;
+        color: var(--text-muted);
+        font-weight: 400;
+      }
+      .status-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: var(--text-muted);
+      }
+      .status-dot.connected { background: var(--success); }
+      .status-dot.error { background: var(--error); }
+      .status-dot.polling {
+        background: var(--accent);
+        animation: pulse 1.5s infinite;
+      }
+      @keyframes pulse {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.4; }
       }
       label {
         display: block;
         margin-top: 8px;
-        font-weight: 600;
+        font-weight: 500;
+        color: var(--text-muted);
+        font-size: 10px;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
       }
       input {
         width: 100%;
-        box-sizing: border-box;
-        padding: 6px 8px;
+        padding: 8px 10px;
         margin-top: 4px;
-        border: 1px solid #ccc;
-        border-radius: 6px;
-        font-size: 12px;
-      }
-      button {
-        margin-top: 12px;
-        padding: 6px 10px;
-        border: none;
-        border-radius: 6px;
-        background: #111;
-        color: #fff;
-        cursor: pointer;
-      }
-      .status {
-        margin-top: 12px;
-        padding: 8px;
-        background: #f3f3f3;
+        border: 1px solid var(--border);
         border-radius: 6px;
         font-size: 11px;
-        line-height: 1.4;
+        background: var(--bg-secondary);
+        color: var(--text);
+        outline: none;
       }
-      .muted {
-        color: #666;
+      input:focus { border-color: var(--accent); }
+      .btn-row {
+        display: flex;
+        gap: 8px;
+        margin-top: 12px;
+      }
+      button {
+        flex: 1;
+        padding: 8px 12px;
+        border: none;
+        border-radius: 6px;
+        font-size: 11px;
+        font-weight: 500;
+        cursor: pointer;
+        transition: opacity 0.15s;
+      }
+      button:hover { opacity: 0.85; }
+      button:active { opacity: 0.7; }
+      .btn-primary {
+        background: var(--accent);
+        color: #fff;
+      }
+      .btn-secondary {
+        background: var(--bg-secondary);
+        color: var(--text);
+        border: 1px solid var(--border);
+      }
+      .stats {
+        display: flex;
+        gap: 12px;
+        margin-top: 12px;
+        padding: 10px;
+        background: var(--bg-secondary);
+        border-radius: 6px;
+      }
+      .stat {
+        text-align: center;
+        flex: 1;
+      }
+      .stat-value {
+        font-size: 18px;
+        font-weight: 600;
+        color: var(--accent);
+      }
+      .stat-label {
+        font-size: 9px;
+        color: var(--text-muted);
+        text-transform: uppercase;
+        margin-top: 2px;
+      }
+      .log-panel {
+        margin-top: 12px;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        max-height: 150px;
+        overflow-y: auto;
+      }
+      .log-header {
+        padding: 6px 10px;
+        background: var(--bg-secondary);
+        border-bottom: 1px solid var(--border);
+        font-weight: 500;
+        font-size: 10px;
+        display: flex;
+        justify-content: space-between;
+      }
+      .log-content {
+        padding: 8px;
+        font-family: "SF Mono", "Menlo", monospace;
+        font-size: 10px;
+      }
+      .log-entry {
+        padding: 4px 0;
+        border-bottom: 1px solid var(--border);
+        display: flex;
+        gap: 8px;
+      }
+      .log-entry:last-child { border-bottom: none; }
+      .log-time { color: var(--text-muted); min-width: 50px; }
+      .log-action { color: var(--accent); min-width: 100px; }
+      .log-result { flex: 1; }
+      .log-result.ok { color: var(--success); }
+      .log-result.error { color: var(--error); }
+      .test-progress {
+        margin-top: 8px;
+        padding: 8px;
+        background: var(--bg-secondary);
+        border-radius: 6px;
+        font-size: 10px;
+      }
+      .progress-bar {
+        height: 4px;
+        background: var(--border);
+        border-radius: 2px;
+        margin-top: 6px;
+        overflow: hidden;
+      }
+      .progress-fill {
+        height: 100%;
+        background: var(--accent);
+        transition: width 0.3s;
       }
     </style>
   </head>
   <body>
+    <div class="header">
+      <h1>
+        <span class="status-dot" id="statusDot"></span>
+        Figma MCP
+      </h1>
+      <span class="version">v0.3.18 · 100 actions</span>
+    </div>
+
     <label for="server">Server URL</label>
     <input id="server" value="http://localhost:8940" />
 
-    <label for="channel">Channel ID (optional)</label>
-    <input id="channel" placeholder="Leave empty to auto-generate" />
+    <label for="channel">Channel ID</label>
+    <input id="channel" placeholder="Auto-generated on connect" />
 
-    <button id="connect">Connect</button>
+    <div class="btn-row">
+      <button class="btn-primary" id="connect">Connect</button>
+      <button class="btn-secondary" id="selfTest">Self-Test</button>
+    </div>
 
-    <div class="status" id="status">
-      <div>Not connected</div>
-      <div class="muted">Plugin polls /plugin/poll and sends results to /plugin/result.</div>
+    <div class="stats">
+      <div class="stat">
+        <div class="stat-value" id="cmdCount">0</div>
+        <div class="stat-label">Commands</div>
+      </div>
+      <div class="stat">
+        <div class="stat-value" id="okCount">0</div>
+        <div class="stat-label">Success</div>
+      </div>
+      <div class="stat">
+        <div class="stat-value" id="errCount">0</div>
+        <div class="stat-label">Errors</div>
+      </div>
+    </div>
+
+    <div id="testProgress" class="test-progress" style="display:none;">
+      <div>Testing: <span id="testName">-</span></div>
+      <div class="progress-bar"><div class="progress-fill" id="testBar" style="width:0%"></div></div>
+    </div>
+
+    <div class="log-panel">
+      <div class="log-header">
+        <span>Activity Log</span>
+        <span id="logClear" style="cursor:pointer;color:var(--text-muted);">Clear</span>
+      </div>
+      <div class="log-content" id="logContent">
+        <div style="color:var(--text-muted);">Waiting for connection...</div>
+      </div>
     </div>
 
     <script>
-      const serverInput = document.getElementById("server");
-      const channelInput = document.getElementById("channel");
-      const statusEl = document.getElementById("status");
-      const connectBtn = document.getElementById("connect");
+      var serverInput = document.getElementById("server");
+      var channelInput = document.getElementById("channel");
+      var connectBtn = document.getElementById("connect");
+      var selfTestBtn = document.getElementById("selfTest");
+      var statusDot = document.getElementById("statusDot");
+      var cmdCount = document.getElementById("cmdCount");
+      var okCount = document.getElementById("okCount");
+      var errCount = document.getElementById("errCount");
+      var logContent = document.getElementById("logContent");
+      var logClear = document.getElementById("logClear");
+      var testProgress = document.getElementById("testProgress");
+      var testName = document.getElementById("testName");
+      var testBar = document.getElementById("testBar");
 
-      const STORAGE_KEY = "figmaMcpBridgeState";
-
-      let serverUrl = serverInput.value.trim();
-      let channelId = "";
-      let polling = false;
-      const pollWaitMs = 15000;
-      const pollDelayMs = 50;
-      const errorDelayMs = 2000;
+      var STORAGE_KEY = "figmaMcpBridgeState";
+      var serverUrl = "";
+      var channelId = "";
+      var polling = false;
+      var stats = { cmd: 0, ok: 0, err: 0 };
+      var logs = [];
+      var MAX_LOGS = 50;
 
       function normalizeServerUrl(raw) {
         if (!raw) return "";
-        let value = raw.trim();
+        var value = raw.trim();
         if (!value) return "";
-        if (!/^https?:\/\//i.test(value)) {
-          value = "http://" + value;
-        }
-        if (value.endsWith("/")) {
-          value = value.slice(0, -1);
-        }
+        if (!/^https?:\/\//i.test(value)) value = "http://" + value;
+        if (value.charAt(value.length - 1) === "/") value = value.slice(0, -1);
         return value;
       }
 
       function loadState() {
         try {
-          const raw = localStorage.getItem(STORAGE_KEY);
-          if (!raw) return null;
-          const parsed = JSON.parse(raw);
-          if (!parsed || typeof parsed !== "object") return null;
-          return parsed;
-        } catch (err) {
-          return null;
-        }
+          var raw = localStorage.getItem(STORAGE_KEY);
+          return raw ? JSON.parse(raw) : null;
+        } catch (e) { return null; }
       }
 
       function saveState(state) {
-        try {
-          localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-        } catch (err) {
-          // Ignore storage failures.
-        }
+        try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch (e) {}
       }
 
-      function setStatus(text) {
-        statusEl.innerHTML = text;
+      function setStatus(status) {
+        statusDot.className = "status-dot " + status;
       }
 
-      const state = loadState();
-      if (state && typeof state.serverUrl === "string") {
-        serverInput.value = state.serverUrl;
-      }
-      if (state && typeof state.channelId === "string") {
-        channelInput.value = state.channelId;
+      function updateStats() {
+        cmdCount.textContent = stats.cmd;
+        okCount.textContent = stats.ok;
+        errCount.textContent = stats.err;
       }
 
-      async function connect() {
-        serverUrl = normalizeServerUrl(serverInput.value);
-        channelId = channelInput.value.trim();
+      function addLog(action, result, isOk) {
+        var now = new Date();
+        var time = String(now.getHours()).padStart(2, "0") + ":" +
+                   String(now.getMinutes()).padStart(2, "0") + ":" +
+                   String(now.getSeconds()).padStart(2, "0");
+        logs.unshift({ time: time, action: action, result: result, ok: isOk });
+        if (logs.length > MAX_LOGS) logs.pop();
+        renderLogs();
+      }
 
-        if (!serverUrl) {
-          setStatus("<div>Error</div><div class=\"muted\">Server URL is required.</div>");
+      function renderLogs() {
+        if (logs.length === 0) {
+          logContent.innerHTML = '<div style="color:var(--text-muted);">No activity yet</div>';
           return;
         }
+        var html = "";
+        for (var i = 0; i < logs.length; i++) {
+          var log = logs[i];
+          var resultClass = log.ok ? "ok" : "error";
+          html += '<div class="log-entry">' +
+            '<span class="log-time">' + log.time + '</span>' +
+            '<span class="log-action">' + log.action + '</span>' +
+            '<span class="log-result ' + resultClass + '">' + log.result + '</span>' +
+          '</div>';
+        }
+        logContent.innerHTML = html;
+      }
 
+      logClear.onclick = function() {
+        logs = [];
+        renderLogs();
+      };
+
+      var state = loadState();
+      if (state && state.serverUrl) serverInput.value = state.serverUrl;
+      if (state && state.channelId) channelInput.value = state.channelId;
+
+      function connect() {
+        serverUrl = normalizeServerUrl(serverInput.value);
+        channelId = channelInput.value.trim();
+        if (!serverUrl) {
+          addLog("connect", "Server URL required", false);
+          setStatus("error");
+          return Promise.reject(new Error("Server URL required"));
+        }
         serverInput.value = serverUrl;
+        setStatus("");
 
-        const payload = channelId ? { channel_id: channelId } : {};
-        const resp = await fetch(serverUrl + "/plugin/connect", {
+        var payload = channelId ? { channel_id: channelId } : {};
+        return fetch(serverUrl + "/plugin/connect", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload)
+        }).then(function(resp) {
+          if (!resp.ok) throw new Error("HTTP " + resp.status);
+          return resp.json();
+        }).then(function(data) {
+          channelId = data.channel_id || channelId;
+          channelInput.value = channelId;
+          saveState({ serverUrl: serverUrl, channelId: channelId });
+          setStatus("connected");
+          addLog("connect", "Channel: " + channelId.slice(0, 8) + "...", true);
+          if (!polling) {
+            polling = true;
+            pollLoop();
+          }
+        }).catch(function(err) {
+          setStatus("error");
+          addLog("connect", String(err), false);
+          throw err;
         });
-        if (!resp.ok) {
-          throw new Error("HTTP " + resp.status);
-        }
-        const data = await resp.json();
-        channelId = data.channel_id || channelId;
-        channelInput.value = channelId;
-
-        saveState({ serverUrl, channelId });
-
-        setStatus(
-          "<div>Connected</div>" +
-          "<div class=\"muted\">Channel: " + channelId + "</div>"
-        );
-
-        if (!polling) {
-          polling = true;
-          pollLoop();
-        }
       }
 
-      async function pollLoop() {
-        if (!channelId) {
-          polling = false;
-          return;
-        }
-        try {
-          const resp = await fetch(serverUrl + "/plugin/poll", {
+      function pollLoop() {
+        if (!channelId) { polling = false; return; }
+        setStatus("polling");
+        fetch(serverUrl + "/plugin/poll", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ channel_id: channelId, max_commands: 5, wait_ms: 15000 })
+        }).then(function(resp) {
+          if (!resp.ok) throw new Error("HTTP " + resp.status);
+          return resp.json();
+        }).then(function(data) {
+          setStatus("connected");
+          var commands = Array.isArray(data.commands) ? data.commands : [];
+          for (var i = 0; i < commands.length; i++) {
+            var cmd = commands[i];
+            stats.cmd++;
+            updateStats();
+            addLog(cmd.name || "unknown", "executing...", true);
+            parent.postMessage({ pluginMessage: { type: "command", command: cmd } }, "*");
+          }
+          setTimeout(pollLoop, 50);
+        }).catch(function(err) {
+          setStatus("error");
+          addLog("poll", String(err), false);
+          setTimeout(pollLoop, 2000);
+        });
+      }
+
+      window.onmessage = function(event) {
+        var msg = event.data.pluginMessage;
+        if (!msg) return;
+
+        if (msg.type === "command_result") {
+          if (!channelId) return;
+          var payload = msg.payload;
+          if (typeof msg.payload_json === "string") {
+            try { payload = JSON.parse(msg.payload_json); }
+            catch (e) { payload = { error: "Parse error" }; }
+          }
+          if (msg.ok) { stats.ok++; } else { stats.err++; }
+          updateStats();
+          var resultText = msg.ok ? "OK" : (payload && payload.error ? payload.error : "Error");
+          addLog(msg.action || "result", resultText, msg.ok);
+
+          fetch(serverUrl + "/plugin/result", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               channel_id: channelId,
-              max_commands: 5,
-              wait_ms: pollWaitMs
+              command_id: msg.command_id,
+              ok: msg.ok,
+              payload: payload
             })
           });
-          if (!resp.ok) {
-            throw new Error("HTTP " + resp.status);
-          }
-          const data = await resp.json();
-          const commands = Array.isArray(data.commands) ? data.commands : [];
-          for (const cmd of commands) {
-            parent.postMessage({ pluginMessage: { type: "command", command: cmd } }, "*");
-          }
-          setTimeout(pollLoop, pollDelayMs);
-        } catch (err) {
-          setStatus(
-            "<div>Error</div>" +
-            "<div class=\"muted\">" + String(err) + "</div>" +
-            "<div class=\"muted\">Check server: ./start-figma-mcp-http.sh --port 8940</div>"
-          );
-          setTimeout(pollLoop, errorDelayMs);
         }
+
+        if (msg.type === "test_result") {
+          var ok = msg.ok;
+          if (ok) { stats.ok++; } else { stats.err++; }
+          updateStats();
+          addLog("test:" + msg.action, ok ? "PASS" : "FAIL", ok);
+        }
+      };
+
+      connectBtn.onclick = function() { connect().catch(function(){}); };
+
+      // Self-Test: 10 basic actions
+      var SELF_TESTS = [
+        { name: "list_pages", payload: {} },
+        { name: "get_viewport", payload: {} },
+        { name: "read_selection", payload: {} },
+        { name: "get_doc_info", payload: {} },
+        { name: "list_components", payload: {} },
+        { name: "find_all", payload: { type: "FRAME" } },
+        { name: "get_local_styles", payload: {} },
+        { name: "get_fonts", payload: {} },
+        { name: "get_layer_list", payload: {} },
+        { name: "get_selection_colors", payload: {} }
+      ];
+
+      selfTestBtn.onclick = function() {
+        if (!channelId) {
+          addLog("self-test", "Connect first!", false);
+          return;
+        }
+        testProgress.style.display = "block";
+        runSelfTests(0);
+      };
+
+      function runSelfTests(idx) {
+        if (idx >= SELF_TESTS.length) {
+          testProgress.style.display = "none";
+          addLog("self-test", "Completed " + SELF_TESTS.length + " tests", true);
+          return;
+        }
+        var test = SELF_TESTS[idx];
+        testName.textContent = test.name;
+        testBar.style.width = ((idx + 1) / SELF_TESTS.length * 100) + "%";
+
+        var cmd = {
+          id: "test-" + Date.now() + "-" + idx,
+          name: test.name,
+          payload: test.payload
+        };
+        parent.postMessage({ pluginMessage: { type: "command", command: cmd } }, "*");
+        setTimeout(function() { runSelfTests(idx + 1); }, 300);
       }
-
-      window.onmessage = async (event) => {
-        const msg = event.data.pluginMessage;
-        if (!msg || msg.type !== "command_result") return;
-        if (!channelId) return;
-
-        let payload = msg.payload;
-        if (typeof msg.payload_json === "string") {
-          try {
-            payload = JSON.parse(msg.payload_json);
-          } catch (err) {
-            payload = { error: "Invalid payload_json", details: String(err) };
-          }
-        }
-
-        await fetch(serverUrl + "/plugin/result", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            channel_id: channelId,
-            command_id: msg.command_id,
-            ok: msg.ok,
-            payload
-          })
-        });
-      };
-
-      connectBtn.onclick = () => {
-        connect().catch((err) => {
-          setStatus("<div>Error</div><div class=\"muted\">" + String(err) + "</div>");
-        });
-      };
     </script>
   </body>
 </html>
