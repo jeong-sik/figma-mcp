@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.15] - 2026-01-29
+
+### Improved
+- Add consistent category markers to all 56 tools (Tool Budget optimization)
+- Categories: 🎯 CORE, 📦 BATCH, ✅ VERIFY, 📋 QUICK, 🔌 PLUGIN, 🖼️ ASSET, 📊 REPORT, 🔧 UTIL, [Advanced]
+- Compress tool descriptions (avg 30% reduction)
+
+### Sources
+- "Less is More" MCP design patterns (Klavis)
+- Docker MCP best practices
+- Figma official MCP server docs
+
 ## [0.3.14] - 2026-01-29
 
 ### Improved
