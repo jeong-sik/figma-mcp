@@ -2403,6 +2403,114 @@ figma.ui.onmessage = async (msg) => {
         }));
         payload = { parent_id: node.id, layer_count: layers.length, layers: layers };
       }
+    } else if (command.name === "scroll_and_zoom") {
+      // Scroll and zoom viewport simultaneously
+      const p = command.payload || {};
+      const x = p.x !== undefined ? p.x : figma.viewport.center.x;
+      const y = p.y !== undefined ? p.y : figma.viewport.center.y;
+      const zoom = p.zoom !== undefined ? p.zoom : figma.viewport.zoom;
+      figma.viewport.center = { x: x, y: y };
+      figma.viewport.zoom = zoom;
+      payload = { center: { x: x, y: y }, zoom: zoom };
+    } else if (command.name === "get_paint_styles") {
+      // Get detailed paint/fill information from a node
+      const p = command.payload || {};
+      const nodeId = p.node_id || p.nodeId;
+      const node = nodeId ? await getNodeById(nodeId) : (figma.currentPage.selection[0] || null);
+      if (!node) {
+        ok = false;
+        payload = { error: "Node not found" };
+      } else {
+        const result = { node_id: node.id };
+        if ("fills" in node && node.fills !== figma.mixed) {
+          result.fills = node.fills;
+        }
+        if ("strokes" in node) {
+          result.strokes = node.strokes;
+        }
+        if ("fillStyleId" in node) {
+          result.fill_style_id = node.fillStyleId;
+        }
+        if ("strokeStyleId" in node) {
+          result.stroke_style_id = node.strokeStyleId;
+        }
+        payload = result;
+      }
+    } else if (command.name === "set_text_case") {
+      // Set text case transformation
+      const p = command.payload || {};
+      const nodeId = p.node_id || p.nodeId;
+      const textCase = (p.text_case || p.textCase || "ORIGINAL").toUpperCase();
+      const node = nodeId ? await getNodeById(nodeId) : (figma.currentPage.selection[0] || null);
+      if (!node) {
+        ok = false;
+        payload = { error: "Node not found" };
+      } else if (node.type !== "TEXT") {
+        ok = false;
+        payload = { error: "Node must be a text node" };
+      } else {
+        await figma.loadFontAsync(node.fontName);
+        node.textCase = textCase;
+        payload = { node_id: node.id, text_case: textCase };
+      }
+    } else if (command.name === "get_stroke_details") {
+      // Get detailed stroke information
+      const p = command.payload || {};
+      const nodeId = p.node_id || p.nodeId;
+      const node = nodeId ? await getNodeById(nodeId) : (figma.currentPage.selection[0] || null);
+      if (!node) {
+        ok = false;
+        payload = { error: "Node not found" };
+      } else if (!("strokes" in node)) {
+        ok = false;
+        payload = { error: "Node does not have strokes" };
+      } else {
+        payload = {
+          node_id: node.id,
+          strokes: node.strokes,
+          stroke_weight: "strokeWeight" in node ? node.strokeWeight : null,
+          stroke_align: "strokeAlign" in node ? node.strokeAlign : null,
+          stroke_cap: "strokeCap" in node ? node.strokeCap : null,
+          stroke_join: "strokeJoin" in node ? node.strokeJoin : null,
+          stroke_miter_limit: "strokeMiterLimit" in node ? node.strokeMiterLimit : null,
+          dash_pattern: "dashPattern" in node ? node.dashPattern : null
+        };
+      }
+    } else if (command.name === "set_stroke_weight") {
+      // Set stroke weight
+      const p = command.payload || {};
+      const nodeId = p.node_id || p.nodeId;
+      const weight = p.weight || p.stroke_weight;
+      const node = nodeId ? await getNodeById(nodeId) : (figma.currentPage.selection[0] || null);
+      if (!node) {
+        ok = false;
+        payload = { error: "Node not found" };
+      } else if (!("strokeWeight" in node)) {
+        ok = false;
+        payload = { error: "Node does not support stroke weight" };
+      } else if (weight === undefined) {
+        ok = false;
+        payload = { error: "weight required" };
+      } else {
+        node.strokeWeight = weight;
+        payload = { node_id: node.id, stroke_weight: weight };
+      }
+    } else if (command.name === "collapse_layer") {
+      // Collapse a layer in the layers panel (for frames/groups)
+      const p = command.payload || {};
+      const nodeId = p.node_id || p.nodeId;
+      const node = nodeId ? await getNodeById(nodeId) : (figma.currentPage.selection[0] || null);
+      if (!node) {
+        ok = false;
+        payload = { error: "Node not found" };
+      } else if (!("expanded" in node)) {
+        ok = false;
+        payload = { error: "Node does not support collapse/expand" };
+      } else {
+        const expand = p.expand !== undefined ? p.expand : false;
+        node.expanded = expand;
+        payload = { node_id: node.id, expanded: expand };
+      }
     } else {
       ok = false;
       payload = { error: "Unknown command" };

@@ -627,8 +627,10 @@ let tool_figma_plugin : tool_def = {
       "swap_component"; "resize_to_fit"; "get_characters"; "set_range_fills";
       "set_range_font_size"; "insert_child"; "get_all_local_variables";
       "get_styles_by_type"; "apply_style"; "get_overrides"; "reset_overrides";
-      "bring_to_front"; "send_to_back"; "set_grid"; "get_layer_list"
-    ] "94개 action: 연결(3), 페이지(4), 문서(1), 생성(11), 조회(18), 편집(9), 변형(6), 불리언(4), 정렬(2), 스타일(19+apply_style), 텍스트(4), 레이아웃(3+set_grid), 컴포넌트(2+overrides), 내보내기(2), 프로토타입(2), 레이어(3: bring_to_front/send_to_back/get_layer_list)");
+      "bring_to_front"; "send_to_back"; "set_grid"; "get_layer_list";
+      "scroll_and_zoom"; "get_paint_styles"; "set_text_case";
+      "get_stroke_details"; "set_stroke_weight"; "collapse_layer"
+    ] "🎉 100개 action: 연결(3), 페이지(4), 문서(1), 생성(11), 조회(20), 편집(9), 변형(7), 불리언(4), 정렬(2), 스타일(21), 텍스트(5), 레이아웃(4), 컴포넌트(4), 내보내기(2), 프로토타입(2), 레이어(4)");
     ("channel_id", string_prop "채널 ID");
     ("node_id", string_prop "노드 ID");
     ("url", string_prop "Figma URL (node_id 자동 추출)");
@@ -725,6 +727,10 @@ let tool_figma_plugin : tool_def = {
     ("gutter", number_prop "거터 사이즈 (set_grid)");
     ("alignment", enum_prop ["MIN"; "CENTER"; "MAX"; "STRETCH"] "정렬 (set_grid)");
     ("visible", bool_prop "표시 여부 (set_grid)");
+    ("zoom", number_prop "줌 레벨 (scroll_and_zoom)");
+    ("text_case", enum_prop ["ORIGINAL"; "UPPER"; "LOWER"; "TITLE"; "SMALL_CAPS"; "SMALL_CAPS_FORCED"] "텍스트 대소문자 (set_text_case)");
+    ("weight", number_prop "선 두께 (set_stroke_weight)");
+    ("expand", bool_prop "레이어 펼치기 여부 (collapse_layer)");
   ] ["action"];
 }
 
@@ -5936,6 +5942,102 @@ let handle_plugin_get_layer_list args : (Yojson.Safe.t, string) result =
        | Error err -> Error err
        | Ok result -> Ok (make_text_content (Yojson.Safe.pretty_to_string result.payload)))
 
+(* scroll_and_zoom 핸들러 *)
+let handle_plugin_scroll_and_zoom args : (Yojson.Safe.t, string) result =
+  match resolve_channel_id args with
+  | Error msg -> Error msg
+  | Ok channel_id ->
+      let timeout_ms = get_int "timeout_ms" args |> Option.value ~default:10000 in
+      let x = get_float "x" args in
+      let y = get_float "y" args in
+      let zoom = get_float "zoom" args in
+      let fields = [] in
+      let fields = match x with Some v -> ("x", `Float v) :: fields | None -> fields in
+      let fields = match y with Some v -> ("y", `Float v) :: fields | None -> fields in
+      let fields = match zoom with Some v -> ("zoom", `Float v) :: fields | None -> fields in
+      let payload = `Assoc fields in
+      let command_id = Figma_plugin_bridge.enqueue_command ~channel_id ~name:"scroll_and_zoom" ~payload in
+      (match plugin_wait ~channel_id ~command_id ~timeout_ms with
+       | Error err -> Error err
+       | Ok result -> Ok (make_text_content (Yojson.Safe.pretty_to_string result.payload)))
+
+(* get_paint_styles 핸들러 *)
+let handle_plugin_get_paint_styles args : (Yojson.Safe.t, string) result =
+  match resolve_channel_id args with
+  | Error msg -> Error msg
+  | Ok channel_id ->
+      let timeout_ms = get_int "timeout_ms" args |> Option.value ~default:10000 in
+      let node_id = get_string "node_id" args in
+      let fields = match node_id with Some v -> [("node_id", `String v)] | None -> [] in
+      let payload = `Assoc fields in
+      let command_id = Figma_plugin_bridge.enqueue_command ~channel_id ~name:"get_paint_styles" ~payload in
+      (match plugin_wait ~channel_id ~command_id ~timeout_ms with
+       | Error err -> Error err
+       | Ok result -> Ok (make_text_content (Yojson.Safe.pretty_to_string result.payload)))
+
+(* set_text_case 핸들러 *)
+let handle_plugin_set_text_case args : (Yojson.Safe.t, string) result =
+  match resolve_channel_id args with
+  | Error msg -> Error msg
+  | Ok channel_id ->
+      let timeout_ms = get_int "timeout_ms" args |> Option.value ~default:10000 in
+      let node_id = get_string "node_id" args in
+      let text_case = get_string "text_case" args |> Option.value ~default:"ORIGINAL" in
+      let fields = [("text_case", `String text_case)] in
+      let fields = match node_id with Some v -> ("node_id", `String v) :: fields | None -> fields in
+      let payload = `Assoc fields in
+      let command_id = Figma_plugin_bridge.enqueue_command ~channel_id ~name:"set_text_case" ~payload in
+      (match plugin_wait ~channel_id ~command_id ~timeout_ms with
+       | Error err -> Error err
+       | Ok result -> Ok (make_text_content (Yojson.Safe.pretty_to_string result.payload)))
+
+(* get_stroke_details 핸들러 *)
+let handle_plugin_get_stroke_details args : (Yojson.Safe.t, string) result =
+  match resolve_channel_id args with
+  | Error msg -> Error msg
+  | Ok channel_id ->
+      let timeout_ms = get_int "timeout_ms" args |> Option.value ~default:10000 in
+      let node_id = get_string "node_id" args in
+      let fields = match node_id with Some v -> [("node_id", `String v)] | None -> [] in
+      let payload = `Assoc fields in
+      let command_id = Figma_plugin_bridge.enqueue_command ~channel_id ~name:"get_stroke_details" ~payload in
+      (match plugin_wait ~channel_id ~command_id ~timeout_ms with
+       | Error err -> Error err
+       | Ok result -> Ok (make_text_content (Yojson.Safe.pretty_to_string result.payload)))
+
+(* set_stroke_weight 핸들러 *)
+let handle_plugin_set_stroke_weight args : (Yojson.Safe.t, string) result =
+  match (get_float "weight" args, resolve_channel_id args) with
+  | (None, _) -> Error "Missing required parameter: weight"
+  | (_, Error msg) -> Error msg
+  | (Some weight, Ok channel_id) ->
+      let timeout_ms = get_int "timeout_ms" args |> Option.value ~default:10000 in
+      let node_id = get_string "node_id" args in
+      let fields = [("weight", `Float weight)] in
+      let fields = match node_id with Some v -> ("node_id", `String v) :: fields | None -> fields in
+      let payload = `Assoc fields in
+      let command_id = Figma_plugin_bridge.enqueue_command ~channel_id ~name:"set_stroke_weight" ~payload in
+      (match plugin_wait ~channel_id ~command_id ~timeout_ms with
+       | Error err -> Error err
+       | Ok result -> Ok (make_text_content (Yojson.Safe.pretty_to_string result.payload)))
+
+(* collapse_layer 핸들러 *)
+let handle_plugin_collapse_layer args : (Yojson.Safe.t, string) result =
+  match resolve_channel_id args with
+  | Error msg -> Error msg
+  | Ok channel_id ->
+      let timeout_ms = get_int "timeout_ms" args |> Option.value ~default:10000 in
+      let node_id = get_string "node_id" args in
+      let expand = get_bool "expand" args in
+      let fields = [] in
+      let fields = match node_id with Some v -> ("node_id", `String v) :: fields | None -> fields in
+      let fields = match expand with Some v -> ("expand", `Bool v) :: fields | None -> fields in
+      let payload = `Assoc fields in
+      let command_id = Figma_plugin_bridge.enqueue_command ~channel_id ~name:"collapse_layer" ~payload in
+      (match plugin_wait ~channel_id ~command_id ~timeout_ms with
+       | Error err -> Error err
+       | Ok result -> Ok (make_text_content (Yojson.Safe.pretty_to_string result.payload)))
+
 (* STRAP 통합 핸들러: action으로 라우팅, 기존 핸들러 재사용 *)
 let handle_figma_plugin args : (Yojson.Safe.t, string) result =
   match get_string "action" args with
@@ -6036,7 +6138,13 @@ let handle_figma_plugin args : (Yojson.Safe.t, string) result =
       | "send_to_back" -> handle_plugin_send_to_back args
       | "set_grid" -> handle_plugin_set_grid args
       | "get_layer_list" -> handle_plugin_get_layer_list args
-      | _ -> Error (sprintf "Unknown action: %s. 94 actions available." action)
+      | "scroll_and_zoom" -> handle_plugin_scroll_and_zoom args
+      | "get_paint_styles" -> handle_plugin_get_paint_styles args
+      | "set_text_case" -> handle_plugin_set_text_case args
+      | "get_stroke_details" -> handle_plugin_get_stroke_details args
+      | "set_stroke_weight" -> handle_plugin_set_stroke_weight args
+      | "collapse_layer" -> handle_plugin_collapse_layer args
+      | _ -> Error (sprintf "Unknown action: %s. 100 actions available." action)
 
 (** ============== LLM Bridge 핸들러 ============== *)
 
