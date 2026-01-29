@@ -1,0 +1,112 @@
+{"timestamp":1769579453.62499,"event":["Tool_called",{"tool_name":"figma_get_node_summary","success":true,"duration_ms":4325,"agent_id":null,"error":null}]}
+{"timestamp":1769579485.726405,"event":["Tool_called",{"tool_name":"figma_tree","success":true,"duration_ms":23188,"agent_id":null,"error":null}]}
+{"timestamp":1769579499.974141,"event":["Tool_called",{"tool_name":"figma_get_node","success":false,"duration_ms":3263,"agent_id":null,"error":"Node not found: 2710:34859"}]}
+{"timestamp":1769579511.423343,"event":["Tool_called",{"tool_name":"figma_tree","success":true,"duration_ms":6441,"agent_id":null,"error":null}]}
+{"timestamp":1769579740.63649,"event":["Tool_called",{"tool_name":"figma_tree","success":true,"duration_ms":6902,"agent_id":null,"error":null}]}
+{"timestamp":1769593398.843534,"event":["Tool_called",{"tool_name":"figma_parse_url","success":true,"duration_ms":0,"agent_id":null,"error":null}]}
+{"timestamp":1769593408.957293,"event":["Tool_called",{"tool_name":"figma_search","success":false,"duration_ms":452,"agent_id":null,"error":"Invalid request: Check node_id format (should be like '123:456') and required parameters"}]}
+{"timestamp":1769593437.861697,"event":["Tool_called",{"tool_name":"figma_search","success":true,"duration_ms":23876,"agent_id":null,"error":null}]}
+{"timestamp":1769593456.351492,"event":["Tool_called",{"tool_name":"figma_search","success":true,"duration_ms":10094,"agent_id":null,"error":null}]}
+{"timestamp":1769593464.883402,"event":["Tool_called",{"tool_name":"figma_search","success":true,"duration_ms":8054,"agent_id":null,"error":null}]}
+{"timestamp":1769593474.444303,"event":["Tool_called",{"tool_name":"figma_search","success":true,"duration_ms":9178,"agent_id":null,"error":null}]}
+{"timestamp":1769593501.129769,"event":["Tool_called",{"tool_name":"figma_get_node_summary","success":true,"duration_ms":2950,"agent_id":null,"error":null}]}
+{"timestamp":1769593503.940497,"event":["Tool_called",{"tool_name":"figma_get_node_summary","success":true,"duration_ms":2551,"agent_id":null,"error":null}]}
+{"timestamp":1769593506.63814,"event":["Tool_called",{"tool_name":"figma_get_node_summary","success":true,"duration_ms":2448,"agent_id":null,"error":null}]}
+{"timestamp":1769593514.645979,"event":["Tool_called",{"tool_name":"figma_get_node_summary","success":true,"duration_ms":7748,"agent_id":null,"error":null}]}
+{"timestamp":1769593528.683825,"event":["Tool_called",{"tool_name":"figma_get_node","success":true,"duration_ms":2729,"agent_id":null,"error":null}]}
+{"timestamp":1769593558.043685,"event":["Tool_called",{"tool_name":"figma_export_image","success":true,"duration_ms":10011,"agent_id":null,"error":null}]}
+{"timestamp":1769593701.029107,"event":["Tool_called",{"tool_name":"figma_search","success":true,"duration_ms":16638,"agent_id":null,"error":null}]}
+{"timestamp":1769593731.714103,"event":["Tool_called",{"tool_name":"figma_search","success":true,"duration_ms":21383,"agent_id":null,"error":null}]}
+{"timestamp":1769593747.901344,"event":["Tool_called",{"tool_name":"figma_search","success":true,"duration_ms":15048,"agent_id":null,"error":null}]}
+{"timestamp":1769593757.135252,"event":["Tool_called",{"tool_name":"figma_parse_url","success":true,"duration_ms":0,"agent_id":null,"error":null}]}
+{"timestamp":1769593769.399859,"event":["Tool_called",{"tool_name":"figma_get_node","success":true,"duration_ms":3511,"agent_id":null,"error":null}]}
+{"timestamp":1769593791.519332,"event":["Tool_called",{"tool_name":"figma_export_image","success":true,"duration_ms":20601,"agent_id":null,"error":null}]}
+{"timestamp":1769593827.860687,"event":["Tool_called",{"tool_name":"figma_export_image","success":true,"duration_ms":9734,"agent_id":null,"error":null}]}
+{"timestamp":1769593858.013604,"event":["Tool_called",{"tool_name":"figma_export_image","success":true,"duration_ms":14925,"agent_id":null,"error":null}]}
+{"timestamp":1769594082.894567,"event":["Tool_called",{"tool_name":"figma_get_node_bundle","success":true,"duration_ms":9406,"agent_id":null,"error":null}]}
+{"timestamp":1769594092.705226,"event":["Tool_called",{"tool_name":"figma_get_node_bundle","success":true,"duration_ms":9744,"agent_id":null,"error":null}]}
+{"timestamp":1769596753.150783,"event":["Tool_called",{"tool_name":"figma_get_node","success":true,"duration_ms":3331,"agent_id":null,"error":null}]}
+{"timestamp":1769596768.501977,"event":["Tool_called",{"tool_name":"figma_search","success":true,"duration_ms":8978,"agent_id":null,"error":null}]}
+{"timestamp":1769596776.547459,"event":["Tool_called",{"tool_name":"figma_search","success":true,"duration_ms":7908,"agent_id":null,"error":null}]}
+{"timestamp":1769596792.453388,"event":["Tool_called",{"tool_name":"figma_search","success":true,"duration_ms":8308,"agent_id":null,"error":null}]}
+{"timestamp":1769596800.590698,"event":["Tool_called",{"tool_name":"figma_search","success":true,"duration_ms":7951,"agent_id":null,"error":null}]}
+{"timestamp":1769596818.232539,"event":["Tool_called",{"tool_name":"figma_search","success":true,"duration_ms":8417,"agent_id":null,"error":null}]}
+{"timestamp":1769596821.160167,"event":["Tool_called",{"tool_name":"figma_get_node","success":true,"duration_ms":2771,"agent_id":null,"error":null}]}
+{"timestamp":1769596839.355064,"event":["Tool_called",{"tool_name":"figma_tree","success":true,"duration_ms":6100,"agent_id":null,"error":null}]}
+{"timestamp":1769596851.244736,"event":["Tool_called",{"tool_name":"figma_tree","success":true,"duration_ms":5964,"agent_id":null,"error":null}]}
+{"timestamp":1769596874.823582,"event":["Tool_called",{"tool_name":"figma_search","success":true,"duration_ms":9374,"agent_id":null,"error":null}]}
+{"timestamp":1769596883.976164,"event":["Tool_called",{"tool_name":"figma_search","success":true,"duration_ms":8971,"agent_id":null,"error":null}]}
+{"timestamp":1769596899.55169,"event":["Tool_called",{"tool_name":"figma_search","success":true,"duration_ms":8561,"agent_id":null,"error":null}]}
+{"timestamp":1769596910.901515,"event":["Tool_called",{"tool_name":"figma_list_screens","success":true,"duration_ms":6309,"agent_id":null,"error":null}]}
+{"timestamp":1769596925.125508,"event":["Tool_called",{"tool_name":"figma_get_node","success":true,"duration_ms":995,"agent_id":null,"error":null}]}
+{"timestamp":1769596934.547766,"event":["Tool_called",{"tool_name":"figma_search","success":true,"duration_ms":9298,"agent_id":null,"error":null}]}
+{"timestamp":1769597221.831802,"event":["Tool_called",{"tool_name":"figma_read_large_result","success":true,"duration_ms":0,"agent_id":null,"error":null}]}
+{"timestamp":1769597238.28245,"event":["Tool_called",{"tool_name":"figma_tree","success":true,"duration_ms":7053,"agent_id":null,"error":null}]}
+{"timestamp":1769597259.169985,"event":["Tool_called",{"tool_name":"figma_search","success":true,"duration_ms":9028,"agent_id":null,"error":null}]}
+{"timestamp":1769597271.377195,"event":["Tool_called",{"tool_name":"figma_get_node","success":true,"duration_ms":3312,"agent_id":null,"error":null}]}
+{"timestamp":1769597274.612164,"event":["Tool_called",{"tool_name":"figma_get_node","success":true,"duration_ms":3093,"agent_id":null,"error":null}]}
+{"timestamp":1769597279.474689,"event":["Tool_called",{"tool_name":"figma_read_large_result","success":true,"duration_ms":0,"agent_id":null,"error":null}]}
+{"timestamp":1769597289.484942,"event":["Tool_called",{"tool_name":"figma_read_large_result","success":true,"duration_ms":0,"agent_id":null,"error":null}]}
+{"timestamp":1769597669.841215,"event":["Tool_called",{"tool_name":"figma_export_image","success":true,"duration_ms":8238,"agent_id":null,"error":null}]}
+{"timestamp":1769601253.168306,"event":["Tool_called",{"tool_name":"figma_get_node_bundle","success":true,"duration_ms":19778,"agent_id":null,"error":null}]}
+{"timestamp":1769601534.82429,"event":["Tool_called",{"tool_name":"figma_tree","success":true,"duration_ms":6672,"agent_id":null,"error":null}]}
+{"timestamp":1769601559.464801,"event":["Tool_called",{"tool_name":"figma_query","success":true,"duration_ms":3694,"agent_id":null,"error":null}]}
+{"timestamp":1769601569.530712,"event":["Tool_called",{"tool_name":"figma_get_node","success":true,"duration_ms":3321,"agent_id":null,"error":null}]}
+{"timestamp":1769601572.37522,"event":["Tool_called",{"tool_name":"figma_get_node","success":true,"duration_ms":2697,"agent_id":null,"error":null}]}
+{"timestamp":1769601626.077799,"event":["Tool_called",{"tool_name":"figma_export_image","success":true,"duration_ms":4715,"agent_id":null,"error":null}]}
+{"timestamp":1769601772.428788,"event":["Tool_called",{"tool_name":"figma_search","success":false,"duration_ms":635,"agent_id":null,"error":"Invalid request: Check node_id format (should be like '123:456') and required parameters"}]}
+{"timestamp":1769601772.979573,"event":["Tool_called",{"tool_name":"figma_search","success":false,"duration_ms":422,"agent_id":null,"error":"Invalid request: Check node_id format (should be like '123:456') and required parameters"}]}
+{"timestamp":1769601792.487618,"event":["Tool_called",{"tool_name":"figma_query","success":true,"duration_ms":13081,"agent_id":null,"error":null}]}
+{"timestamp":1769601808.70979,"event":["Tool_called",{"tool_name":"figma_query","success":true,"duration_ms":11132,"agent_id":null,"error":null}]}
+{"timestamp":1769601820.869485,"event":["Tool_called",{"tool_name":"figma_query","success":true,"duration_ms":2904,"agent_id":null,"error":null}]}
+{"timestamp":1769601823.892823,"event":["Tool_called",{"tool_name":"figma_query","success":true,"duration_ms":2768,"agent_id":null,"error":null}]}
+{"timestamp":1769601827.045105,"event":["Tool_called",{"tool_name":"figma_query","success":true,"duration_ms":3062,"agent_id":null,"error":null}]}
+{"timestamp":1769601840.68533,"event":["Tool_called",{"tool_name":"figma_tree","success":true,"duration_ms":6683,"agent_id":null,"error":null}]}
+{"timestamp":1769601858.808625,"event":["Tool_called",{"tool_name":"figma_query","success":true,"duration_ms":10132,"agent_id":null,"error":null}]}
+{"timestamp":1769601870.124364,"event":["Tool_called",{"tool_name":"figma_query","success":true,"duration_ms":11172,"agent_id":null,"error":null}]}
+{"timestamp":1769601890.445947,"event":["Tool_called",{"tool_name":"figma_query","success":true,"duration_ms":11105,"agent_id":null,"error":null}]}
+{"timestamp":1769601899.27363,"event":["Tool_called",{"tool_name":"figma_query","success":true,"duration_ms":8760,"agent_id":null,"error":null}]}
+{"timestamp":1769650797.106596,"event":["Tool_called",{"tool_name":"figma_get_node_summary","success":true,"duration_ms":2760,"agent_id":null,"error":null}]}
+{"timestamp":1769650799.522391,"event":["Tool_called",{"tool_name":"figma_get_node_summary","success":true,"duration_ms":2362,"agent_id":null,"error":null}]}
+{"timestamp":1769650809.479437,"event":["Tool_called",{"tool_name":"figma_get_node","success":true,"duration_ms":604,"agent_id":null,"error":null}]}
+{"timestamp":1769650810.081146,"event":["Tool_called",{"tool_name":"figma_get_node","success":true,"duration_ms":480,"agent_id":null,"error":null}]}
+{"timestamp":1769650888.996451,"event":["Tool_called",{"tool_name":"figma_get_node","success":true,"duration_ms":2673,"agent_id":null,"error":null}]}
+{"timestamp":1769650891.444323,"event":["Tool_called",{"tool_name":"figma_get_node","success":true,"duration_ms":2368,"agent_id":null,"error":null}]}
+{"timestamp":1769650893.883649,"event":["Tool_called",{"tool_name":"figma_get_node","success":true,"duration_ms":2346,"agent_id":null,"error":null}]}
+{"timestamp":1769650896.654708,"event":["Tool_called",{"tool_name":"figma_get_node","success":true,"duration_ms":2665,"agent_id":null,"error":null}]}
+{"timestamp":1769650899.126529,"event":["Tool_called",{"tool_name":"figma_get_node","success":true,"duration_ms":2385,"agent_id":null,"error":null}]}
+{"timestamp":1769650901.634605,"event":["Tool_called",{"tool_name":"figma_get_node","success":true,"duration_ms":2414,"agent_id":null,"error":null}]}
+{"timestamp":1769650917.283826,"event":["Tool_called",{"tool_name":"figma_get_node","success":true,"duration_ms":2499,"agent_id":null,"error":null}]}
+{"timestamp":1769650920.09764,"event":["Tool_called",{"tool_name":"figma_get_node","success":true,"duration_ms":2746,"agent_id":null,"error":null}]}
+{"timestamp":1769650922.569055,"event":["Tool_called",{"tool_name":"figma_get_node","success":true,"duration_ms":2343,"agent_id":null,"error":null}]}
+{"timestamp":1769650924.718622,"event":["Tool_called",{"tool_name":"figma_get_node","success":true,"duration_ms":2057,"agent_id":null,"error":null}]}
+{"timestamp":1769650927.468282,"event":["Tool_called",{"tool_name":"figma_get_node","success":true,"duration_ms":2633,"agent_id":null,"error":null}]}
+{"timestamp":1769650930.059186,"event":["Tool_called",{"tool_name":"figma_get_node","success":true,"duration_ms":2476,"agent_id":null,"error":null}]}
+{"timestamp":1769651147.298328,"event":["Tool_called",{"tool_name":"figma_get_node","success":true,"duration_ms":3179,"agent_id":null,"error":null}]}
+{"timestamp":1769651149.807275,"event":["Tool_called",{"tool_name":"figma_get_node","success":true,"duration_ms":2318,"agent_id":null,"error":null}]}
+{"timestamp":1769652554.87963,"event":["Tool_called",{"tool_name":"figma_get_node_summary","success":true,"duration_ms":2941,"agent_id":null,"error":null}]}
+{"timestamp":1769652585.640437,"event":["Tool_called",{"tool_name":"figma_get_node","success":true,"duration_ms":3213,"agent_id":null,"error":null}]}
+{"timestamp":1769652611.844216,"event":["Tool_called",{"tool_name":"figma_get_node","success":true,"duration_ms":2571,"agent_id":null,"error":null}]}
+{"timestamp":1769652615.305045,"event":["Tool_called",{"tool_name":"figma_get_node","success":true,"duration_ms":2507,"agent_id":null,"error":null}]}
+{"timestamp":1769652789.083694,"event":["Tool_called",{"tool_name":"figma_get_node","success":false,"duration_ms":627,"agent_id":null,"error":"Invalid request: Check node_id format (should be like '123:456') and required parameters"}]}
+{"timestamp":1769652789.542533,"event":["Tool_called",{"tool_name":"figma_get_node","success":false,"duration_ms":419,"agent_id":null,"error":"Invalid request: Check node_id format (should be like '123:456') and required parameters"}]}
+{"timestamp":1769652797.795987,"event":["Tool_called",{"tool_name":"figma_get_node","success":false,"duration_ms":679,"agent_id":null,"error":"Invalid request: Check node_id format (should be like '123:456') and required parameters"}]}
+{"timestamp":1769652798.29578,"event":["Tool_called",{"tool_name":"figma_get_node","success":false,"duration_ms":416,"agent_id":null,"error":"Invalid request: Check node_id format (should be like '123:456') and required parameters"}]}
+{"timestamp":1769652798.845532,"event":["Tool_called",{"tool_name":"figma_get_node","success":false,"duration_ms":463,"agent_id":null,"error":"Invalid request: Check node_id format (should be like '123:456') and required parameters"}]}
+{"timestamp":1769652806.376765,"event":["Tool_called",{"tool_name":"figma_parse_url","success":true,"duration_ms":0,"agent_id":null,"error":null}]}
+{"timestamp":1769652815.813947,"event":["Tool_called",{"tool_name":"figma_get_node_summary","success":false,"duration_ms":519,"agent_id":null,"error":"Figma API error: Invalid request: Check node_id format (should be like '123:456') and required parameters"}]}
+{"timestamp":1769654108.194471,"event":["Tool_called",{"tool_name":"figma_list_screens","success":false,"duration_ms":674,"agent_id":null,"error":"Invalid request: Check node_id format (should be like '123:456') and required parameters"}]}
+{"timestamp":1769654120.719522,"event":["Tool_called",{"tool_name":"figma_export_image","success":false,"duration_ms":603,"agent_id":null,"error":"Invalid request: Check node_id format (should be like '123:456') and required parameters"}]}
+{"timestamp":1769654129.928626,"event":["Tool_called",{"tool_name":"figma_doctor","success":true,"duration_ms":552,"agent_id":null,"error":null}]}
+{"timestamp":1769654141.493134,"event":["Tool_called",{"tool_name":"figma_tree","success":false,"duration_ms":479,"agent_id":null,"error":"Invalid request: Check node_id format (should be like '123:456') and required parameters"}]}
+{"timestamp":1769654146.685083,"event":["Tool_called",{"tool_name":"figma_tree","success":false,"duration_ms":422,"agent_id":null,"error":"Invalid request: Check node_id format (should be like '123:456') and required parameters"}]}
+{"timestamp":1769654163.302844,"event":["Tool_called",{"tool_name":"figma_get_me","success":true,"duration_ms":564,"agent_id":null,"error":null}]}
+{"timestamp":1769654168.747653,"event":["Tool_called",{"tool_name":"figma_get_file_meta","success":false,"duration_ms":747,"agent_id":null,"error":"Invalid request: Check node_id format (should be like '123:456') and required parameters"}]}
+{"timestamp":1769654423.916393,"event":["Tool_called",{"tool_name":"figma_get_me","success":true,"duration_ms":619,"agent_id":null,"error":null}]}
+{"timestamp":1769654504.072504,"event":["Tool_called",{"tool_name":"figma_search","success":false,"duration_ms":552,"agent_id":null,"error":"Invalid request: Check node_id format (should be like '123:456') and required parameters"}]}
+{"timestamp":1769654513.695092,"event":["Tool_called",{"tool_name":"figma_list_screens","success":false,"duration_ms":454,"agent_id":null,"error":"Invalid request: Check node_id format (should be like '123:456') and required parameters"}]}
+{"timestamp":1769654530.999321,"event":["Tool_called",{"tool_name":"figma_get_file","success":false,"duration_ms":528,"agent_id":null,"error":"Invalid request: Check node_id format (should be like '123:456') and required parameters"}]}
+{"timestamp":1769654592.331784,"event":["Tool_called",{"tool_name":"figma_get_node","success":true,"duration_ms":3469,"agent_id":null,"error":null}]}
+{"timestamp":1769654618.024914,"event":["Tool_called",{"tool_name":"figma_list_screens","success":true,"duration_ms":19816,"agent_id":null,"error":null}]}
+{"timestamp":1769654630.966003,"event":["Tool_called",{"tool_name":"figma_get_node","success":true,"duration_ms":2935,"agent_id":null,"error":null}]}
+{"timestamp":1769654634.052644,"event":["Tool_called",{"tool_name":"figma_get_node","success":true,"duration_ms":2983,"agent_id":null,"error":null}]}

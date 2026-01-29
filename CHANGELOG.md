@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.11] - 2026-01-29
+
+### Fixed
+- Include Figma API response body in error messages for better debugging (max 200 chars)
+- Raise ulimit in startup scripts to prevent EMFILE accept crashes under high load
+
+## [0.3.10] - 2026-01-28
+
 ### Changed
 - Drop external `mcp_protocol` dependency in favor of local protocol module to avoid pin conflicts.
 
@@ -15,8 +23,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Record `Result.Error` outcomes as circuit failures in LLM MCP retry flow.
 - Clamp `figma_select_nodes` summary depth/preview scale and emit warnings on clamp.
 - Run Lwt-based Figma API calls in a separate Eio domain in the example tool executor.
-
-## [0.3.10] - 2026-01-28
 
 ### Fixed
 - Ensure cache directory creation works for nested paths (mkdir_p).
