@@ -35,21 +35,50 @@ type error_recovery = {
   retry_after: float;    (** 재시도 대기 시간 (초) *)
 }
 
+(** Body 기반 에러 키워드 감지 *)
+let body_contains body keyword =
+  string_contains (String.lowercase_ascii body) keyword
+
+let body_contains_any body keywords =
+  List.exists (body_contains body) keywords
+
+(** 키워드 → suggestion 매핑에서 첫 매칭 반환 *)
+let first_match body rules default =
+  match List.find_opt (fun (keywords, _) ->
+    List.for_all (body_contains body) keywords
+  ) rules with
+  | Some (_, suggestion) -> suggestion
+  | None -> default
+
+(** 400 에러 suggestion 생성 *)
+let suggestion_for_400 body =
+  first_match body [
+    (["invalid"; "id"], "Invalid ID format. Node IDs should be like '123:456', file keys are alphanumeric strings.");
+    (["missing"], "Missing required parameter. Check file_key, node_id, or other required fields.");
+    (["node"], "Node-related error. Verify the node exists and ID format is correct (e.g., '123:456').");
+  ] "Invalid request parameters. Check file_key and node_id are correct."
+
+(** 404 에러 suggestion 생성 *)
+let suggestion_for_404 body =
+  first_match body [
+    (["file"], "File not found. The file may have been deleted, moved, or you may not have access.");
+    (["node"], "Node not found. The node may have been deleted or the ID is incorrect.");
+    (["version"], "Version not found. The specified version may not exist.");
+  ] "Resource not found. Verify file_key and node_id exist and are accessible."
+
+(** 403 에러 suggestion 생성 *)
+let suggestion_for_403 body =
+  if body_contains_any body ["file_variables:read"; "invalid scope"] then
+    "Token missing scope: file_variables:read. Create a token with this scope in Figma Settings > Personal Access Tokens."
+  else
+    "You don't have permission to access this file. Ask the owner to share it with you, or check if the endpoint requires OAuth (PAT not allowed)."
+
 (** HTTP 상태 코드별 에러 복구 정보 *)
 let get_http_error_recovery code body retry_after =
   match code with
   | 400 -> {
       message = "Invalid request";
-      suggestion =
-        (let body_lower = String.lowercase_ascii body in
-         if string_contains body_lower "invalid" && string_contains body_lower "id" then
-           "Invalid ID format. Node IDs should be like '123:456', file keys are alphanumeric strings."
-         else if string_contains body_lower "missing" then
-           "Missing required parameter. Check file_key, node_id, or other required fields."
-         else if string_contains body_lower "node" then
-           "Node-related error. Verify the node exists and ID format is correct (e.g., '123:456')."
-         else
-           "Invalid request parameters. Check file_key and node_id are correct.");
+      suggestion = suggestion_for_400 body;
       retryable = false;
       retry_after = 0.0;
     }
@@ -61,27 +90,13 @@ let get_http_error_recovery code body retry_after =
     }
   | 403 -> {
       message = "Access denied";
-      suggestion =
-        (let body_lower = String.lowercase_ascii body in
-         if string_contains body_lower "file_variables:read" || string_contains body_lower "invalid scope" then
-           "Token missing scope: file_variables:read. Create a token with this scope in Figma Settings > Personal Access Tokens."
-         else
-           "You don't have permission to access this file. Ask the owner to share it with you, or check if the endpoint requires OAuth (PAT not allowed).");
+      suggestion = suggestion_for_403 body;
       retryable = false;
       retry_after = 0.0;
     }
   | 404 -> {
       message = "Not found";
-      suggestion =
-        (let body_lower = String.lowercase_ascii body in
-         if string_contains body_lower "file" then
-           "File not found. The file may have been deleted, moved, or you may not have access."
-         else if string_contains body_lower "node" then
-           "Node not found. The node may have been deleted or the ID is incorrect."
-         else if string_contains body_lower "version" then
-           "Version not found. The specified version may not exist."
-         else
-           "Resource not found. Verify file_key and node_id exist and are accessible.");
+      suggestion = suggestion_for_404 body;
       retryable = false;
       retry_after = 0.0;
     }
