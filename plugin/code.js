@@ -811,7 +811,7 @@ figma.ui.onmessage = async (msg) => {
         const p = command.payload;
         // Support both camelCase and snake_case
         const layoutMode = p.layoutMode || p.layout_mode;
-        const itemSpacing = p.itemSpacing ?? p.item_spacing;
+        const itemSpacing = (p.itemSpacing !== undefined) ? p.itemSpacing : p.item_spacing;
         const padding = p.padding;
         const primaryAlignment = p.primaryAxisAlignItems || p.primary_alignment;
         const counterAlignment = p.counterAxisAlignItems || p.counter_alignment;
