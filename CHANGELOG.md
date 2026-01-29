@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.14] - 2026-01-29
+
+### Improved
+- Add `get_int_or`, `get_int_positive`, `get_int_nonneg` helper functions
+- Replace 14 instances of verbose match patterns with concise helpers
+- Remove unused `required` parameter workaround from `string_prop`
+
 ## [0.3.13] - 2026-01-29
 
 ### Improved
