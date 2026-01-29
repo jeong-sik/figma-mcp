@@ -418,6 +418,9 @@ async function applyProps(node, props) {
 
   if ("effects" in props && "effects" in node) node.effects = props.effects;
 
+  // Vector drawing support (SVG path syntax)
+  if ("vectorPaths" in props && "vectorPaths" in node) node.vectorPaths = props.vectorPaths;
+
   if ("cornerRadius" in props && "cornerRadius" in node) node.cornerRadius = props.cornerRadius;
 
   if ("layoutMode" in props && "layoutMode" in node) node.layoutMode = props.layoutMode;
