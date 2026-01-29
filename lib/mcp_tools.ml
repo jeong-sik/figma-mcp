@@ -598,7 +598,7 @@ let tool_figma_plugin_apply_ops : tool_def = {
 (* STRAP 통합: plugin 도구 통합 (8→14 actions) *)
 let tool_figma_plugin : tool_def = {
   name = "figma_plugin";
-  description = "🔌 PLUGIN: Figma Desktop 앱과 실시간 연동. action으로 세부 동작 선택. 24개 action 지원.";
+  description = "🔌 PLUGIN: Figma Desktop 앱과 실시간 연동. action으로 세부 동작 선택. 36개 action 지원.";
   input_schema = object_schema [
     ("action", enum_prop [
       "connect"; "use_channel"; "status";
@@ -608,33 +608,61 @@ let tool_figma_plugin : tool_def = {
       "clone"; "group"; "ungroup";
       "set_selection"; "zoom_to"; "reorder";
       "set_locked"; "set_visible"; "flatten";
-      "set_auto_layout"; "get_viewport"; "set_viewport"; "rename"
-    ] "수행할 동작: connect(채널 생성), use_channel(기본 채널 설정), status(상태 확인), read_selection(선택 노드), get_node(노드 정보), export_image(이미지 내보내기), get_variables(변수 조회), apply_ops(노드 편집), list_pages(페이지 목록), switch_page(페이지 전환), list_components(컴포넌트 목록), clone(노드 복제), group(그룹화), ungroup(그룹 해제), set_selection(선택 변경), zoom_to(노드로 줌), reorder(z-order 변경), set_locked(잠금), set_visible(가시성), flatten(벡터 평탄화), set_auto_layout(오토레이아웃), get_viewport(뷰포트 조회), set_viewport(뷰포트 설정), rename(이름 변경)");
-    ("channel_id", string_prop "채널 ID (옵션, connect/use_channel에서 사용)");
-    ("node_id", string_prop "노드 ID (get_node/export_image/clone/ungroup/reorder/set_locked/set_visible/flatten/set_auto_layout/rename/zoom_to에서 사용)");
+      "set_auto_layout"; "get_viewport"; "set_viewport"; "rename";
+      "resize"; "move"; "set_opacity"; "set_corner_radius";
+      "set_fill"; "set_stroke"; "set_effects";
+      "create_component"; "detach_instance"; "set_text"; "find_all"; "notify"
+    ] "36개 action 지원. 연결(connect/use_channel/status), 조회(read_selection/get_node/list_pages/list_components/get_viewport/find_all), 탐색(switch_page/zoom_to/set_selection), 변환(clone/group/ungroup/flatten/create_component/detach_instance), 속성(rename/resize/move/set_opacity/set_corner_radius/set_fill/set_stroke/set_effects/set_auto_layout/set_locked/set_visible/reorder/set_text), 기타(export_image/get_variables/apply_ops/set_viewport/notify)");
+    ("channel_id", string_prop "채널 ID");
+    ("node_id", string_prop "노드 ID");
     ("url", string_prop "Figma URL (node_id 자동 추출)");
     ("depth", number_prop "자식 탐색 깊이 (기본값: 6)");
-    ("include_geometry", bool_prop "벡터/지오메트리 포함 여부 (기본값: true)");
-    ("format", enum_prop ["png"; "jpg"; "svg"; "pdf"] "이미지 포맷 (export_image, 기본값: png)");
-    ("scale", number_prop "스케일 (export_image, 기본값: 1)");
-    ("ops", array_prop "작업 목록 (apply_ops에서 사용)");
-    ("timeout_ms", number_prop "응답 대기 시간 (기본값: 20000)");
-    ("page_id", string_prop "페이지 ID (switch_page에서 사용)");
-    ("node_ids", array_prop "노드 ID 배열 (group/set_selection/zoom_to에서 사용)");
-    ("offset_x", number_prop "X 오프셋 (clone, 기본값: 20)");
-    ("offset_y", number_prop "Y 오프셋 (clone, 기본값: 20)");
-    ("name", string_prop "새 이름 (clone/group/rename에서 사용)");
-    ("direction", enum_prop ["front"; "back"; "forward"; "backward"] "z-order 방향 (reorder에서 사용)");
-    ("locked", bool_prop "잠금 상태 (set_locked, 기본값: true)");
-    ("visible", bool_prop "가시성 (set_visible, 기본값: true)");
-    ("layout_mode", enum_prop ["HORIZONTAL"; "VERTICAL"; "NONE"] "레이아웃 모드 (set_auto_layout에서 사용)");
-    ("item_spacing", number_prop "아이템 간격 (set_auto_layout에서 사용)");
-    ("padding", number_prop "패딩 (set_auto_layout에서 사용)");
-    ("primary_alignment", enum_prop ["MIN"; "CENTER"; "MAX"; "SPACE_BETWEEN"] "주축 정렬 (set_auto_layout에서 사용)");
-    ("counter_alignment", enum_prop ["MIN"; "CENTER"; "MAX"] "교차축 정렬 (set_auto_layout에서 사용)");
-    ("center_x", number_prop "뷰포트 중심 X (set_viewport에서 사용)");
-    ("center_y", number_prop "뷰포트 중심 Y (set_viewport에서 사용)");
-    ("zoom", number_prop "줌 레벨 (set_viewport에서 사용)");
+    ("include_geometry", bool_prop "벡터/지오메트리 포함 여부");
+    ("format", enum_prop ["png"; "jpg"; "svg"; "pdf"] "이미지 포맷");
+    ("scale", number_prop "스케일");
+    ("ops", array_prop "작업 목록 (apply_ops)");
+    ("timeout_ms", number_prop "응답 대기 시간");
+    ("page_id", string_prop "페이지 ID");
+    ("node_ids", array_prop "노드 ID 배열");
+    ("offset_x", number_prop "X 오프셋");
+    ("offset_y", number_prop "Y 오프셋");
+    ("name", string_prop "이름");
+    ("direction", enum_prop ["front"; "back"; "forward"; "backward"] "z-order 방향");
+    ("locked", bool_prop "잠금 상태");
+    ("visible", bool_prop "가시성");
+    ("layout_mode", enum_prop ["HORIZONTAL"; "VERTICAL"; "NONE"] "레이아웃 모드");
+    ("item_spacing", number_prop "아이템 간격");
+    ("padding", number_prop "패딩");
+    ("primary_alignment", enum_prop ["MIN"; "CENTER"; "MAX"; "SPACE_BETWEEN"] "주축 정렬");
+    ("counter_alignment", enum_prop ["MIN"; "CENTER"; "MAX"] "교차축 정렬");
+    ("center_x", number_prop "뷰포트 중심 X");
+    ("center_y", number_prop "뷰포트 중심 Y");
+    ("zoom", number_prop "줌 레벨");
+    ("width", number_prop "너비 (resize)");
+    ("height", number_prop "높이 (resize)");
+    ("x", number_prop "X 좌표 (move)");
+    ("y", number_prop "Y 좌표 (move)");
+    ("opacity", number_prop "투명도 0-1 (set_opacity)");
+    ("radius", number_prop "모서리 반경 (set_corner_radius)");
+    ("top_left", number_prop "좌상단 반경");
+    ("top_right", number_prop "우상단 반경");
+    ("bottom_left", number_prop "좌하단 반경");
+    ("bottom_right", number_prop "우하단 반경");
+    ("r", number_prop "빨강 0-1 (set_fill)");
+    ("g", number_prop "초록 0-1 (set_fill)");
+    ("b", number_prop "파랑 0-1 (set_fill)");
+    ("a", number_prop "알파 0-1 (set_fill)");
+    ("stroke_r", number_prop "스트로크 빨강 (set_stroke)");
+    ("stroke_g", number_prop "스트로크 초록 (set_stroke)");
+    ("stroke_b", number_prop "스트로크 파랑 (set_stroke)");
+    ("stroke_weight", number_prop "스트로크 두께 (set_stroke)");
+    ("effects", array_prop "이펙트 배열 (set_effects)");
+    ("text", string_prop "텍스트 내용 (set_text)");
+    ("type", string_prop "노드 타입 필터 (find_all)");
+    ("find_name", string_prop "이름 필터 (find_all)");
+    ("name_contains", string_prop "이름 포함 필터 (find_all)");
+    ("message", string_prop "알림 메시지 (notify)");
+    ("notify_timeout", number_prop "알림 표시 시간 ms (notify, 기본값: 3000)");
   ] ["action"];
 }
 
@@ -4646,6 +4674,211 @@ let handle_plugin_rename args : (Yojson.Safe.t, string) result =
        | Error err -> Error err
        | Ok result -> Ok (make_text_content (Yojson.Safe.pretty_to_string result.payload)))
 
+(* resize 핸들러 *)
+let handle_plugin_resize args : (Yojson.Safe.t, string) result =
+  match (get_string "node_id" args, resolve_channel_id args) with
+  | (None, _) -> Error "Missing required parameter: node_id"
+  | (_, Error msg) -> Error msg
+  | (Some node_id, Ok channel_id) ->
+      let timeout_ms = get_int "timeout_ms" args |> Option.value ~default:10000 in
+      let width = get_float "width" args in
+      let height = get_float "height" args in
+      let payload_fields = [("node_id", `String node_id)] @
+        (match width with Some w -> [("width", `Float w)] | None -> []) @
+        (match height with Some h -> [("height", `Float h)] | None -> []) in
+      let payload = `Assoc payload_fields in
+      let command_id = Figma_plugin_bridge.enqueue_command ~channel_id ~name:"resize" ~payload in
+      (match plugin_wait ~channel_id ~command_id ~timeout_ms with
+       | Error err -> Error err
+       | Ok result -> Ok (make_text_content (Yojson.Safe.pretty_to_string result.payload)))
+
+(* move 핸들러 *)
+let handle_plugin_move args : (Yojson.Safe.t, string) result =
+  match (get_string "node_id" args, resolve_channel_id args) with
+  | (None, _) -> Error "Missing required parameter: node_id"
+  | (_, Error msg) -> Error msg
+  | (Some node_id, Ok channel_id) ->
+      let timeout_ms = get_int "timeout_ms" args |> Option.value ~default:10000 in
+      let x = get_float "x" args in
+      let y = get_float "y" args in
+      let payload_fields = [("node_id", `String node_id)] @
+        (match x with Some v -> [("x", `Float v)] | None -> []) @
+        (match y with Some v -> [("y", `Float v)] | None -> []) in
+      let payload = `Assoc payload_fields in
+      let command_id = Figma_plugin_bridge.enqueue_command ~channel_id ~name:"move" ~payload in
+      (match plugin_wait ~channel_id ~command_id ~timeout_ms with
+       | Error err -> Error err
+       | Ok result -> Ok (make_text_content (Yojson.Safe.pretty_to_string result.payload)))
+
+(* set_opacity 핸들러 *)
+let handle_plugin_set_opacity args : (Yojson.Safe.t, string) result =
+  match (get_string "node_id" args, get_float "opacity" args, resolve_channel_id args) with
+  | (None, _, _) -> Error "Missing required parameter: node_id"
+  | (_, None, _) -> Error "Missing required parameter: opacity"
+  | (_, _, Error msg) -> Error msg
+  | (Some node_id, Some opacity, Ok channel_id) ->
+      let timeout_ms = get_int "timeout_ms" args |> Option.value ~default:10000 in
+      let payload = `Assoc [("node_id", `String node_id); ("opacity", `Float opacity)] in
+      let command_id = Figma_plugin_bridge.enqueue_command ~channel_id ~name:"set_opacity" ~payload in
+      (match plugin_wait ~channel_id ~command_id ~timeout_ms with
+       | Error err -> Error err
+       | Ok result -> Ok (make_text_content (Yojson.Safe.pretty_to_string result.payload)))
+
+(* set_corner_radius 핸들러 *)
+let handle_plugin_set_corner_radius args : (Yojson.Safe.t, string) result =
+  match (get_string "node_id" args, resolve_channel_id args) with
+  | (None, _) -> Error "Missing required parameter: node_id"
+  | (_, Error msg) -> Error msg
+  | (Some node_id, Ok channel_id) ->
+      let timeout_ms = get_int "timeout_ms" args |> Option.value ~default:10000 in
+      let radius = get_float "radius" args in
+      let top_left = get_float "top_left" args in
+      let top_right = get_float "top_right" args in
+      let bottom_left = get_float "bottom_left" args in
+      let bottom_right = get_float "bottom_right" args in
+      let payload_fields = [("node_id", `String node_id)] @
+        (match radius with Some r -> [("radius", `Float r)] | None -> []) @
+        (match top_left with Some r -> [("topLeft", `Float r)] | None -> []) @
+        (match top_right with Some r -> [("topRight", `Float r)] | None -> []) @
+        (match bottom_left with Some r -> [("bottomLeft", `Float r)] | None -> []) @
+        (match bottom_right with Some r -> [("bottomRight", `Float r)] | None -> []) in
+      let payload = `Assoc payload_fields in
+      let command_id = Figma_plugin_bridge.enqueue_command ~channel_id ~name:"set_corner_radius" ~payload in
+      (match plugin_wait ~channel_id ~command_id ~timeout_ms with
+       | Error err -> Error err
+       | Ok result -> Ok (make_text_content (Yojson.Safe.pretty_to_string result.payload)))
+
+(* set_fill 핸들러 *)
+let handle_plugin_set_fill args : (Yojson.Safe.t, string) result =
+  match (get_string "node_id" args, resolve_channel_id args) with
+  | (None, _) -> Error "Missing required parameter: node_id"
+  | (_, Error msg) -> Error msg
+  | (Some node_id, Ok channel_id) ->
+      let timeout_ms = get_int "timeout_ms" args |> Option.value ~default:10000 in
+      let r = get_float "r" args |> Option.value ~default:0.0 in
+      let g = get_float "g" args |> Option.value ~default:0.0 in
+      let b = get_float "b" args |> Option.value ~default:0.0 in
+      let a = get_float "a" args in
+      let color_fields = [("r", `Float r); ("g", `Float g); ("b", `Float b)] @
+        (match a with Some v -> [("a", `Float v)] | None -> []) in
+      let payload = `Assoc [("node_id", `String node_id); ("color", `Assoc color_fields)] in
+      let command_id = Figma_plugin_bridge.enqueue_command ~channel_id ~name:"set_fill" ~payload in
+      (match plugin_wait ~channel_id ~command_id ~timeout_ms with
+       | Error err -> Error err
+       | Ok result -> Ok (make_text_content (Yojson.Safe.pretty_to_string result.payload)))
+
+(* set_stroke 핸들러 *)
+let handle_plugin_set_stroke args : (Yojson.Safe.t, string) result =
+  match (get_string "node_id" args, resolve_channel_id args) with
+  | (None, _) -> Error "Missing required parameter: node_id"
+  | (_, Error msg) -> Error msg
+  | (Some node_id, Ok channel_id) ->
+      let timeout_ms = get_int "timeout_ms" args |> Option.value ~default:10000 in
+      let r = get_float "stroke_r" args in
+      let g = get_float "stroke_g" args in
+      let b = get_float "stroke_b" args in
+      let weight = get_float "stroke_weight" args in
+      let color_opt = match (r, g, b) with
+        | (Some rv, Some gv, Some bv) -> Some (`Assoc [("r", `Float rv); ("g", `Float gv); ("b", `Float bv)])
+        | _ -> None in
+      let payload_fields = [("node_id", `String node_id)] @
+        (match color_opt with Some c -> [("color", c)] | None -> []) @
+        (match weight with Some w -> [("weight", `Float w)] | None -> []) in
+      let payload = `Assoc payload_fields in
+      let command_id = Figma_plugin_bridge.enqueue_command ~channel_id ~name:"set_stroke" ~payload in
+      (match plugin_wait ~channel_id ~command_id ~timeout_ms with
+       | Error err -> Error err
+       | Ok result -> Ok (make_text_content (Yojson.Safe.pretty_to_string result.payload)))
+
+(* set_effects 핸들러 *)
+let handle_plugin_set_effects args : (Yojson.Safe.t, string) result =
+  match (get_string "node_id" args, resolve_channel_id args) with
+  | (None, _) -> Error "Missing required parameter: node_id"
+  | (_, Error msg) -> Error msg
+  | (Some node_id, Ok channel_id) ->
+      let timeout_ms = get_int "timeout_ms" args |> Option.value ~default:10000 in
+      let effects = match args with
+        | `Assoc fields -> (match List.assoc_opt "effects" fields with Some e -> e | None -> `List [])
+        | _ -> `List [] in
+      let payload = `Assoc [("node_id", `String node_id); ("effects", effects)] in
+      let command_id = Figma_plugin_bridge.enqueue_command ~channel_id ~name:"set_effects" ~payload in
+      (match plugin_wait ~channel_id ~command_id ~timeout_ms with
+       | Error err -> Error err
+       | Ok result -> Ok (make_text_content (Yojson.Safe.pretty_to_string result.payload)))
+
+(* create_component 핸들러 *)
+let handle_plugin_create_component args : (Yojson.Safe.t, string) result =
+  match (get_string "node_id" args, resolve_channel_id args) with
+  | (None, _) -> Error "Missing required parameter: node_id"
+  | (_, Error msg) -> Error msg
+  | (Some node_id, Ok channel_id) ->
+      let timeout_ms = get_int "timeout_ms" args |> Option.value ~default:10000 in
+      let payload = `Assoc [("node_id", `String node_id)] in
+      let command_id = Figma_plugin_bridge.enqueue_command ~channel_id ~name:"create_component" ~payload in
+      (match plugin_wait ~channel_id ~command_id ~timeout_ms with
+       | Error err -> Error err
+       | Ok result -> Ok (make_text_content (Yojson.Safe.pretty_to_string result.payload)))
+
+(* detach_instance 핸들러 *)
+let handle_plugin_detach_instance args : (Yojson.Safe.t, string) result =
+  match (get_string "node_id" args, resolve_channel_id args) with
+  | (None, _) -> Error "Missing required parameter: node_id"
+  | (_, Error msg) -> Error msg
+  | (Some node_id, Ok channel_id) ->
+      let timeout_ms = get_int "timeout_ms" args |> Option.value ~default:10000 in
+      let payload = `Assoc [("node_id", `String node_id)] in
+      let command_id = Figma_plugin_bridge.enqueue_command ~channel_id ~name:"detach_instance" ~payload in
+      (match plugin_wait ~channel_id ~command_id ~timeout_ms with
+       | Error err -> Error err
+       | Ok result -> Ok (make_text_content (Yojson.Safe.pretty_to_string result.payload)))
+
+(* set_text 핸들러 *)
+let handle_plugin_set_text args : (Yojson.Safe.t, string) result =
+  match (get_string "node_id" args, get_string "text" args, resolve_channel_id args) with
+  | (None, _, _) -> Error "Missing required parameter: node_id"
+  | (_, None, _) -> Error "Missing required parameter: text"
+  | (_, _, Error msg) -> Error msg
+  | (Some node_id, Some text, Ok channel_id) ->
+      let timeout_ms = get_int "timeout_ms" args |> Option.value ~default:10000 in
+      let payload = `Assoc [("node_id", `String node_id); ("text", `String text)] in
+      let command_id = Figma_plugin_bridge.enqueue_command ~channel_id ~name:"set_text" ~payload in
+      (match plugin_wait ~channel_id ~command_id ~timeout_ms with
+       | Error err -> Error err
+       | Ok result -> Ok (make_text_content (Yojson.Safe.pretty_to_string result.payload)))
+
+(* find_all 핸들러 *)
+let handle_plugin_find_all args : (Yojson.Safe.t, string) result =
+  match resolve_channel_id args with
+  | Error msg -> Error msg
+  | Ok channel_id ->
+      let timeout_ms = get_int "timeout_ms" args |> Option.value ~default:20000 in
+      let node_type = get_string "type" args in
+      let name = get_string "find_name" args in
+      let name_contains = get_string "name_contains" args in
+      let payload_fields =
+        (match node_type with Some t -> [("type", `String t)] | None -> []) @
+        (match name with Some n -> [("name", `String n)] | None -> []) @
+        (match name_contains with Some n -> [("name_contains", `String n)] | None -> []) in
+      let payload = `Assoc payload_fields in
+      let command_id = Figma_plugin_bridge.enqueue_command ~channel_id ~name:"find_all" ~payload in
+      (match plugin_wait ~channel_id ~command_id ~timeout_ms with
+       | Error err -> Error err
+       | Ok result -> Ok (make_text_content (Yojson.Safe.pretty_to_string result.payload)))
+
+(* notify 핸들러 *)
+let handle_plugin_notify args : (Yojson.Safe.t, string) result =
+  match (get_string "message" args, resolve_channel_id args) with
+  | (None, _) -> Error "Missing required parameter: message"
+  | (_, Error msg) -> Error msg
+  | (Some message, Ok channel_id) ->
+      let timeout_ms = get_int "timeout_ms" args |> Option.value ~default:10000 in
+      let notify_timeout = get_int "notify_timeout" args |> Option.value ~default:3000 in
+      let payload = `Assoc [("message", `String message); ("timeout", `Int notify_timeout)] in
+      let command_id = Figma_plugin_bridge.enqueue_command ~channel_id ~name:"notify" ~payload in
+      (match plugin_wait ~channel_id ~command_id ~timeout_ms with
+       | Error err -> Error err
+       | Ok result -> Ok (make_text_content (Yojson.Safe.pretty_to_string result.payload)))
+
 (* STRAP 통합 핸들러: action으로 라우팅, 기존 핸들러 재사용 *)
 let handle_figma_plugin args : (Yojson.Safe.t, string) result =
   match get_string "action" args with
@@ -4676,7 +4909,19 @@ let handle_figma_plugin args : (Yojson.Safe.t, string) result =
       | "get_viewport" -> handle_plugin_get_viewport args
       | "set_viewport" -> handle_plugin_set_viewport args
       | "rename" -> handle_plugin_rename args
-      | _ -> Error (sprintf "Unknown action: %s. Available: connect, use_channel, status, read_selection, get_node, export_image, get_variables, apply_ops, list_pages, switch_page, list_components, clone, group, ungroup, set_selection, zoom_to, reorder, set_locked, set_visible, flatten, set_auto_layout, get_viewport, set_viewport, rename" action)
+      | "resize" -> handle_plugin_resize args
+      | "move" -> handle_plugin_move args
+      | "set_opacity" -> handle_plugin_set_opacity args
+      | "set_corner_radius" -> handle_plugin_set_corner_radius args
+      | "set_fill" -> handle_plugin_set_fill args
+      | "set_stroke" -> handle_plugin_set_stroke args
+      | "set_effects" -> handle_plugin_set_effects args
+      | "create_component" -> handle_plugin_create_component args
+      | "detach_instance" -> handle_plugin_detach_instance args
+      | "set_text" -> handle_plugin_set_text args
+      | "find_all" -> handle_plugin_find_all args
+      | "notify" -> handle_plugin_notify args
+      | _ -> Error (sprintf "Unknown action: %s. Available: connect, use_channel, status, read_selection, get_node, export_image, get_variables, apply_ops, list_pages, switch_page, list_components, clone, group, ungroup, set_selection, zoom_to, reorder, set_locked, set_visible, flatten, set_auto_layout, get_viewport, set_viewport, rename, resize, move, set_opacity, set_corner_radius, set_fill, set_stroke, set_effects, create_component, detach_instance, set_text, find_all, notify" action)
 
 (** ============== LLM Bridge 핸들러 ============== *)
 

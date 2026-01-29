@@ -875,6 +875,269 @@ figma.ui.onmessage = async (msg) => {
         node.name = newName;
         payload = { node_id: node.id, old_name: oldName, new_name: node.name };
       }
+    } else if (command.name === "resize") {
+      // Resize a node
+      const nodeId = command.payload && command.payload.node_id;
+      const width = command.payload && command.payload.width;
+      const height = command.payload && command.payload.height;
+      const node = nodeId ? await getNodeById(nodeId) : null;
+      if (!node) {
+        ok = false;
+        payload = { error: "Node not found" };
+      } else if (!("resize" in node)) {
+        ok = false;
+        payload = { error: "Node cannot be resized" };
+      } else {
+        const oldWidth = node.width;
+        const oldHeight = node.height;
+        if (typeof width === "number" && typeof height === "number") {
+          node.resize(width, height);
+        } else if (typeof width === "number") {
+          node.resize(width, node.height);
+        } else if (typeof height === "number") {
+          node.resize(node.width, height);
+        }
+        payload = { node_id: node.id, old: { width: oldWidth, height: oldHeight }, new: { width: node.width, height: node.height } };
+      }
+    } else if (command.name === "move") {
+      // Move a node (change x, y position)
+      const nodeId = command.payload && command.payload.node_id;
+      const x = command.payload && command.payload.x;
+      const y = command.payload && command.payload.y;
+      const node = nodeId ? await getNodeById(nodeId) : null;
+      if (!node) {
+        ok = false;
+        payload = { error: "Node not found" };
+      } else if (!("x" in node)) {
+        ok = false;
+        payload = { error: "Node cannot be moved" };
+      } else {
+        const oldX = node.x;
+        const oldY = node.y;
+        if (typeof x === "number") node.x = x;
+        if (typeof y === "number") node.y = y;
+        payload = { node_id: node.id, old: { x: oldX, y: oldY }, new: { x: node.x, y: node.y } };
+      }
+    } else if (command.name === "set_opacity") {
+      // Set node opacity
+      const nodeId = command.payload && command.payload.node_id;
+      const opacity = command.payload && command.payload.opacity;
+      const node = nodeId ? await getNodeById(nodeId) : null;
+      if (!node) {
+        ok = false;
+        payload = { error: "Node not found" };
+      } else if (!("opacity" in node)) {
+        ok = false;
+        payload = { error: "Node does not support opacity" };
+      } else if (typeof opacity !== "number") {
+        ok = false;
+        payload = { error: "opacity must be a number (0-1)" };
+      } else {
+        const oldOpacity = node.opacity;
+        node.opacity = Math.max(0, Math.min(1, opacity));
+        payload = { node_id: node.id, old_opacity: oldOpacity, new_opacity: node.opacity };
+      }
+    } else if (command.name === "set_corner_radius") {
+      // Set corner radius on a frame/rectangle
+      const nodeId = command.payload && command.payload.node_id;
+      const radius = command.payload && command.payload.radius;
+      const node = nodeId ? await getNodeById(nodeId) : null;
+      if (!node) {
+        ok = false;
+        payload = { error: "Node not found" };
+      } else if (!("cornerRadius" in node)) {
+        ok = false;
+        payload = { error: "Node does not support corner radius" };
+      } else {
+        const oldRadius = node.cornerRadius;
+        if (typeof radius === "number") {
+          node.cornerRadius = radius;
+        }
+        // Support individual corners
+        const p = command.payload;
+        if (typeof p.topLeft === "number") node.topLeftRadius = p.topLeft;
+        if (typeof p.topRight === "number") node.topRightRadius = p.topRight;
+        if (typeof p.bottomLeft === "number") node.bottomLeftRadius = p.bottomLeft;
+        if (typeof p.bottomRight === "number") node.bottomRightRadius = p.bottomRight;
+        payload = {
+          node_id: node.id,
+          cornerRadius: node.cornerRadius,
+          corners: { topLeft: node.topLeftRadius, topRight: node.topRightRadius, bottomLeft: node.bottomLeftRadius, bottomRight: node.bottomRightRadius }
+        };
+      }
+    } else if (command.name === "set_fill") {
+      // Set fill color on a node
+      const nodeId = command.payload && command.payload.node_id;
+      const color = command.payload && command.payload.color;
+      const node = nodeId ? await getNodeById(nodeId) : null;
+      if (!node) {
+        ok = false;
+        payload = { error: "Node not found" };
+      } else if (!("fills" in node)) {
+        ok = false;
+        payload = { error: "Node does not support fills" };
+      } else if (!color) {
+        ok = false;
+        payload = { error: "color is required (e.g., {r:1, g:0, b:0})" };
+      } else {
+        const fill = { type: "SOLID", color: { r: color.r || 0, g: color.g || 0, b: color.b || 0 } };
+        if (typeof color.a === "number") fill.opacity = color.a;
+        node.fills = [fill];
+        payload = { node_id: node.id, fill: fill };
+      }
+    } else if (command.name === "set_stroke") {
+      // Set stroke on a node
+      const nodeId = command.payload && command.payload.node_id;
+      const color = command.payload && command.payload.color;
+      const weight = command.payload && command.payload.weight;
+      const node = nodeId ? await getNodeById(nodeId) : null;
+      if (!node) {
+        ok = false;
+        payload = { error: "Node not found" };
+      } else if (!("strokes" in node)) {
+        ok = false;
+        payload = { error: "Node does not support strokes" };
+      } else {
+        if (color) {
+          const stroke = { type: "SOLID", color: { r: color.r || 0, g: color.g || 0, b: color.b || 0 } };
+          node.strokes = [stroke];
+        }
+        if (typeof weight === "number") {
+          node.strokeWeight = weight;
+        }
+        payload = { node_id: node.id, strokes: node.strokes, strokeWeight: node.strokeWeight };
+      }
+    } else if (command.name === "set_effects") {
+      // Set effects (shadow, blur) on a node
+      const nodeId = command.payload && command.payload.node_id;
+      const effects = command.payload && command.payload.effects;
+      const node = nodeId ? await getNodeById(nodeId) : null;
+      if (!node) {
+        ok = false;
+        payload = { error: "Node not found" };
+      } else if (!("effects" in node)) {
+        ok = false;
+        payload = { error: "Node does not support effects" };
+      } else if (!Array.isArray(effects)) {
+        ok = false;
+        payload = { error: "effects must be an array" };
+      } else {
+        // Ensure all effects have required fields
+        const validEffects = effects.map(e => {
+          if (e.type === "DROP_SHADOW" || e.type === "INNER_SHADOW") {
+            return {
+              type: e.type,
+              color: e.color || { r: 0, g: 0, b: 0, a: 0.25 },
+              offset: e.offset || { x: 0, y: 4 },
+              radius: e.radius || 4,
+              spread: e.spread || 0,
+              visible: e.visible !== false,
+              blendMode: e.blendMode || "NORMAL"
+            };
+          } else if (e.type === "LAYER_BLUR" || e.type === "BACKGROUND_BLUR") {
+            return { type: e.type, radius: e.radius || 10, visible: e.visible !== false };
+          }
+          return e;
+        });
+        node.effects = validEffects;
+        payload = { node_id: node.id, effects: node.effects };
+      }
+    } else if (command.name === "create_component") {
+      // Create a component from a node
+      const nodeId = command.payload && command.payload.node_id;
+      const node = nodeId ? await getNodeById(nodeId) : null;
+      if (!node) {
+        ok = false;
+        payload = { error: "Node not found" };
+      } else if (node.type === "COMPONENT" || node.type === "COMPONENT_SET") {
+        ok = false;
+        payload = { error: "Node is already a component" };
+      } else if (!node.parent) {
+        ok = false;
+        payload = { error: "Node has no parent" };
+      } else {
+        const component = figma.createComponent();
+        component.name = node.name;
+        component.resize(node.width, node.height);
+        // Clone children or the node itself
+        if ("children" in node) {
+          for (const child of node.children) {
+            component.appendChild(child.clone());
+          }
+        }
+        component.x = node.x;
+        component.y = node.y;
+        const parent = node.parent;
+        const index = parent.children.indexOf(node);
+        parent.insertChild(index, component);
+        node.remove();
+        payload = { component_id: component.id, component_name: component.name };
+      }
+    } else if (command.name === "detach_instance") {
+      // Detach an instance to a frame
+      const nodeId = command.payload && command.payload.node_id;
+      const node = nodeId ? await getNodeById(nodeId) : null;
+      if (!node) {
+        ok = false;
+        payload = { error: "Node not found" };
+      } else if (node.type !== "INSTANCE") {
+        ok = false;
+        payload = { error: "Node is not an instance" };
+      } else {
+        const detached = node.detachInstance();
+        payload = { detached_id: detached.id, detached_name: detached.name };
+      }
+    } else if (command.name === "set_text") {
+      // Set text content on a text node
+      const nodeId = command.payload && command.payload.node_id;
+      const text = command.payload && command.payload.text;
+      const node = nodeId ? await getNodeById(nodeId) : null;
+      if (!node) {
+        ok = false;
+        payload = { error: "Node not found" };
+      } else if (node.type !== "TEXT") {
+        ok = false;
+        payload = { error: "Node is not a text node" };
+      } else if (typeof text !== "string") {
+        ok = false;
+        payload = { error: "text must be a string" };
+      } else {
+        // Load the font first
+        await figma.loadFontAsync(node.fontName);
+        const oldText = node.characters;
+        node.characters = text;
+        payload = { node_id: node.id, old_text: oldText, new_text: node.characters };
+      }
+    } else if (command.name === "find_all") {
+      // Find all nodes matching criteria
+      const nodeType = command.payload && command.payload.type;
+      const name = command.payload && command.payload.name;
+      const nameContains = command.payload && command.payload.name_contains;
+      let nodes = figma.currentPage.findAll();
+      if (nodeType) {
+        nodes = nodes.filter(n => n.type === nodeType);
+      }
+      if (name) {
+        nodes = nodes.filter(n => n.name === name);
+      }
+      if (nameContains) {
+        nodes = nodes.filter(n => n.name.includes(nameContains));
+      }
+      payload = {
+        count: nodes.length,
+        nodes: nodes.slice(0, 100).map(n => ({ id: n.id, name: n.name, type: n.type }))
+      };
+    } else if (command.name === "notify") {
+      // Show a notification in Figma
+      const message = command.payload && command.payload.message;
+      const timeout = command.payload && command.payload.timeout;
+      if (!message) {
+        ok = false;
+        payload = { error: "message is required" };
+      } else {
+        figma.notify(message, { timeout: timeout || 3000 });
+        payload = { notified: true, message: message };
+      }
     } else {
       ok = false;
       payload = { error: "Unknown command" };
