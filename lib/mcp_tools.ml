@@ -598,7 +598,7 @@ let tool_figma_plugin_apply_ops : tool_def = {
 (* STRAP 통합: plugin 도구 통합 (8→14 actions) *)
 let tool_figma_plugin : tool_def = {
   name = "figma_plugin";
-  description = "🔌 PLUGIN: Figma Desktop 앱과 실시간 연동. action으로 세부 동작 선택. 36개 action 지원.";
+  description = "🔌 PLUGIN: Figma Desktop 앱과 실시간 연동. action으로 세부 동작 선택. 52개 action 지원.";
   input_schema = object_schema [
     ("action", enum_prop [
       "connect"; "use_channel"; "status";
@@ -611,8 +611,13 @@ let tool_figma_plugin : tool_def = {
       "set_auto_layout"; "get_viewport"; "set_viewport"; "rename";
       "resize"; "move"; "set_opacity"; "set_corner_radius";
       "set_fill"; "set_stroke"; "set_effects";
-      "create_component"; "detach_instance"; "set_text"; "find_all"; "notify"
-    ] "36개 action 지원. 연결(connect/use_channel/status), 조회(read_selection/get_node/list_pages/list_components/get_viewport/find_all), 탐색(switch_page/zoom_to/set_selection), 변환(clone/group/ungroup/flatten/create_component/detach_instance), 속성(rename/resize/move/set_opacity/set_corner_radius/set_fill/set_stroke/set_effects/set_auto_layout/set_locked/set_visible/reorder/set_text), 기타(export_image/get_variables/apply_ops/set_viewport/notify)");
+      "create_component"; "detach_instance"; "set_text"; "find_all"; "notify";
+      "create_frame"; "create_rectangle"; "create_ellipse"; "create_text";
+      "create_line"; "create_polygon"; "create_star";
+      "delete_node"; "duplicate"; "align"; "distribute";
+      "boolean_union"; "boolean_subtract"; "boolean_intersect"; "boolean_exclude";
+      "get_local_styles"; "set_constraints"
+    ] "52개 action: 연결(connect/use_channel/status), 생성(create_frame/rectangle/ellipse/text/line/polygon/star), 조회(read_selection/get_node/list_pages/list_components/find_all/get_local_styles/get_viewport), 편집(clone/duplicate/delete_node/group/ungroup/flatten/create_component/detach_instance), 불리언(boolean_union/subtract/intersect/exclude), 정렬(align/distribute), 속성(rename/resize/move/set_opacity/set_corner_radius/set_fill/set_stroke/set_effects/set_auto_layout/set_locked/set_visible/reorder/set_text/set_constraints)");
     ("channel_id", string_prop "채널 ID");
     ("node_id", string_prop "노드 ID");
     ("url", string_prop "Figma URL (node_id 자동 추출)");
@@ -663,6 +668,15 @@ let tool_figma_plugin : tool_def = {
     ("name_contains", string_prop "이름 포함 필터 (find_all)");
     ("message", string_prop "알림 메시지 (notify)");
     ("notify_timeout", number_prop "알림 표시 시간 ms (notify, 기본값: 3000)");
+    ("font_size", number_prop "폰트 크기 (create_text)");
+    ("length", number_prop "선 길이 (create_line)");
+    ("rotation", number_prop "회전 각도 (create_line)");
+    ("point_count", number_prop "꼭지점 수 (create_polygon/create_star)");
+    ("inner_radius", number_prop "내부 반경 0-1 (create_star)");
+    ("align_direction", enum_prop ["left"; "center"; "right"; "top"; "middle"; "bottom"] "정렬 방향 (align)");
+    ("distribute_direction", enum_prop ["horizontal"; "vertical"] "분배 방향 (distribute)");
+    ("constraint_horizontal", enum_prop ["MIN"; "CENTER"; "MAX"; "STRETCH"; "SCALE"] "수평 제약 (set_constraints)");
+    ("constraint_vertical", enum_prop ["MIN"; "CENTER"; "MAX"; "STRETCH"; "SCALE"] "수직 제약 (set_constraints)");
   ] ["action"];
 }
 
@@ -4879,6 +4893,331 @@ let handle_plugin_notify args : (Yojson.Safe.t, string) result =
        | Error err -> Error err
        | Ok result -> Ok (make_text_content (Yojson.Safe.pretty_to_string result.payload)))
 
+(* create_frame 핸들러 *)
+let handle_plugin_create_frame args : (Yojson.Safe.t, string) result =
+  match resolve_channel_id args with
+  | Error msg -> Error msg
+  | Ok channel_id ->
+      let timeout_ms = get_int "timeout_ms" args |> Option.value ~default:10000 in
+      let name = get_string "name" args in
+      let x = get_float "x" args in
+      let y = get_float "y" args in
+      let width = get_float "width" args in
+      let height = get_float "height" args in
+      let payload_fields =
+        (match name with Some n -> [("name", `String n)] | None -> []) @
+        (match x with Some v -> [("x", `Float v)] | None -> []) @
+        (match y with Some v -> [("y", `Float v)] | None -> []) @
+        (match width with Some v -> [("width", `Float v)] | None -> []) @
+        (match height with Some v -> [("height", `Float v)] | None -> []) in
+      let payload = `Assoc payload_fields in
+      let command_id = Figma_plugin_bridge.enqueue_command ~channel_id ~name:"create_frame" ~payload in
+      (match plugin_wait ~channel_id ~command_id ~timeout_ms with
+       | Error err -> Error err
+       | Ok result -> Ok (make_text_content (Yojson.Safe.pretty_to_string result.payload)))
+
+(* create_rectangle 핸들러 *)
+let handle_plugin_create_rectangle args : (Yojson.Safe.t, string) result =
+  match resolve_channel_id args with
+  | Error msg -> Error msg
+  | Ok channel_id ->
+      let timeout_ms = get_int "timeout_ms" args |> Option.value ~default:10000 in
+      let name = get_string "name" args in
+      let x = get_float "x" args in
+      let y = get_float "y" args in
+      let width = get_float "width" args in
+      let height = get_float "height" args in
+      let corner_radius = get_float "radius" args in
+      let payload_fields =
+        (match name with Some n -> [("name", `String n)] | None -> []) @
+        (match x with Some v -> [("x", `Float v)] | None -> []) @
+        (match y with Some v -> [("y", `Float v)] | None -> []) @
+        (match width with Some v -> [("width", `Float v)] | None -> []) @
+        (match height with Some v -> [("height", `Float v)] | None -> []) @
+        (match corner_radius with Some v -> [("cornerRadius", `Float v)] | None -> []) in
+      let payload = `Assoc payload_fields in
+      let command_id = Figma_plugin_bridge.enqueue_command ~channel_id ~name:"create_rectangle" ~payload in
+      (match plugin_wait ~channel_id ~command_id ~timeout_ms with
+       | Error err -> Error err
+       | Ok result -> Ok (make_text_content (Yojson.Safe.pretty_to_string result.payload)))
+
+(* create_ellipse 핸들러 *)
+let handle_plugin_create_ellipse args : (Yojson.Safe.t, string) result =
+  match resolve_channel_id args with
+  | Error msg -> Error msg
+  | Ok channel_id ->
+      let timeout_ms = get_int "timeout_ms" args |> Option.value ~default:10000 in
+      let name = get_string "name" args in
+      let x = get_float "x" args in
+      let y = get_float "y" args in
+      let width = get_float "width" args in
+      let height = get_float "height" args in
+      let payload_fields =
+        (match name with Some n -> [("name", `String n)] | None -> []) @
+        (match x with Some v -> [("x", `Float v)] | None -> []) @
+        (match y with Some v -> [("y", `Float v)] | None -> []) @
+        (match width with Some v -> [("width", `Float v)] | None -> []) @
+        (match height with Some v -> [("height", `Float v)] | None -> []) in
+      let payload = `Assoc payload_fields in
+      let command_id = Figma_plugin_bridge.enqueue_command ~channel_id ~name:"create_ellipse" ~payload in
+      (match plugin_wait ~channel_id ~command_id ~timeout_ms with
+       | Error err -> Error err
+       | Ok result -> Ok (make_text_content (Yojson.Safe.pretty_to_string result.payload)))
+
+(* create_text 핸들러 *)
+let handle_plugin_create_text args : (Yojson.Safe.t, string) result =
+  match resolve_channel_id args with
+  | Error msg -> Error msg
+  | Ok channel_id ->
+      let timeout_ms = get_int "timeout_ms" args |> Option.value ~default:10000 in
+      let name = get_string "name" args in
+      let x = get_float "x" args in
+      let y = get_float "y" args in
+      let text = get_string "text" args in
+      let font_size = get_int "font_size" args in
+      let payload_fields =
+        (match name with Some n -> [("name", `String n)] | None -> []) @
+        (match x with Some v -> [("x", `Float v)] | None -> []) @
+        (match y with Some v -> [("y", `Float v)] | None -> []) @
+        (match text with Some t -> [("text", `String t)] | None -> []) @
+        (match font_size with Some s -> [("fontSize", `Int s)] | None -> []) in
+      let payload = `Assoc payload_fields in
+      let command_id = Figma_plugin_bridge.enqueue_command ~channel_id ~name:"create_text" ~payload in
+      (match plugin_wait ~channel_id ~command_id ~timeout_ms with
+       | Error err -> Error err
+       | Ok result -> Ok (make_text_content (Yojson.Safe.pretty_to_string result.payload)))
+
+(* create_line 핸들러 *)
+let handle_plugin_create_line args : (Yojson.Safe.t, string) result =
+  match resolve_channel_id args with
+  | Error msg -> Error msg
+  | Ok channel_id ->
+      let timeout_ms = get_int "timeout_ms" args |> Option.value ~default:10000 in
+      let name = get_string "name" args in
+      let x = get_float "x" args in
+      let y = get_float "y" args in
+      let length = get_float "length" args in
+      let rotation = get_float "rotation" args in
+      let stroke_weight = get_float "stroke_weight" args in
+      let payload_fields =
+        (match name with Some n -> [("name", `String n)] | None -> []) @
+        (match x with Some v -> [("x", `Float v)] | None -> []) @
+        (match y with Some v -> [("y", `Float v)] | None -> []) @
+        (match length with Some v -> [("length", `Float v)] | None -> []) @
+        (match rotation with Some v -> [("rotation", `Float v)] | None -> []) @
+        (match stroke_weight with Some v -> [("stroke_weight", `Float v)] | None -> []) in
+      let payload = `Assoc payload_fields in
+      let command_id = Figma_plugin_bridge.enqueue_command ~channel_id ~name:"create_line" ~payload in
+      (match plugin_wait ~channel_id ~command_id ~timeout_ms with
+       | Error err -> Error err
+       | Ok result -> Ok (make_text_content (Yojson.Safe.pretty_to_string result.payload)))
+
+(* create_polygon 핸들러 *)
+let handle_plugin_create_polygon args : (Yojson.Safe.t, string) result =
+  match resolve_channel_id args with
+  | Error msg -> Error msg
+  | Ok channel_id ->
+      let timeout_ms = get_int "timeout_ms" args |> Option.value ~default:10000 in
+      let name = get_string "name" args in
+      let x = get_float "x" args in
+      let y = get_float "y" args in
+      let width = get_float "width" args in
+      let height = get_float "height" args in
+      let point_count = get_int "point_count" args in
+      let payload_fields =
+        (match name with Some n -> [("name", `String n)] | None -> []) @
+        (match x with Some v -> [("x", `Float v)] | None -> []) @
+        (match y with Some v -> [("y", `Float v)] | None -> []) @
+        (match width with Some v -> [("width", `Float v)] | None -> []) @
+        (match height with Some v -> [("height", `Float v)] | None -> []) @
+        (match point_count with Some c -> [("pointCount", `Int c)] | None -> []) in
+      let payload = `Assoc payload_fields in
+      let command_id = Figma_plugin_bridge.enqueue_command ~channel_id ~name:"create_polygon" ~payload in
+      (match plugin_wait ~channel_id ~command_id ~timeout_ms with
+       | Error err -> Error err
+       | Ok result -> Ok (make_text_content (Yojson.Safe.pretty_to_string result.payload)))
+
+(* create_star 핸들러 *)
+let handle_plugin_create_star args : (Yojson.Safe.t, string) result =
+  match resolve_channel_id args with
+  | Error msg -> Error msg
+  | Ok channel_id ->
+      let timeout_ms = get_int "timeout_ms" args |> Option.value ~default:10000 in
+      let name = get_string "name" args in
+      let x = get_float "x" args in
+      let y = get_float "y" args in
+      let width = get_float "width" args in
+      let height = get_float "height" args in
+      let point_count = get_int "point_count" args in
+      let inner_radius = get_float "inner_radius" args in
+      let payload_fields =
+        (match name with Some n -> [("name", `String n)] | None -> []) @
+        (match x with Some v -> [("x", `Float v)] | None -> []) @
+        (match y with Some v -> [("y", `Float v)] | None -> []) @
+        (match width with Some v -> [("width", `Float v)] | None -> []) @
+        (match height with Some v -> [("height", `Float v)] | None -> []) @
+        (match point_count with Some c -> [("pointCount", `Int c)] | None -> []) @
+        (match inner_radius with Some r -> [("innerRadius", `Float r)] | None -> []) in
+      let payload = `Assoc payload_fields in
+      let command_id = Figma_plugin_bridge.enqueue_command ~channel_id ~name:"create_star" ~payload in
+      (match plugin_wait ~channel_id ~command_id ~timeout_ms with
+       | Error err -> Error err
+       | Ok result -> Ok (make_text_content (Yojson.Safe.pretty_to_string result.payload)))
+
+(* delete_node 핸들러 *)
+let handle_plugin_delete_node args : (Yojson.Safe.t, string) result =
+  match (get_string "node_id" args, resolve_channel_id args) with
+  | (None, _) -> Error "Missing required parameter: node_id"
+  | (_, Error msg) -> Error msg
+  | (Some node_id, Ok channel_id) ->
+      let timeout_ms = get_int "timeout_ms" args |> Option.value ~default:10000 in
+      let payload = `Assoc [("node_id", `String node_id)] in
+      let command_id = Figma_plugin_bridge.enqueue_command ~channel_id ~name:"delete_node" ~payload in
+      (match plugin_wait ~channel_id ~command_id ~timeout_ms with
+       | Error err -> Error err
+       | Ok result -> Ok (make_text_content (Yojson.Safe.pretty_to_string result.payload)))
+
+(* duplicate 핸들러 *)
+let handle_plugin_duplicate args : (Yojson.Safe.t, string) result =
+  match (get_string "node_id" args, resolve_channel_id args) with
+  | (None, _) -> Error "Missing required parameter: node_id"
+  | (_, Error msg) -> Error msg
+  | (Some node_id, Ok channel_id) ->
+      let timeout_ms = get_int "timeout_ms" args |> Option.value ~default:10000 in
+      let offset_x = get_float "offset_x" args in
+      let offset_y = get_float "offset_y" args in
+      let name = get_string "name" args in
+      let payload_fields = [("node_id", `String node_id)] @
+        (match offset_x with Some v -> [("offset_x", `Float v)] | None -> []) @
+        (match offset_y with Some v -> [("offset_y", `Float v)] | None -> []) @
+        (match name with Some n -> [("name", `String n)] | None -> []) in
+      let payload = `Assoc payload_fields in
+      let command_id = Figma_plugin_bridge.enqueue_command ~channel_id ~name:"duplicate" ~payload in
+      (match plugin_wait ~channel_id ~command_id ~timeout_ms with
+       | Error err -> Error err
+       | Ok result -> Ok (make_text_content (Yojson.Safe.pretty_to_string result.payload)))
+
+(* align 핸들러 *)
+let handle_plugin_align args : (Yojson.Safe.t, string) result =
+  match (get_string "align_direction" args, resolve_channel_id args) with
+  | (None, _) -> Error "Missing required parameter: align_direction (left/center/right/top/middle/bottom)"
+  | (_, Error msg) -> Error msg
+  | (Some direction, Ok channel_id) ->
+      let timeout_ms = get_int "timeout_ms" args |> Option.value ~default:10000 in
+      let node_ids = get_string_list "node_ids" args in
+      let payload_fields = [("direction", `String direction)] @
+        (match node_ids with Some ids -> [("node_ids", `List (List.map (fun s -> `String s) ids))] | None -> []) in
+      let payload = `Assoc payload_fields in
+      let command_id = Figma_plugin_bridge.enqueue_command ~channel_id ~name:"align" ~payload in
+      (match plugin_wait ~channel_id ~command_id ~timeout_ms with
+       | Error err -> Error err
+       | Ok result -> Ok (make_text_content (Yojson.Safe.pretty_to_string result.payload)))
+
+(* distribute 핸들러 *)
+let handle_plugin_distribute args : (Yojson.Safe.t, string) result =
+  match (get_string "distribute_direction" args, resolve_channel_id args) with
+  | (None, _) -> Error "Missing required parameter: distribute_direction (horizontal/vertical)"
+  | (_, Error msg) -> Error msg
+  | (Some direction, Ok channel_id) ->
+      let timeout_ms = get_int "timeout_ms" args |> Option.value ~default:10000 in
+      let node_ids = get_string_list "node_ids" args in
+      let payload_fields = [("direction", `String direction)] @
+        (match node_ids with Some ids -> [("node_ids", `List (List.map (fun s -> `String s) ids))] | None -> []) in
+      let payload = `Assoc payload_fields in
+      let command_id = Figma_plugin_bridge.enqueue_command ~channel_id ~name:"distribute" ~payload in
+      (match plugin_wait ~channel_id ~command_id ~timeout_ms with
+       | Error err -> Error err
+       | Ok result -> Ok (make_text_content (Yojson.Safe.pretty_to_string result.payload)))
+
+(* boolean_union 핸들러 *)
+let handle_plugin_boolean_union args : (Yojson.Safe.t, string) result =
+  match resolve_channel_id args with
+  | Error msg -> Error msg
+  | Ok channel_id ->
+      let timeout_ms = get_int "timeout_ms" args |> Option.value ~default:10000 in
+      let node_ids = get_string_list "node_ids" args in
+      let payload = match node_ids with
+        | Some ids -> `Assoc [("node_ids", `List (List.map (fun s -> `String s) ids))]
+        | None -> `Assoc [] in
+      let command_id = Figma_plugin_bridge.enqueue_command ~channel_id ~name:"boolean_union" ~payload in
+      (match plugin_wait ~channel_id ~command_id ~timeout_ms with
+       | Error err -> Error err
+       | Ok result -> Ok (make_text_content (Yojson.Safe.pretty_to_string result.payload)))
+
+(* boolean_subtract 핸들러 *)
+let handle_plugin_boolean_subtract args : (Yojson.Safe.t, string) result =
+  match resolve_channel_id args with
+  | Error msg -> Error msg
+  | Ok channel_id ->
+      let timeout_ms = get_int "timeout_ms" args |> Option.value ~default:10000 in
+      let node_ids = get_string_list "node_ids" args in
+      let payload = match node_ids with
+        | Some ids -> `Assoc [("node_ids", `List (List.map (fun s -> `String s) ids))]
+        | None -> `Assoc [] in
+      let command_id = Figma_plugin_bridge.enqueue_command ~channel_id ~name:"boolean_subtract" ~payload in
+      (match plugin_wait ~channel_id ~command_id ~timeout_ms with
+       | Error err -> Error err
+       | Ok result -> Ok (make_text_content (Yojson.Safe.pretty_to_string result.payload)))
+
+(* boolean_intersect 핸들러 *)
+let handle_plugin_boolean_intersect args : (Yojson.Safe.t, string) result =
+  match resolve_channel_id args with
+  | Error msg -> Error msg
+  | Ok channel_id ->
+      let timeout_ms = get_int "timeout_ms" args |> Option.value ~default:10000 in
+      let node_ids = get_string_list "node_ids" args in
+      let payload = match node_ids with
+        | Some ids -> `Assoc [("node_ids", `List (List.map (fun s -> `String s) ids))]
+        | None -> `Assoc [] in
+      let command_id = Figma_plugin_bridge.enqueue_command ~channel_id ~name:"boolean_intersect" ~payload in
+      (match plugin_wait ~channel_id ~command_id ~timeout_ms with
+       | Error err -> Error err
+       | Ok result -> Ok (make_text_content (Yojson.Safe.pretty_to_string result.payload)))
+
+(* boolean_exclude 핸들러 *)
+let handle_plugin_boolean_exclude args : (Yojson.Safe.t, string) result =
+  match resolve_channel_id args with
+  | Error msg -> Error msg
+  | Ok channel_id ->
+      let timeout_ms = get_int "timeout_ms" args |> Option.value ~default:10000 in
+      let node_ids = get_string_list "node_ids" args in
+      let payload = match node_ids with
+        | Some ids -> `Assoc [("node_ids", `List (List.map (fun s -> `String s) ids))]
+        | None -> `Assoc [] in
+      let command_id = Figma_plugin_bridge.enqueue_command ~channel_id ~name:"boolean_exclude" ~payload in
+      (match plugin_wait ~channel_id ~command_id ~timeout_ms with
+       | Error err -> Error err
+       | Ok result -> Ok (make_text_content (Yojson.Safe.pretty_to_string result.payload)))
+
+(* get_local_styles 핸들러 *)
+let handle_plugin_get_local_styles args : (Yojson.Safe.t, string) result =
+  match resolve_channel_id args with
+  | Error msg -> Error msg
+  | Ok channel_id ->
+      let timeout_ms = get_int "timeout_ms" args |> Option.value ~default:10000 in
+      let command_id = Figma_plugin_bridge.enqueue_command ~channel_id ~name:"get_local_styles" ~payload:`Null in
+      (match plugin_wait ~channel_id ~command_id ~timeout_ms with
+       | Error err -> Error err
+       | Ok result -> Ok (make_text_content (Yojson.Safe.pretty_to_string result.payload)))
+
+(* set_constraints 핸들러 *)
+let handle_plugin_set_constraints args : (Yojson.Safe.t, string) result =
+  match (get_string "node_id" args, resolve_channel_id args) with
+  | (None, _) -> Error "Missing required parameter: node_id"
+  | (_, Error msg) -> Error msg
+  | (Some node_id, Ok channel_id) ->
+      let timeout_ms = get_int "timeout_ms" args |> Option.value ~default:10000 in
+      let horizontal = get_string "constraint_horizontal" args in
+      let vertical = get_string "constraint_vertical" args in
+      let payload_fields = [("node_id", `String node_id)] @
+        (match horizontal with Some h -> [("horizontal", `String h)] | None -> []) @
+        (match vertical with Some v -> [("vertical", `String v)] | None -> []) in
+      let payload = `Assoc payload_fields in
+      let command_id = Figma_plugin_bridge.enqueue_command ~channel_id ~name:"set_constraints" ~payload in
+      (match plugin_wait ~channel_id ~command_id ~timeout_ms with
+       | Error err -> Error err
+       | Ok result -> Ok (make_text_content (Yojson.Safe.pretty_to_string result.payload)))
+
 (* STRAP 통합 핸들러: action으로 라우팅, 기존 핸들러 재사용 *)
 let handle_figma_plugin args : (Yojson.Safe.t, string) result =
   match get_string "action" args with
@@ -4921,7 +5260,24 @@ let handle_figma_plugin args : (Yojson.Safe.t, string) result =
       | "set_text" -> handle_plugin_set_text args
       | "find_all" -> handle_plugin_find_all args
       | "notify" -> handle_plugin_notify args
-      | _ -> Error (sprintf "Unknown action: %s. Available: connect, use_channel, status, read_selection, get_node, export_image, get_variables, apply_ops, list_pages, switch_page, list_components, clone, group, ungroup, set_selection, zoom_to, reorder, set_locked, set_visible, flatten, set_auto_layout, get_viewport, set_viewport, rename, resize, move, set_opacity, set_corner_radius, set_fill, set_stroke, set_effects, create_component, detach_instance, set_text, find_all, notify" action)
+      | "create_frame" -> handle_plugin_create_frame args
+      | "create_rectangle" -> handle_plugin_create_rectangle args
+      | "create_ellipse" -> handle_plugin_create_ellipse args
+      | "create_text" -> handle_plugin_create_text args
+      | "create_line" -> handle_plugin_create_line args
+      | "create_polygon" -> handle_plugin_create_polygon args
+      | "create_star" -> handle_plugin_create_star args
+      | "delete_node" -> handle_plugin_delete_node args
+      | "duplicate" -> handle_plugin_duplicate args
+      | "align" -> handle_plugin_align args
+      | "distribute" -> handle_plugin_distribute args
+      | "boolean_union" -> handle_plugin_boolean_union args
+      | "boolean_subtract" -> handle_plugin_boolean_subtract args
+      | "boolean_intersect" -> handle_plugin_boolean_intersect args
+      | "boolean_exclude" -> handle_plugin_boolean_exclude args
+      | "get_local_styles" -> handle_plugin_get_local_styles args
+      | "set_constraints" -> handle_plugin_set_constraints args
+      | _ -> Error (sprintf "Unknown action: %s. 52 actions available." action)
 
 (** ============== LLM Bridge 핸들러 ============== *)
 

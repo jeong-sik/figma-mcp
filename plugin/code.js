@@ -1138,6 +1138,319 @@ figma.ui.onmessage = async (msg) => {
         figma.notify(message, { timeout: timeout || 3000 });
         payload = { notified: true, message: message };
       }
+    } else if (command.name === "create_frame") {
+      // Create a new frame
+      const p = command.payload || {};
+      const frame = figma.createFrame();
+      frame.name = p.name || "New Frame";
+      frame.x = p.x || 0;
+      frame.y = p.y || 0;
+      frame.resize(p.width || 100, p.height || 100);
+      if (p.fill) {
+        frame.fills = [{ type: "SOLID", color: { r: p.fill.r || 0, g: p.fill.g || 0, b: p.fill.b || 0 } }];
+      }
+      payload = { id: frame.id, name: frame.name, x: frame.x, y: frame.y, width: frame.width, height: frame.height };
+    } else if (command.name === "create_rectangle") {
+      // Create a rectangle
+      const p = command.payload || {};
+      const rect = figma.createRectangle();
+      rect.name = p.name || "Rectangle";
+      rect.x = p.x || 0;
+      rect.y = p.y || 0;
+      rect.resize(p.width || 100, p.height || 100);
+      if (p.fill) {
+        rect.fills = [{ type: "SOLID", color: { r: p.fill.r || 0, g: p.fill.g || 0, b: p.fill.b || 0 } }];
+      }
+      if (typeof p.cornerRadius === "number") {
+        rect.cornerRadius = p.cornerRadius;
+      }
+      payload = { id: rect.id, name: rect.name };
+    } else if (command.name === "create_ellipse") {
+      // Create an ellipse
+      const p = command.payload || {};
+      const ellipse = figma.createEllipse();
+      ellipse.name = p.name || "Ellipse";
+      ellipse.x = p.x || 0;
+      ellipse.y = p.y || 0;
+      ellipse.resize(p.width || 100, p.height || 100);
+      if (p.fill) {
+        ellipse.fills = [{ type: "SOLID", color: { r: p.fill.r || 0, g: p.fill.g || 0, b: p.fill.b || 0 } }];
+      }
+      payload = { id: ellipse.id, name: ellipse.name };
+    } else if (command.name === "create_text") {
+      // Create a text node
+      const p = command.payload || {};
+      const text = figma.createText();
+      // Load font first
+      await figma.loadFontAsync({ family: p.fontFamily || "Inter", style: p.fontStyle || "Regular" });
+      text.name = p.name || "Text";
+      text.x = p.x || 0;
+      text.y = p.y || 0;
+      text.characters = p.text || "Hello";
+      if (typeof p.fontSize === "number") text.fontSize = p.fontSize;
+      if (p.fill) {
+        text.fills = [{ type: "SOLID", color: { r: p.fill.r || 0, g: p.fill.g || 0, b: p.fill.b || 0 } }];
+      }
+      payload = { id: text.id, name: text.name, characters: text.characters };
+    } else if (command.name === "create_line") {
+      // Create a line
+      const p = command.payload || {};
+      const line = figma.createLine();
+      line.name = p.name || "Line";
+      line.x = p.x || 0;
+      line.y = p.y || 0;
+      line.resize(p.length || 100, 0);
+      if (typeof p.rotation === "number") line.rotation = p.rotation;
+      line.strokes = [{ type: "SOLID", color: { r: p.stroke_r || 0, g: p.stroke_g || 0, b: p.stroke_b || 0 } }];
+      line.strokeWeight = p.stroke_weight || 1;
+      payload = { id: line.id, name: line.name };
+    } else if (command.name === "create_polygon") {
+      // Create a polygon
+      const p = command.payload || {};
+      const polygon = figma.createPolygon();
+      polygon.name = p.name || "Polygon";
+      polygon.x = p.x || 0;
+      polygon.y = p.y || 0;
+      polygon.resize(p.width || 100, p.height || 100);
+      if (typeof p.pointCount === "number") polygon.pointCount = p.pointCount;
+      if (p.fill) {
+        polygon.fills = [{ type: "SOLID", color: { r: p.fill.r || 0, g: p.fill.g || 0, b: p.fill.b || 0 } }];
+      }
+      payload = { id: polygon.id, name: polygon.name, pointCount: polygon.pointCount };
+    } else if (command.name === "create_star") {
+      // Create a star
+      const p = command.payload || {};
+      const star = figma.createStar();
+      star.name = p.name || "Star";
+      star.x = p.x || 0;
+      star.y = p.y || 0;
+      star.resize(p.width || 100, p.height || 100);
+      if (typeof p.pointCount === "number") star.pointCount = p.pointCount;
+      if (typeof p.innerRadius === "number") star.innerRadius = p.innerRadius;
+      if (p.fill) {
+        star.fills = [{ type: "SOLID", color: { r: p.fill.r || 0, g: p.fill.g || 0, b: p.fill.b || 0 } }];
+      }
+      payload = { id: star.id, name: star.name, pointCount: star.pointCount };
+    } else if (command.name === "delete_node") {
+      // Delete a node
+      const nodeId = command.payload && command.payload.node_id;
+      const node = nodeId ? await getNodeById(nodeId) : null;
+      if (!node) {
+        ok = false;
+        payload = { error: "Node not found" };
+      } else if (node.type === "PAGE" || node.type === "DOCUMENT") {
+        ok = false;
+        payload = { error: "Cannot delete PAGE or DOCUMENT" };
+      } else {
+        const name = node.name;
+        const type = node.type;
+        node.remove();
+        payload = { deleted: true, node_id: nodeId, name: name, type: type };
+      }
+    } else if (command.name === "duplicate") {
+      // Duplicate a node in place
+      const nodeId = command.payload && command.payload.node_id;
+      const node = nodeId ? await getNodeById(nodeId) : null;
+      if (!node) {
+        ok = false;
+        payload = { error: "Node not found" };
+      } else if (!("clone" in node)) {
+        ok = false;
+        payload = { error: "Node cannot be duplicated" };
+      } else {
+        const dup = node.clone();
+        const p = command.payload;
+        if (typeof p.offset_x === "number") dup.x = node.x + p.offset_x;
+        if (typeof p.offset_y === "number") dup.y = node.y + p.offset_y;
+        if (p.name) dup.name = p.name;
+        payload = { original_id: node.id, duplicate_id: dup.id, name: dup.name };
+      }
+    } else if (command.name === "align") {
+      // Align selected nodes or specified nodes
+      const direction = command.payload && command.payload.direction; // "left", "center", "right", "top", "middle", "bottom"
+      const nodeIds = command.payload && command.payload.node_ids;
+      let nodes = [];
+      if (nodeIds && Array.isArray(nodeIds)) {
+        for (const id of nodeIds) {
+          const n = await getNodeById(id);
+          if (n && "x" in n) nodes.push(n);
+        }
+      } else {
+        nodes = figma.currentPage.selection.filter(n => "x" in n);
+      }
+      if (nodes.length < 2) {
+        ok = false;
+        payload = { error: "Need at least 2 nodes to align" };
+      } else if (!direction) {
+        ok = false;
+        payload = { error: "direction required: left, center, right, top, middle, bottom" };
+      } else {
+        const bounds = nodes.reduce((acc, n) => ({
+          minX: Math.min(acc.minX, n.x),
+          maxX: Math.max(acc.maxX, n.x + n.width),
+          minY: Math.min(acc.minY, n.y),
+          maxY: Math.max(acc.maxY, n.y + n.height)
+        }), { minX: Infinity, maxX: -Infinity, minY: Infinity, maxY: -Infinity });
+
+        for (const n of nodes) {
+          if (direction === "left") n.x = bounds.minX;
+          else if (direction === "right") n.x = bounds.maxX - n.width;
+          else if (direction === "center") n.x = bounds.minX + (bounds.maxX - bounds.minX) / 2 - n.width / 2;
+          else if (direction === "top") n.y = bounds.minY;
+          else if (direction === "bottom") n.y = bounds.maxY - n.height;
+          else if (direction === "middle") n.y = bounds.minY + (bounds.maxY - bounds.minY) / 2 - n.height / 2;
+        }
+        payload = { aligned: direction, node_count: nodes.length };
+      }
+    } else if (command.name === "distribute") {
+      // Distribute nodes evenly
+      const direction = command.payload && command.payload.direction; // "horizontal" or "vertical"
+      const nodeIds = command.payload && command.payload.node_ids;
+      let nodes = [];
+      if (nodeIds && Array.isArray(nodeIds)) {
+        for (const id of nodeIds) {
+          const n = await getNodeById(id);
+          if (n && "x" in n) nodes.push(n);
+        }
+      } else {
+        nodes = figma.currentPage.selection.filter(n => "x" in n);
+      }
+      if (nodes.length < 3) {
+        ok = false;
+        payload = { error: "Need at least 3 nodes to distribute" };
+      } else if (!direction || (direction !== "horizontal" && direction !== "vertical")) {
+        ok = false;
+        payload = { error: "direction required: horizontal or vertical" };
+      } else {
+        if (direction === "horizontal") {
+          nodes.sort((a, b) => a.x - b.x);
+          const totalWidth = nodes.reduce((sum, n) => sum + n.width, 0);
+          const totalSpace = nodes[nodes.length - 1].x + nodes[nodes.length - 1].width - nodes[0].x;
+          const gap = (totalSpace - totalWidth) / (nodes.length - 1);
+          let currentX = nodes[0].x;
+          for (const n of nodes) {
+            n.x = currentX;
+            currentX += n.width + gap;
+          }
+        } else {
+          nodes.sort((a, b) => a.y - b.y);
+          const totalHeight = nodes.reduce((sum, n) => sum + n.height, 0);
+          const totalSpace = nodes[nodes.length - 1].y + nodes[nodes.length - 1].height - nodes[0].y;
+          const gap = (totalSpace - totalHeight) / (nodes.length - 1);
+          let currentY = nodes[0].y;
+          for (const n of nodes) {
+            n.y = currentY;
+            currentY += n.height + gap;
+          }
+        }
+        payload = { distributed: direction, node_count: nodes.length };
+      }
+    } else if (command.name === "boolean_union") {
+      // Boolean union of selected nodes
+      const nodeIds = command.payload && command.payload.node_ids;
+      let nodes = [];
+      if (nodeIds && Array.isArray(nodeIds)) {
+        for (const id of nodeIds) {
+          const n = await getNodeById(id);
+          if (n) nodes.push(n);
+        }
+      } else {
+        nodes = [...figma.currentPage.selection];
+      }
+      if (nodes.length < 2) {
+        ok = false;
+        payload = { error: "Need at least 2 nodes for boolean operation" };
+      } else {
+        const result = figma.union(nodes, figma.currentPage);
+        payload = { result_id: result.id, result_name: result.name, input_count: nodes.length };
+      }
+    } else if (command.name === "boolean_subtract") {
+      // Boolean subtract
+      const nodeIds = command.payload && command.payload.node_ids;
+      let nodes = [];
+      if (nodeIds && Array.isArray(nodeIds)) {
+        for (const id of nodeIds) {
+          const n = await getNodeById(id);
+          if (n) nodes.push(n);
+        }
+      } else {
+        nodes = [...figma.currentPage.selection];
+      }
+      if (nodes.length < 2) {
+        ok = false;
+        payload = { error: "Need at least 2 nodes for boolean operation" };
+      } else {
+        const result = figma.subtract(nodes, figma.currentPage);
+        payload = { result_id: result.id, result_name: result.name, input_count: nodes.length };
+      }
+    } else if (command.name === "boolean_intersect") {
+      // Boolean intersect
+      const nodeIds = command.payload && command.payload.node_ids;
+      let nodes = [];
+      if (nodeIds && Array.isArray(nodeIds)) {
+        for (const id of nodeIds) {
+          const n = await getNodeById(id);
+          if (n) nodes.push(n);
+        }
+      } else {
+        nodes = [...figma.currentPage.selection];
+      }
+      if (nodes.length < 2) {
+        ok = false;
+        payload = { error: "Need at least 2 nodes for boolean operation" };
+      } else {
+        const result = figma.intersect(nodes, figma.currentPage);
+        payload = { result_id: result.id, result_name: result.name, input_count: nodes.length };
+      }
+    } else if (command.name === "boolean_exclude") {
+      // Boolean exclude
+      const nodeIds = command.payload && command.payload.node_ids;
+      let nodes = [];
+      if (nodeIds && Array.isArray(nodeIds)) {
+        for (const id of nodeIds) {
+          const n = await getNodeById(id);
+          if (n) nodes.push(n);
+        }
+      } else {
+        nodes = [...figma.currentPage.selection];
+      }
+      if (nodes.length < 2) {
+        ok = false;
+        payload = { error: "Need at least 2 nodes for boolean operation" };
+      } else {
+        const result = figma.exclude(nodes, figma.currentPage);
+        payload = { result_id: result.id, result_name: result.name, input_count: nodes.length };
+      }
+    } else if (command.name === "get_local_styles") {
+      // Get all local styles
+      const paintStyles = figma.getLocalPaintStyles().map(s => ({ id: s.id, name: s.name, type: "PAINT" }));
+      const textStyles = figma.getLocalTextStyles().map(s => ({ id: s.id, name: s.name, type: "TEXT" }));
+      const effectStyles = figma.getLocalEffectStyles().map(s => ({ id: s.id, name: s.name, type: "EFFECT" }));
+      const gridStyles = figma.getLocalGridStyles().map(s => ({ id: s.id, name: s.name, type: "GRID" }));
+      payload = {
+        paint: paintStyles,
+        text: textStyles,
+        effect: effectStyles,
+        grid: gridStyles,
+        total: paintStyles.length + textStyles.length + effectStyles.length + gridStyles.length
+      };
+    } else if (command.name === "set_constraints") {
+      // Set constraints on a node
+      const nodeId = command.payload && command.payload.node_id;
+      const horizontal = command.payload && command.payload.horizontal; // "MIN", "CENTER", "MAX", "STRETCH", "SCALE"
+      const vertical = command.payload && command.payload.vertical;
+      const node = nodeId ? await getNodeById(nodeId) : null;
+      if (!node) {
+        ok = false;
+        payload = { error: "Node not found" };
+      } else if (!("constraints" in node)) {
+        ok = false;
+        payload = { error: "Node does not support constraints" };
+      } else {
+        if (horizontal) node.constraints = { ...node.constraints, horizontal };
+        if (vertical) node.constraints = { ...node.constraints, vertical };
+        payload = { node_id: node.id, constraints: node.constraints };
+      }
     } else {
       ok = false;
       payload = { error: "Unknown command" };
