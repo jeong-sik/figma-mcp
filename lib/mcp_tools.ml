@@ -625,8 +625,10 @@ let tool_figma_plugin : tool_def = {
       "create_slice"; "set_export_settings"; "get_reactions"; "set_reactions";
       "rasterize"; "get_shared_plugin_data"; "set_shared_plugin_data";
       "swap_component"; "resize_to_fit"; "get_characters"; "set_range_fills";
-      "set_range_font_size"; "insert_child"; "get_all_local_variables"
-    ] "86개 action: 연결(3), 페이지(4), 문서(1), 생성(11), 조회(15+characters/variables), 편집(clone/duplicate/delete/group/ungroup/flatten/detach/set_parent/insert_child), 변형(resize/move/rotate/flip/reorder/resize_to_fit), 불리언(4), 정렬(2), 스타일(17), 텍스트(set_text/get_characters/set_range_fills/set_range_font_size), 레이아웃(2), 컴포넌트(swap_component), 내보내기(2), 프로토타입(2)");
+      "set_range_font_size"; "insert_child"; "get_all_local_variables";
+      "get_styles_by_type"; "apply_style"; "get_overrides"; "reset_overrides";
+      "bring_to_front"; "send_to_back"; "set_grid"; "get_layer_list"
+    ] "94개 action: 연결(3), 페이지(4), 문서(1), 생성(11), 조회(18), 편집(9), 변형(6), 불리언(4), 정렬(2), 스타일(19+apply_style), 텍스트(4), 레이아웃(3+set_grid), 컴포넌트(2+overrides), 내보내기(2), 프로토타입(2), 레이어(3: bring_to_front/send_to_back/get_layer_list)");
     ("channel_id", string_prop "채널 ID");
     ("node_id", string_prop "노드 ID");
     ("url", string_prop "Figma URL (node_id 자동 추출)");
@@ -716,6 +718,13 @@ let tool_figma_plugin : tool_def = {
     ("a", number_prop "알파 0-1 (set_range_fills)");
     ("font_size", number_prop "폰트 크기 (set_range_font_size)");
     ("index", number_prop "삽입 위치 (insert_child)");
+    ("style_type", enum_prop ["FILL"; "PAINT"; "TEXT"; "EFFECT"; "GRID"; "STROKE"] "스타일 타입 (get_styles_by_type/apply_style)");
+    ("style_id", string_prop "스타일 ID (apply_style)");
+    ("pattern", enum_prop ["GRID"; "COLUMNS"; "ROWS"] "그리드 패턴 (set_grid)");
+    ("count", number_prop "컬럼/로우 개수 (set_grid)");
+    ("gutter", number_prop "거터 사이즈 (set_grid)");
+    ("alignment", enum_prop ["MIN"; "CENTER"; "MAX"; "STRETCH"] "정렬 (set_grid)");
+    ("visible", bool_prop "표시 여부 (set_grid)");
   ] ["action"];
 }
 
@@ -5796,6 +5805,137 @@ let handle_plugin_get_all_local_variables args : (Yojson.Safe.t, string) result 
        | Error err -> Error err
        | Ok result -> Ok (make_text_content (Yojson.Safe.pretty_to_string result.payload)))
 
+(* get_styles_by_type 핸들러 *)
+let handle_plugin_get_styles_by_type args : (Yojson.Safe.t, string) result =
+  match resolve_channel_id args with
+  | Error msg -> Error msg
+  | Ok channel_id ->
+      let timeout_ms = get_int "timeout_ms" args |> Option.value ~default:10000 in
+      let style_type = get_string "style_type" args |> Option.value ~default:"FILL" in
+      let payload = `Assoc [("style_type", `String style_type)] in
+      let command_id = Figma_plugin_bridge.enqueue_command ~channel_id ~name:"get_styles_by_type" ~payload in
+      (match plugin_wait ~channel_id ~command_id ~timeout_ms with
+       | Error err -> Error err
+       | Ok result -> Ok (make_text_content (Yojson.Safe.pretty_to_string result.payload)))
+
+(* apply_style 핸들러 *)
+let handle_plugin_apply_style args : (Yojson.Safe.t, string) result =
+  match (get_string "style_id" args, resolve_channel_id args) with
+  | (None, _) -> Error "Missing required parameter: style_id"
+  | (_, Error msg) -> Error msg
+  | (Some style_id, Ok channel_id) ->
+      let timeout_ms = get_int "timeout_ms" args |> Option.value ~default:10000 in
+      let node_id = get_string "node_id" args in
+      let style_type = get_string "style_type" args |> Option.value ~default:"FILL" in
+      let fields = [("style_id", `String style_id); ("style_type", `String style_type)] in
+      let fields = match node_id with Some v -> ("node_id", `String v) :: fields | None -> fields in
+      let payload = `Assoc fields in
+      let command_id = Figma_plugin_bridge.enqueue_command ~channel_id ~name:"apply_style" ~payload in
+      (match plugin_wait ~channel_id ~command_id ~timeout_ms with
+       | Error err -> Error err
+       | Ok result -> Ok (make_text_content (Yojson.Safe.pretty_to_string result.payload)))
+
+(* get_overrides 핸들러 *)
+let handle_plugin_get_overrides args : (Yojson.Safe.t, string) result =
+  match resolve_channel_id args with
+  | Error msg -> Error msg
+  | Ok channel_id ->
+      let timeout_ms = get_int "timeout_ms" args |> Option.value ~default:10000 in
+      let node_id = get_string "node_id" args in
+      let fields = match node_id with Some v -> [("node_id", `String v)] | None -> [] in
+      let payload = `Assoc fields in
+      let command_id = Figma_plugin_bridge.enqueue_command ~channel_id ~name:"get_overrides" ~payload in
+      (match plugin_wait ~channel_id ~command_id ~timeout_ms with
+       | Error err -> Error err
+       | Ok result -> Ok (make_text_content (Yojson.Safe.pretty_to_string result.payload)))
+
+(* reset_overrides 핸들러 *)
+let handle_plugin_reset_overrides args : (Yojson.Safe.t, string) result =
+  match resolve_channel_id args with
+  | Error msg -> Error msg
+  | Ok channel_id ->
+      let timeout_ms = get_int "timeout_ms" args |> Option.value ~default:10000 in
+      let node_id = get_string "node_id" args in
+      let fields = match node_id with Some v -> [("node_id", `String v)] | None -> [] in
+      let payload = `Assoc fields in
+      let command_id = Figma_plugin_bridge.enqueue_command ~channel_id ~name:"reset_overrides" ~payload in
+      (match plugin_wait ~channel_id ~command_id ~timeout_ms with
+       | Error err -> Error err
+       | Ok result -> Ok (make_text_content (Yojson.Safe.pretty_to_string result.payload)))
+
+(* bring_to_front 핸들러 *)
+let handle_plugin_bring_to_front args : (Yojson.Safe.t, string) result =
+  match resolve_channel_id args with
+  | Error msg -> Error msg
+  | Ok channel_id ->
+      let timeout_ms = get_int "timeout_ms" args |> Option.value ~default:10000 in
+      let node_id = get_string "node_id" args in
+      let fields = match node_id with Some v -> [("node_id", `String v)] | None -> [] in
+      let payload = `Assoc fields in
+      let command_id = Figma_plugin_bridge.enqueue_command ~channel_id ~name:"bring_to_front" ~payload in
+      (match plugin_wait ~channel_id ~command_id ~timeout_ms with
+       | Error err -> Error err
+       | Ok result -> Ok (make_text_content (Yojson.Safe.pretty_to_string result.payload)))
+
+(* send_to_back 핸들러 *)
+let handle_plugin_send_to_back args : (Yojson.Safe.t, string) result =
+  match resolve_channel_id args with
+  | Error msg -> Error msg
+  | Ok channel_id ->
+      let timeout_ms = get_int "timeout_ms" args |> Option.value ~default:10000 in
+      let node_id = get_string "node_id" args in
+      let fields = match node_id with Some v -> [("node_id", `String v)] | None -> [] in
+      let payload = `Assoc fields in
+      let command_id = Figma_plugin_bridge.enqueue_command ~channel_id ~name:"send_to_back" ~payload in
+      (match plugin_wait ~channel_id ~command_id ~timeout_ms with
+       | Error err -> Error err
+       | Ok result -> Ok (make_text_content (Yojson.Safe.pretty_to_string result.payload)))
+
+(* set_grid 핸들러 *)
+let handle_plugin_set_grid args : (Yojson.Safe.t, string) result =
+  match resolve_channel_id args with
+  | Error msg -> Error msg
+  | Ok channel_id ->
+      let timeout_ms = get_int "timeout_ms" args |> Option.value ~default:10000 in
+      let node_id = get_string "node_id" args in
+      let pattern = get_string "pattern" args in
+      let count = get_int "count" args in
+      let gutter = get_int "gutter" args in
+      let offset = get_int "offset" args in
+      let alignment = get_string "alignment" args in
+      let size = get_int "size" args in
+      let visible = get_bool "visible" args in
+      let append = get_bool "append" args in
+      let fields = [] in
+      let fields = match node_id with Some v -> ("node_id", `String v) :: fields | None -> fields in
+      let fields = match pattern with Some v -> ("pattern", `String v) :: fields | None -> fields in
+      let fields = match count with Some v -> ("count", `Int v) :: fields | None -> fields in
+      let fields = match gutter with Some v -> ("gutter", `Int v) :: fields | None -> fields in
+      let fields = match offset with Some v -> ("offset", `Int v) :: fields | None -> fields in
+      let fields = match alignment with Some v -> ("alignment", `String v) :: fields | None -> fields in
+      let fields = match size with Some v -> ("size", `Int v) :: fields | None -> fields in
+      let fields = match visible with Some v -> ("visible", `Bool v) :: fields | None -> fields in
+      let fields = match append with Some v -> ("append", `Bool v) :: fields | None -> fields in
+      let payload = `Assoc fields in
+      let command_id = Figma_plugin_bridge.enqueue_command ~channel_id ~name:"set_grid" ~payload in
+      (match plugin_wait ~channel_id ~command_id ~timeout_ms with
+       | Error err -> Error err
+       | Ok result -> Ok (make_text_content (Yojson.Safe.pretty_to_string result.payload)))
+
+(* get_layer_list 핸들러 *)
+let handle_plugin_get_layer_list args : (Yojson.Safe.t, string) result =
+  match resolve_channel_id args with
+  | Error msg -> Error msg
+  | Ok channel_id ->
+      let timeout_ms = get_int "timeout_ms" args |> Option.value ~default:10000 in
+      let node_id = get_string "node_id" args in
+      let fields = match node_id with Some v -> [("node_id", `String v)] | None -> [] in
+      let payload = `Assoc fields in
+      let command_id = Figma_plugin_bridge.enqueue_command ~channel_id ~name:"get_layer_list" ~payload in
+      (match plugin_wait ~channel_id ~command_id ~timeout_ms with
+       | Error err -> Error err
+       | Ok result -> Ok (make_text_content (Yojson.Safe.pretty_to_string result.payload)))
+
 (* STRAP 통합 핸들러: action으로 라우팅, 기존 핸들러 재사용 *)
 let handle_figma_plugin args : (Yojson.Safe.t, string) result =
   match get_string "action" args with
@@ -5888,7 +6028,15 @@ let handle_figma_plugin args : (Yojson.Safe.t, string) result =
       | "set_range_font_size" -> handle_plugin_set_range_font_size args
       | "insert_child" -> handle_plugin_insert_child args
       | "get_all_local_variables" -> handle_plugin_get_all_local_variables args
-      | _ -> Error (sprintf "Unknown action: %s. 86 actions available." action)
+      | "get_styles_by_type" -> handle_plugin_get_styles_by_type args
+      | "apply_style" -> handle_plugin_apply_style args
+      | "get_overrides" -> handle_plugin_get_overrides args
+      | "reset_overrides" -> handle_plugin_reset_overrides args
+      | "bring_to_front" -> handle_plugin_bring_to_front args
+      | "send_to_back" -> handle_plugin_send_to_back args
+      | "set_grid" -> handle_plugin_set_grid args
+      | "get_layer_list" -> handle_plugin_get_layer_list args
+      | _ -> Error (sprintf "Unknown action: %s. 94 actions available." action)
 
 (** ============== LLM Bridge 핸들러 ============== *)
 

@@ -2221,6 +2221,188 @@ figma.ui.onmessage = async (msg) => {
         ok = false;
         payload = { error: String(e) };
       }
+    } else if (command.name === "get_styles_by_type") {
+      // Get local styles by type
+      const p = command.payload || {};
+      const styleType = (p.style_type || p.styleType || "FILL").toUpperCase();
+      let styles = [];
+      if (styleType === "FILL" || styleType === "PAINT") {
+        styles = figma.getLocalPaintStyles();
+      } else if (styleType === "TEXT") {
+        styles = figma.getLocalTextStyles();
+      } else if (styleType === "EFFECT") {
+        styles = figma.getLocalEffectStyles();
+      } else if (styleType === "GRID") {
+        styles = figma.getLocalGridStyles();
+      }
+      payload = {
+        style_type: styleType,
+        count: styles.length,
+        styles: styles.map(s => ({
+          id: s.id,
+          name: s.name,
+          key: s.key,
+          description: s.description
+        }))
+      };
+    } else if (command.name === "apply_style") {
+      // Apply a style to a node
+      const p = command.payload || {};
+      const nodeId = p.node_id || p.nodeId;
+      const styleId = p.style_id || p.styleId;
+      const styleType = (p.style_type || p.styleType || "FILL").toUpperCase();
+      const node = nodeId ? await getNodeById(nodeId) : (figma.currentPage.selection[0] || null);
+      if (!node) {
+        ok = false;
+        payload = { error: "Node not found" };
+      } else if (!styleId) {
+        ok = false;
+        payload = { error: "style_id required" };
+      } else {
+        try {
+          if (styleType === "FILL" || styleType === "PAINT") {
+            if ("fillStyleId" in node) node.fillStyleId = styleId;
+          } else if (styleType === "STROKE") {
+            if ("strokeStyleId" in node) node.strokeStyleId = styleId;
+          } else if (styleType === "TEXT") {
+            if ("textStyleId" in node) node.textStyleId = styleId;
+          } else if (styleType === "EFFECT") {
+            if ("effectStyleId" in node) node.effectStyleId = styleId;
+          } else if (styleType === "GRID") {
+            if ("gridStyleId" in node) node.gridStyleId = styleId;
+          }
+          payload = { node_id: node.id, style_id: styleId, style_type: styleType };
+        } catch (e) {
+          ok = false;
+          payload = { error: String(e) };
+        }
+      }
+    } else if (command.name === "get_overrides") {
+      // Get instance overrides
+      const p = command.payload || {};
+      const nodeId = p.node_id || p.nodeId;
+      const node = nodeId ? await getNodeById(nodeId) : (figma.currentPage.selection[0] || null);
+      if (!node) {
+        ok = false;
+        payload = { error: "Node not found" };
+      } else if (node.type !== "INSTANCE") {
+        ok = false;
+        payload = { error: "Node must be an instance" };
+      } else {
+        const overrides = node.overrides || [];
+        payload = {
+          node_id: node.id,
+          main_component: node.mainComponent ? { id: node.mainComponent.id, name: node.mainComponent.name } : null,
+          overrides: overrides
+        };
+      }
+    } else if (command.name === "reset_overrides") {
+      // Reset instance overrides
+      const p = command.payload || {};
+      const nodeId = p.node_id || p.nodeId;
+      const node = nodeId ? await getNodeById(nodeId) : (figma.currentPage.selection[0] || null);
+      if (!node) {
+        ok = false;
+        payload = { error: "Node not found" };
+      } else if (node.type !== "INSTANCE") {
+        ok = false;
+        payload = { error: "Node must be an instance" };
+      } else {
+        node.resetOverrides();
+        payload = { node_id: node.id, reset: true };
+      }
+    } else if (command.name === "bring_to_front") {
+      // Bring node to front (top of layer order)
+      const p = command.payload || {};
+      const nodeId = p.node_id || p.nodeId;
+      const node = nodeId ? await getNodeById(nodeId) : (figma.currentPage.selection[0] || null);
+      if (!node) {
+        ok = false;
+        payload = { error: "Node not found" };
+      } else if (!node.parent || !("children" in node.parent)) {
+        ok = false;
+        payload = { error: "Cannot reorder this node" };
+      } else {
+        const parent = node.parent;
+        const lastIndex = parent.children.length - 1;
+        parent.insertChild(lastIndex, node);
+        payload = { node_id: node.id, new_index: lastIndex };
+      }
+    } else if (command.name === "send_to_back") {
+      // Send node to back (bottom of layer order)
+      const p = command.payload || {};
+      const nodeId = p.node_id || p.nodeId;
+      const node = nodeId ? await getNodeById(nodeId) : (figma.currentPage.selection[0] || null);
+      if (!node) {
+        ok = false;
+        payload = { error: "Node not found" };
+      } else if (!node.parent || !("children" in node.parent)) {
+        ok = false;
+        payload = { error: "Cannot reorder this node" };
+      } else {
+        const parent = node.parent;
+        parent.insertChild(0, node);
+        payload = { node_id: node.id, new_index: 0 };
+      }
+    } else if (command.name === "set_grid") {
+      // Set grid layout on a frame
+      const p = command.payload || {};
+      const nodeId = p.node_id || p.nodeId;
+      const node = nodeId ? await getNodeById(nodeId) : (figma.currentPage.selection[0] || null);
+      if (!node) {
+        ok = false;
+        payload = { error: "Node not found" };
+      } else if (!("layoutGrids" in node)) {
+        ok = false;
+        payload = { error: "Node does not support grids" };
+      } else {
+        const gridType = (p.pattern || "GRID").toUpperCase();
+        const count = p.count || 12;
+        const gutterSize = p.gutter || 20;
+        const offset = p.offset || 0;
+        const alignment = (p.alignment || "STRETCH").toUpperCase();
+        const grid = {
+          pattern: gridType,
+          visible: p.visible !== false,
+          color: p.color || { r: 1, g: 0, b: 0, a: 0.1 }
+        };
+        if (gridType === "COLUMNS" || gridType === "ROWS") {
+          grid.count = count;
+          grid.gutterSize = gutterSize;
+          grid.offset = offset;
+          grid.alignment = alignment;
+        } else {
+          grid.sectionSize = p.size || 10;
+        }
+        if (p.append) {
+          node.layoutGrids = node.layoutGrids.concat([grid]);
+        } else {
+          node.layoutGrids = [grid];
+        }
+        payload = { node_id: node.id, grids: node.layoutGrids };
+      }
+    } else if (command.name === "get_layer_list") {
+      // Get layer list (z-order) of a container
+      const p = command.payload || {};
+      const nodeId = p.node_id || p.nodeId;
+      const node = nodeId ? await getNodeById(nodeId) : figma.currentPage;
+      if (!node) {
+        ok = false;
+        payload = { error: "Node not found" };
+      } else if (!("children" in node)) {
+        ok = false;
+        payload = { error: "Node has no children" };
+      } else {
+        const layers = node.children.map((child, index) => ({
+          index: index,
+          id: child.id,
+          name: child.name,
+          type: child.type,
+          visible: child.visible,
+          locked: child.locked
+        }));
+        payload = { parent_id: node.id, layer_count: layers.length, layers: layers };
+      }
     } else {
       ok = false;
       payload = { error: "Unknown command" };
