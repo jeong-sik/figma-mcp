@@ -3,7 +3,7 @@
  * 100 actions, ~800 lines (vs 2500 lines before)
  */
 
-figma.showUI(__html__, { width: 360, height: 260 });
+figma.showUI(__html__, { width: 360, height: 480 });
 
 const MIXED = figma.mixed;
 const MAX_PAYLOAD_CHARS = 2000000;
