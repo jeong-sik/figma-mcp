@@ -685,7 +685,8 @@ figma.ui.onmessage = async (msg) => {
         for (const child of children) {
           parent.appendChild(child);
         }
-        node.remove();
+        // Figma auto-removes empty groups, so skip explicit remove
+        try { node.remove(); } catch (e) { /* already removed */ }
         payload = { ungrouped_ids: childIds };
       }
     } else {
