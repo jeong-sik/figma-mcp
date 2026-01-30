@@ -135,11 +135,18 @@ let make_error_response id code message data : Yojson.Safe.t =
 (** ============== Tool 정의 → JSON ============== *)
 
 let tool_to_json (tool : tool_def) : Yojson.Safe.t =
-  `Assoc [
+  (* P1.4: Auto-detect [DEPRECATED] prefix and add deprecated field *)
+  let is_deprecated = String.length tool.description >= 12 &&
+    String.sub tool.description 0 12 = "[DEPRECATED]" in
+  let base_fields = [
     ("name", `String tool.name);
     ("description", `String tool.description);
     ("inputSchema", tool.input_schema);
-  ]
+  ] in
+  if is_deprecated then
+    `Assoc (base_fields @ [("deprecated", `Bool true)])
+  else
+    `Assoc base_fields
 
 let resource_to_json (r : mcp_resource) : Yojson.Safe.t =
   `Assoc [

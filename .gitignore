@@ -35,3 +35,9 @@ figma-mcp-macos-arm64
 figma-mcp-linux-x64
 # Track the local release artifact
 !figma-mcp-macos-arm64
+
+# Feedback Loop artifacts
+.figma-ssim.log
+tokens.json
+.figma-experiments.log
+data/telemetry.jsonl

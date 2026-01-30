@@ -120,7 +120,7 @@ end
 (** {1 LLM Integration Configuration} *)
 
 module Llm = struct
-  (** LLM provider (openai, anthropic, gemini, ollama) *)
+  (** LLM provider (reserved for future batch processing) *)
   let provider =
     get_string ~default:"" "LLM_PROVIDER"
 end

@@ -332,6 +332,42 @@ let hint_to_json = function
   | AdjustBorderRadius r ->
     `Assoc [("type", `String "border_radius"); ("value", `Float r)]
 
+(** 힌트를 자연어 설명으로 변환 *)
+let hint_to_description = function
+  | AdjustPadding (t, r, b, l) ->
+    let parts = [] in
+    let parts = if t > 0. then (sprintf "상단 %.0fpx" t) :: parts else parts in
+    let parts = if r > 0. then (sprintf "우측 %.0fpx" r) :: parts else parts in
+    let parts = if b > 0. then (sprintf "하단 %.0fpx" b) :: parts else parts in
+    let parts = if l > 0. then (sprintf "좌측 %.0fpx" l) :: parts else parts in
+    if parts = [] then "여백 미세 조정 필요"
+    else sprintf "여백(padding) 추가 필요: %s" (String.concat ", " (List.rev parts))
+  | AdjustGap g ->
+    sprintf "요소 간격(gap) %.0fpx 조정 필요" g
+  | AdjustColor (sel, rgba) ->
+    sprintf "'%s' 색상을 rgba(%.0f,%.0f,%.0f,%.2f)로 변경 필요"
+      sel (rgba.r *. 255.) (rgba.g *. 255.) (rgba.b *. 255.) rgba.a
+  | AdjustSize (w, h) ->
+    sprintf "크기 조정 필요: 너비 %+.0fpx, 높이 %+.0fpx" w h
+  | AdjustFontSize s ->
+    sprintf "폰트 크기 %+.0fpx 조정 필요" s
+  | AdjustBorderRadius r ->
+    sprintf "모서리 둥글기(border-radius) %.0fpx로 조정 필요" r
+
+(** 힌트 목록을 자연어 요약으로 변환 *)
+let hints_to_summary hints =
+  if hints = [] then
+    "✅ 조정 불필요 - 시각적 일치도가 충분합니다."
+  else
+    let descriptions = List.map hint_to_description hints in
+    sprintf "📋 %d개 조정 제안:\n%s"
+      (List.length hints)
+      (String.concat "\n" (List.mapi (fun i d -> sprintf "  %d. %s" (i+1) d) descriptions))
+
+(** 힌트 목록을 JSON 배열로 변환 (MCP 클라이언트용) *)
+let hints_to_json hints =
+  `List (List.map hint_to_json hints)
+
 (** SSIM 점수와 영역별 diff 분석 기반 조정 힌트 생성
     diff_regions의 영역별 차이 비율을 분석하여 타겟 조정을 제안합니다.
 
@@ -930,3 +966,93 @@ let cleanup_temp_files () =
       with Unix.Unix_error _ -> ()
     ) files
   end
+
+(** ============== SSIM 개선 로그 (Feedback Loop) ============== *)
+
+(** SSIM 검증 로그 파일 경로 *)
+let ssim_log_path = ".figma-ssim.log"
+
+(** 검증 결과를 로컬 파일에 append
+
+    @param node_id Figma 노드 ID
+    @param ssim 측정된 SSIM 값
+    @param notes 변경 설명 (optional)
+*)
+let log_verification ~node_id ~ssim ?(notes="") () =
+  let timestamp = Unix.gettimeofday () in
+  let iso_time =
+    let tm = Unix.localtime timestamp in
+    Printf.sprintf "%04d-%02d-%02d %02d:%02d:%02d"
+      (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1) tm.Unix.tm_mday
+      tm.Unix.tm_hour tm.Unix.tm_min tm.Unix.tm_sec
+  in
+  let line = Printf.sprintf "%s|%s|%.4f|%s\n" iso_time node_id ssim notes in
+  let oc = open_out_gen [Open_append; Open_creat; Open_text] 0o644 ssim_log_path in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr oc)
+    (fun () -> output_string oc line)
+
+(** SSIM 개선 기록 (before/after 비교)
+
+    @param node_id Figma 노드 ID
+    @param before_ssim 이전 SSIM 값
+    @param after_ssim 이후 SSIM 값
+    @param change_description 변경 설명
+    @return SSIM 개선율 (percentage)
+*)
+let log_improvement ~node_id ~before_ssim ~after_ssim ~change_description =
+  let improvement = (after_ssim -. before_ssim) *. 100.0 in
+  let notes = Printf.sprintf "%s (%.1f%% improvement)" change_description improvement in
+  log_verification ~node_id ~ssim:after_ssim ~notes ();
+  improvement
+
+(** 힌트 적용 결과를 SSIM 로그에 기록 *)
+let log_hint_application ~node_id ~before_ssim ~after_ssim ~hints =
+  let hint_names = List.map (function
+    | AdjustPadding _ -> "padding"
+    | AdjustGap _ -> "gap"
+    | AdjustColor _ -> "color"
+    | AdjustSize _ -> "size"
+    | AdjustFontSize _ -> "font_size"
+    | AdjustBorderRadius _ -> "border_radius"
+  ) hints in
+  let hints_str = String.concat "+" hint_names in
+  let improvement = (after_ssim -. before_ssim) *. 100. in
+  let notes = Printf.sprintf "hints:%s (%.1f%% %s)"
+    hints_str
+    (abs_float improvement)
+    (if improvement >= 0. then "↑" else "↓")
+  in
+  log_verification ~node_id ~ssim:after_ssim ~notes ()
+
+(** 최근 SSIM 로그 조회
+
+    @param count 조회할 개수 (기본: 20)
+    @return (timestamp, node_id, ssim, notes) 리스트
+*)
+let get_recent_logs ?(count=20) () =
+  if Sys.file_exists ssim_log_path then begin
+    let ic = open_in ssim_log_path in
+    let lines = ref [] in
+    (try while true do lines := input_line ic :: !lines done
+     with End_of_file -> close_in ic);
+    let recent = List.filteri (fun i _ -> i < count) !lines in
+    List.filter_map (fun line ->
+      match String.split_on_char '|' line with
+      | [ts; node_id; ssim_str; notes] ->
+          (try Some (ts, node_id, float_of_string ssim_str, notes)
+           with _ -> None)
+      | _ -> None
+    ) recent
+  end else []
+
+(** 노드별 SSIM 추세 조회
+
+    @param node_id Figma 노드 ID
+    @return SSIM 값 리스트 (시간순)
+*)
+let get_ssim_trend ~node_id =
+  get_recent_logs ~count:1000 ()
+  |> List.filter (fun (_, nid, _, _) -> nid = node_id)
+  |> List.map (fun (_, _, ssim, _) -> ssim)
+  |> List.rev

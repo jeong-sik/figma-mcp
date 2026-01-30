@@ -135,6 +135,18 @@ security add-generic-password -s "figma-mcp" -a "FIGMA_TOKEN" -w "YOUR_TOKEN"
 - `FIGMA_MCP_MAX_BODY_BYTES` 또는 `MCP_MAX_BODY_BYTES`로 조정하세요.
 - `Content-Length`가 없으면 스트리밍 누적 바이트로 제한하며, 초과 시 413을 반환합니다.
 
+## Troubleshooting: TLS (macOS/Linux)
+
+`ca-certs: empty trust anchors` 에러가 나는 경우가 있습니다.  
+`start-figma-mcp*.sh` 스크립트는 macOS/Linux에서 대표 CA 번들을 자동 탐색해 `SSL_CERT_FILE`을 설정합니다.  
+바이너리를 직접 실행하는 경우에만 아래를 추가하세요.
+
+```bash
+# macOS
+export SSL_CERT_FILE="/etc/ssl/cert.pem"
+# Linux (예시)
+export SSL_CERT_FILE="/etc/ssl/certs/ca-certificates.crt"
+```
 상세 가이드(토큰 발급 경로, 릴리즈 바이너리 설치, 설정 JSON 예시):
 - `docs/INSTALL-MANUAL.md`
 
@@ -380,6 +392,270 @@ echo '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}' | ./start-figm
 
 - 변경 이력: `CHANGELOG.md`
 - 설치/연동/레시피: `docs/`
+
+Visual Feedback Loop에서 발견된 CSS 정확도 문제를 수정했습니다.
+
+### P0-1, P0-2: Flexbox Alignment
+
+Figma `primaryAxisAlignItems`/`counterAxisAlignItems` → CSS `justify-content`/`align-items` 매핑:
+
+| Figma | justify-content | align-items |
+|-------|-----------------|-------------|
+| MIN | flex-start (기본값) | flex-start (기본값) |
+| CENTER | center | center |
+| MAX | flex-end | flex-end |
+| SPACE_BETWEEN | space-between | - |
+| BASELINE | - | baseline |
+
+**Before**: 모든 값이 무시됨 → CENTER/MAX 레이아웃 틀어짐
+**After**: 동적 매핑으로 정확한 정렬
+
+### P0-3: Effects (Shadow, Blur)
+
+4가지 Figma 효과를 CSS로 변환:
+
+```css
+/* DropShadow → box-shadow */
+box-shadow: 4px 4px 10px 2px rgba(0,0,0,0.25);
+
+/* InnerShadow → box-shadow inset */
+box-shadow: inset 2px 2px 5px 0px rgba(255,255,255,0.5);
+
+/* LayerBlur → filter:blur */
+filter: blur(8px);
+
+/* BackgroundBlur → backdrop-filter */
+backdrop-filter: blur(12px);
+```
+
+**예제 출력**:
+```css
+box-shadow:4px 4px 10px 2px rgba(0,0,0,0.2),inset 2px 2px 5px 0px rgba(255,255,255,0.50);filter:blur(8px);backdrop-filter:blur(12px)
+```
+
+### P0-4: Gradient
+
+Figma `gradientStops` → CSS `linear-gradient`:
+
+```ocaml
+(* 입력: Figma gradientStops *)
+[
+  (0.0, {r=1.0; g=0.0; b=0.0; a=1.0});   (* Red *)
+  (0.5, {r=0.0; g=1.0; b=0.0; a=1.0});   (* Green *)
+  (1.0, {r=0.0; g=0.0; b=1.0; a=1.0});   (* Blue *)
+]
+
+(* 출력: CSS *)
+"linear-gradient(to right,#FF0000 0%,#00FF00 50%,#0000FF 100%)"
+```
+
+**현재 제한사항**:
+- 방향은 `to right` 고정 (각도 계산은 P1)
+- Radial/Angular/Diamond는 linear로 fallback
+
+### 성능 벤치마크
+
+```
+gradient_to_css (5 stops)     : 4 µs/iter
+effects_to_css (4 effects)    : 6 µs/iter
+effects_to_css (all invisible): <1 µs/iter
+```
+
+### 테스트
+
+```bash
+# P0 유닛 테스트 (10개)
+dune exec ./test/test_codegen_p0.exe
+
+# P0 벤치마크
+dune exec ./test/bench_p0.exe
+```
+
+### 커밋 & 푸시 예시
+
+```bash
+# 테스트 후 커밋/푸시
+git checkout -b feature/your-branch
+git add <files>
+git commit -m "your message"
+git push -u origin feature/your-branch
+```
+
+---
+
+## Future Work: 다중 유사도 측정 시스템
+
+현재 `figma_compare`는 실용적 휴리스틱 기반입니다. 아래 학술적 기반 개선을 계획 중:
+
+### 다중 유사도 지표 (Multi-Metric Similarity)
+
+| 지표 | 공식/알고리즘 | 출처 |
+|------|--------------|------|
+| **Color** | CIEDE2000 (ΔE*₀₀) | CIE 표준, 인간 색지각 모델 |
+| **Layout** | IoU (Intersection over Union) | 객체 탐지 표준 메트릭 |
+| **Structure** | Tree Edit Distance (TED) | Zhang-Shasha 알고리즘 |
+| **Visual** | SSIM (Structural Similarity Index) | Wang et al. 2004, IEEE TIP |
+| **Embedding** | Cosine Similarity on UI Embedding | Rico (Google, UIST 2017) |
+
+### 출력 예시 (계획)
+
+```
+비교: "B2C 홈 (Web)" vs "B2C 홈 (Mobile)"
+
+┌─────────────────┬────────┬─────────────────────────────┐
+│ 지표            │ 점수   │ 설명                        │
+├─────────────────┼────────┼─────────────────────────────┤
+│ Color (ΔE*₀₀)  │ 95.2%  │ 색상 차이 ΔE=2.3 (JND 이하) │
+│ Layout (IoU)    │ 87.4%  │ 요소 위치 오버랩            │
+│ Structure (TED) │ 92.0%  │ 트리 편집 거리 4            │
+│ Visual (SSIM)   │ 89.1%  │ 구조적 유사도               │
+│ Embedding       │ 94.7%  │ Rico-style 64dim cosine     │
+├─────────────────┼────────┼─────────────────────────────┤
+│ **종합**        │ 91.7%  │ 가중 평균                   │
+└─────────────────┴────────┴─────────────────────────────┘
+```
+
+### 참고 논문
+
+- [Rico: A Mobile App Dataset](https://dl.acm.org/doi/10.1145/3126594.3126651) (UIST 2017)
+- [LTSim: Layout Transportation-based Similarity](https://arxiv.org/html/2407.12356v1) (2024)
+- [SSIM: Image Quality Assessment](https://ieeexplore.ieee.org/document/1284395) (IEEE TIP 2004)
+- [CIEDE2000 Color Difference](https://en.wikipedia.org/wiki/Color_difference#CIEDE2000)
+
+### 구현 우선순위
+
+1. ✅ 현재: 휴리스틱 가중치 (Critical/Major/Minor)
+2. 🔜 Phase 1: CIEDE2000 색상 거리 적용
+3. 🔜 Phase 2: IoU 레이아웃 유사도 추가
+4. 🔜 Phase 3: SSIM 시각적 유사도 (렌더링 필요)
+5. 🔜 Phase 4: Rico-style Embedding (ML 모델 필요)
+||||||| bb690a1
+Visual Feedback Loop에서 발견된 CSS 정확도 문제를 수정했습니다.
+
+### P0-1, P0-2: Flexbox Alignment
+
+Figma `primaryAxisAlignItems`/`counterAxisAlignItems` → CSS `justify-content`/`align-items` 매핑:
+
+| Figma | justify-content | align-items |
+|-------|-----------------|-------------|
+| MIN | flex-start (기본값) | flex-start (기본값) |
+| CENTER | center | center |
+| MAX | flex-end | flex-end |
+| SPACE_BETWEEN | space-between | - |
+| BASELINE | - | baseline |
+
+**Before**: 모든 값이 무시됨 → CENTER/MAX 레이아웃 틀어짐
+**After**: 동적 매핑으로 정확한 정렬
+
+### P0-3: Effects (Shadow, Blur)
+
+4가지 Figma 효과를 CSS로 변환:
+
+```css
+/* DropShadow → box-shadow */
+box-shadow: 4px 4px 10px 2px rgba(0,0,0,0.25);
+
+/* InnerShadow → box-shadow inset */
+box-shadow: inset 2px 2px 5px 0px rgba(255,255,255,0.5);
+
+/* LayerBlur → filter:blur */
+filter: blur(8px);
+
+/* BackgroundBlur → backdrop-filter */
+backdrop-filter: blur(12px);
+```
+
+**예제 출력**:
+```css
+box-shadow:4px 4px 10px 2px rgba(0,0,0,0.2),inset 2px 2px 5px 0px rgba(255,255,255,0.50);filter:blur(8px);backdrop-filter:blur(12px)
+```
+
+### P0-4: Gradient
+
+Figma `gradientStops` → CSS `linear-gradient`:
+
+```ocaml
+(* 입력: Figma gradientStops *)
+[
+  (0.0, {r=1.0; g=0.0; b=0.0; a=1.0});   (* Red *)
+  (0.5, {r=0.0; g=1.0; b=0.0; a=1.0});   (* Green *)
+  (1.0, {r=0.0; g=0.0; b=1.0; a=1.0});   (* Blue *)
+]
+
+(* 출력: CSS *)
+"linear-gradient(to right,#FF0000 0%,#00FF00 50%,#0000FF 100%)"
+```
+
+**현재 제한사항**:
+- 방향은 `to right` 고정 (각도 계산은 P1)
+- Radial/Angular/Diamond는 linear로 fallback
+
+### 성능 벤치마크
+
+```
+gradient_to_css (5 stops)     : 4 µs/iter
+effects_to_css (4 effects)    : 6 µs/iter
+effects_to_css (all invisible): <1 µs/iter
+```
+
+### 테스트
+
+```bash
+# P0 유닛 테스트 (10개)
+dune exec ./test/test_codegen_p0.exe
+
+# P0 벤치마크
+dune exec ./test/bench_p0.exe
+```
+
+---
+
+## Future Work: 다중 유사도 측정 시스템
+
+현재 `figma_compare`는 실용적 휴리스틱 기반입니다. 아래 학술적 기반 개선을 계획 중:
+
+### 다중 유사도 지표 (Multi-Metric Similarity)
+
+| 지표 | 공식/알고리즘 | 출처 |
+|------|--------------|------|
+| **Color** | CIEDE2000 (ΔE*₀₀) | CIE 표준, 인간 색지각 모델 |
+| **Layout** | IoU (Intersection over Union) | 객체 탐지 표준 메트릭 |
+| **Structure** | Tree Edit Distance (TED) | Zhang-Shasha 알고리즘 |
+| **Visual** | SSIM (Structural Similarity Index) | Wang et al. 2004, IEEE TIP |
+| **Embedding** | Cosine Similarity on UI Embedding | Rico (Google, UIST 2017) |
+
+### 출력 예시 (계획)
+
+```
+비교: "B2C 홈 (Web)" vs "B2C 홈 (Mobile)"
+
+┌─────────────────┬────────┬─────────────────────────────┐
+│ 지표            │ 점수   │ 설명                        │
+├─────────────────┼────────┼─────────────────────────────┤
+│ Color (ΔE*₀₀)  │ 95.2%  │ 색상 차이 ΔE=2.3 (JND 이하) │
+│ Layout (IoU)    │ 87.4%  │ 요소 위치 오버랩            │
+│ Structure (TED) │ 92.0%  │ 트리 편집 거리 4            │
+│ Visual (SSIM)   │ 89.1%  │ 구조적 유사도               │
+│ Embedding       │ 94.7%  │ Rico-style 64dim cosine     │
+├─────────────────┼────────┼─────────────────────────────┤
+│ **종합**        │ 91.7%  │ 가중 평균                   │
+└─────────────────┴────────┴─────────────────────────────┘
+```
+
+### 참고 논문
+
+- [Rico: A Mobile App Dataset](https://dl.acm.org/doi/10.1145/3126594.3126651) (UIST 2017)
+- [LTSim: Layout Transportation-based Similarity](https://arxiv.org/html/2407.12356v1) (2024)
+- [SSIM: Image Quality Assessment](https://ieeexplore.ieee.org/document/1284395) (IEEE TIP 2004)
+- [CIEDE2000 Color Difference](https://en.wikipedia.org/wiki/Color_difference#CIEDE2000)
+
+### 구현 우선순위
+
+1. ✅ 현재: 휴리스틱 가중치 (Critical/Major/Minor)
+2. 🔜 Phase 1: CIEDE2000 색상 거리 적용
+3. 🔜 Phase 2: IoU 레이아웃 유사도 추가
+4. 🔜 Phase 3: SSIM 시각적 유사도 (렌더링 필요)
+5. 🔜 Phase 4: Rico-style Embedding (ML 모델 필요)
 
 ## 라이선스
 

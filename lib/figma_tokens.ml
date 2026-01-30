@@ -441,3 +441,96 @@ let export_tokens tokens format =
   | Compose -> to_compose tokens
   | Flutter -> to_flutter tokens
   | W3C_DTCG -> to_w3c_dtcg tokens
+
+(** ============== 토큰 중복 경고 (Feedback Loop) ============== *)
+
+(** HEX 색상을 RGB로 변환 *)
+let hex_to_rgb hex =
+  let hex = if String.get hex 0 = '#' then String.sub hex 1 (String.length hex - 1) else hex in
+  let r = int_of_string ("0x" ^ String.sub hex 0 2) in
+  let g = int_of_string ("0x" ^ String.sub hex 2 2) in
+  let b = int_of_string ("0x" ^ String.sub hex 4 2) in
+  Ciede2000.{ r = float_of_int r; g = float_of_int g; b = float_of_int b }
+
+(** 두 색상의 Delta-E (CIEDE2000) 계산 *)
+let color_delta_e hex1 hex2 =
+  let rgb1 = hex_to_rgb hex1 in
+  let rgb2 = hex_to_rgb hex2 in
+  let lab1 = Ciede2000.rgb_to_lab rgb1 in
+  let lab2 = Ciede2000.rgb_to_lab rgb2 in
+  Ciede2000.delta_e lab1 lab2
+
+(** 유사 색상 경고 정보 *)
+type color_similarity_warning = {
+  color1: color_token;
+  color2: color_token;
+  delta_e: float;
+}
+
+(** 기존 색상들과 새 색상 비교하여 유사한 것 찾기
+
+    @param existing_colors 기존 색상 목록
+    @param new_color 새로 추가할 색상
+    @param threshold Delta-E 임계값 (기본: 5.0, JND 기준)
+    @return 유사한 색상 목록
+*)
+let find_similar_colors ~existing_colors ~new_color ?(threshold=5.0) () =
+  List.filter_map (fun existing ->
+    let de = color_delta_e existing.hex new_color.hex in
+    if de < threshold && existing.hex <> new_color.hex then
+      Some { color1 = existing; color2 = new_color; delta_e = de }
+    else None
+  ) existing_colors
+
+(** 토큰 목록 내 모든 중복 색상 검사
+
+    @param tokens 디자인 토큰
+    @param threshold Delta-E 임계값 (기본: 5.0)
+    @return 유사 색상 쌍 목록
+*)
+let check_color_duplicates ?(threshold=5.0) tokens =
+  let colors = tokens.colors in
+  let warnings = ref [] in
+  List.iteri (fun i c1 ->
+    List.iteri (fun j c2 ->
+      if j > i then begin
+        let de = color_delta_e c1.hex c2.hex in
+        if de < threshold then
+          warnings := { color1 = c1; color2 = c2; delta_e = de } :: !warnings
+      end
+    ) colors
+  ) colors;
+  !warnings
+
+(** 중복 경고를 사람이 읽기 좋은 형태로 출력 *)
+let format_color_warnings warnings =
+  if warnings = [] then
+    "✅ No similar colors found - all colors are distinct!"
+  else
+    let header = Printf.sprintf "⚠️ Found %d similar color pair(s):\n" (List.length warnings) in
+    let lines = List.map (fun w ->
+      Printf.sprintf "  • %s (%s) ≈ %s (%s) - Delta-E: %.2f"
+        w.color1.name w.color1.hex w.color2.name w.color2.hex w.delta_e
+    ) warnings in
+    header ^ String.concat "\n" lines
+
+(** JSON 형태로 경고 출력 *)
+let color_warnings_to_json warnings =
+  `Assoc [
+    ("warning_count", `Int (List.length warnings));
+    ("similar_pairs", `List (List.map (fun w ->
+      `Assoc [
+        ("color1", `Assoc [("name", `String w.color1.name); ("hex", `String w.color1.hex)]);
+        ("color2", `Assoc [("name", `String w.color2.name); ("hex", `String w.color2.hex)]);
+        ("delta_e", `Float w.delta_e);
+        ("suggestion", `String (Printf.sprintf "Consider merging into single token: %s" w.color1.name));
+      ]
+    ) warnings));
+  ]
+  |> Yojson.Safe.pretty_to_string
+
+(** 토큰 추출 + 중복 검사 통합 함수 *)
+let extract_all_with_warnings ?(threshold=5.0) nodes =
+  let tokens = extract_all nodes in
+  let warnings = check_color_duplicates ~threshold tokens in
+  (tokens, warnings)

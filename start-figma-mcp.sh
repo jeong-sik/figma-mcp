@@ -9,17 +9,28 @@ set -e
 ULIMIT_NOFILE="${FIGMA_ULIMIT_NOFILE:-65536}"
 ulimit -n "$ULIMIT_NOFILE" >/dev/null 2>&1 || true
 
+# Ensure system CA bundle is available for TLS (macOS/Linux ca-certs can be empty)
+if [ -z "${SSL_CERT_FILE:-}" ]; then
+  for candidate in \
+    "/etc/ssl/cert.pem" \
+    "/etc/ssl/certs/ca-certificates.crt" \
+    "/etc/pki/tls/certs/ca-bundle.crt" \
+    "/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem" \
+    "/etc/ssl/ca-bundle.pem" \
+    "/usr/local/share/certs/ca-root-nss.crt"; do
+    if [ -f "$candidate" ]; then
+      export SSL_CERT_FILE="$candidate"
+      break
+    fi
+  done
+fi
+
 # Load FIGMA_TOKEN from Keychain if not already set
 if [ -z "$FIGMA_TOKEN" ]; then
   FIGMA_TOKEN=$(security find-generic-password -s "figma-mcp" -a "FIGMA_TOKEN" -w 2>/dev/null || true)
   if [ -n "$FIGMA_TOKEN" ]; then
     export FIGMA_TOKEN
   fi
-fi
-
-# Ensure system trust store is available for HTTPS
-if [ -z "${SSL_CERT_FILE:-}" ] && [ -f "/etc/ssl/cert.pem" ]; then
-  export SSL_CERT_FILE="/etc/ssl/cert.pem"
 fi
 
 # Ensure OCaml environment
