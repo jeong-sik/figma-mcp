@@ -310,7 +310,7 @@ let tool_figma_verify_visual : tool_def = {
 (** Region-based comparison - 영역별 상세 비교 *)
 let tool_figma_compare_regions : tool_def = {
   name = "figma_compare_regions";
-  description = "✅ VERIFY: 이미지 영역별 비교. 아이콘/헤더/푸터 개별 정확도 측정.";
+  description = "[DEPRECATED] figma_compare(mode: \"regions\")를 사용하세요. 영역별 이미지 비교 기능은 통합 compare 도구로 이전되었습니다.";
   input_schema = object_schema [
     ("image_a", string_prop "기준 이미지 경로 (Figma 렌더)");
     ("image_b", string_prop "비교 이미지 경로 (HTML 렌더)");
@@ -323,7 +323,7 @@ let tool_figma_compare_regions : tool_def = {
 (** Evolution Report - 진화 과정 리포트 조회 *)
 let tool_figma_evolution_report : tool_def = {
   name = "figma_evolution_report";
-  description = "📊 REPORT: Visual Loop 진화 리포트. run_dir 없으면 목록, 있으면 상세.";
+  description = "[DEPRECATED] figma_compare(mode: \"evolution\")를 사용하세요. 진화 리포트 기능은 통합 compare 도구로 이전되었습니다.";
   input_schema = object_schema [
     ("run_dir", string_prop "Evolution 디렉토리 경로 (예: /tmp/figma-evolution/run_1234567890). 없으면 최근 실행 목록 반환");
     ("generate_image", bool_prop "비교 이미지 자동 생성 여부 (기본값: true)");
@@ -333,7 +333,7 @@ let tool_figma_evolution_report : tool_def = {
 (** Compare Elements - 색상/박스 확장 메트릭 비교 *)
 let tool_figma_compare_elements : tool_def = {
   name = "figma_compare_elements";
-  description = "✅ VERIFY: 색상/박스 정밀 비교. OKLab/CIEDE2000, IoU/GIoU/DIoU 메트릭.";
+  description = "[DEPRECATED] figma_compare(mode: \"elements\")를 사용하세요. 색상/박스 비교 기능은 통합 compare 도구로 이전되었습니다.";
   input_schema = object_schema [
     ("type", enum_prop ["color"; "box"; "full"] "비교 타입: color(색상), box(박스), full(둘 다)");
     ("color1", string_prop "첫 번째 색상 (#RRGGBB 또는 rgb(r,g,b))");
@@ -446,7 +446,7 @@ let tool_figma_get_file_components : tool_def = {
 
 let tool_figma_get_team_components : tool_def = {
   name = "figma_get_team_components";
-  description = "[Advanced] 팀 전체 컴포넌트 목록. 디자인 시스템 감사용. 대부분 figma_get_file_components로 충분.";
+  description = "[DEPRECATED] 팀 레벨 API는 Rate Limit이 엄격합니다. 대신 figma_get_file_components를 사용하세요. 향후 버전에서 제거될 수 있습니다.";
   input_schema = object_schema [
     ("team_id", string_prop "팀 ID");
     ("token", string_prop "Figma Personal Access Token (optional if FIGMA_TOKEN env var is set)");
@@ -464,7 +464,7 @@ let tool_figma_get_file_component_sets : tool_def = {
 
 let tool_figma_get_team_component_sets : tool_def = {
   name = "figma_get_team_component_sets";
-  description = "[Advanced] 팀 전체 컴포넌트 셋 목록. 변형(Variants) 관리용. 대부분 figma_get_file_component_sets로 충분.";
+  description = "[DEPRECATED] 팀 레벨 API는 Rate Limit이 엄격합니다. 대신 figma_get_file_component_sets를 사용하세요. 향후 버전에서 제거될 수 있습니다.";
   input_schema = object_schema [
     ("team_id", string_prop "팀 ID");
     ("token", string_prop "Figma Personal Access Token (optional if FIGMA_TOKEN env var is set)");
@@ -482,7 +482,7 @@ let tool_figma_get_file_styles : tool_def = {
 
 let tool_figma_get_team_styles : tool_def = {
   name = "figma_get_team_styles";
-  description = "[Advanced] 팀 전체 스타일 목록. 디자인 토큰 감사용. 대부분 figma_get_file_styles 또는 figma_export_tokens로 충분.";
+  description = "[DEPRECATED] 팀 레벨 API는 Rate Limit이 엄격합니다. 대신 figma_get_file_styles 또는 figma_export_tokens를 사용하세요. 향후 버전에서 제거될 수 있습니다.";
   input_schema = object_schema [
     ("team_id", string_prop "팀 ID");
     ("token", string_prop "Figma Personal Access Token (optional if FIGMA_TOKEN env var is set)");
@@ -491,7 +491,7 @@ let tool_figma_get_team_styles : tool_def = {
 
 let tool_figma_get_component : tool_def = {
   name = "figma_get_component";
-  description = "[Advanced] 컴포넌트 키로 상세 정보. 보통 figma_get_file_components로 충분.";
+  description = "[DEPRECATED] 개별 키 조회는 비효율적입니다. 대신 figma_get_file_components를 사용하세요. 향후 버전에서 제거될 수 있습니다.";
   input_schema = object_schema [
     ("component_key", string_prop "컴포넌트 키");
     ("token", string_prop "Figma Personal Access Token (optional if FIGMA_TOKEN env var is set)");
@@ -500,7 +500,7 @@ let tool_figma_get_component : tool_def = {
 
 let tool_figma_get_component_set : tool_def = {
   name = "figma_get_component_set";
-  description = "[Advanced] 컴포넌트 셋 키로 상세 정보. 보통 figma_get_file_component_sets로 충분.";
+  description = "[DEPRECATED] 개별 키 조회는 비효율적입니다. 대신 figma_get_file_component_sets를 사용하세요. 향후 버전에서 제거될 수 있습니다.";
   input_schema = object_schema [
     ("component_set_key", string_prop "컴포넌트 셋 키");
     ("token", string_prop "Figma Personal Access Token (optional if FIGMA_TOKEN env var is set)");
@@ -509,7 +509,7 @@ let tool_figma_get_component_set : tool_def = {
 
 let tool_figma_get_style : tool_def = {
   name = "figma_get_style";
-  description = "[Advanced] 스타일 키로 상세 정보. 보통 figma_get_file_styles로 충분.";
+  description = "[DEPRECATED] 개별 키 조회는 비효율적입니다. 대신 figma_get_file_styles 또는 figma_export_tokens를 사용하세요. 향후 버전에서 제거될 수 있습니다.";
   input_schema = object_schema [
     ("style_key", string_prop "스타일 키");
     ("token", string_prop "Figma Personal Access Token (optional if FIGMA_TOKEN env var is set)");
@@ -854,16 +854,33 @@ let tool_figma_search : tool_def = {
 
 let tool_figma_compare : tool_def = {
   name = "figma_compare";
-  description = "✅ VERIFY: 두 노드 일관성 검사. 크기/색상/타이포/레이아웃 차이 분석.";
+  description = "✅ VERIFY: 통합 비교 도구. mode로 기능 선택: general(노드 비교), batch(Web/Mobile), regions(영역별), elements(색상/박스), evolution(리포트).";
   input_schema = object_schema [
-    ("file_key", string_prop "Figma 파일 키");
+    (* Common *)
+    ("mode", enum_prop ["general"; "batch"; "regions"; "elements"; "evolution"] "비교 모드 선택");
+    (* general/batch mode params *)
+    ("file_key", string_prop "Figma 파일 키 (general/batch 모드)");
     ("token", string_prop "Figma Personal Access Token (optional if FIGMA_TOKEN env var is set)");
-    ("node_a_id", string_prop "첫 번째 노드 ID (예: 100:200)");
-    ("node_b_id", string_prop "두 번째 노드 ID");
-    ("mode", enum_prop ["single"; "batch"] "비교 모드: single (단일 쌍), batch (Web/Mobile 일괄 매칭)");
-    ("web_prefix", string_prop "Web 노드 이름 접두사 (batch 모드)");
-    ("mobile_prefix", string_prop "Mobile 노드 이름 접두사 (batch 모드)");
-  ] ["file_key"];
+    ("node_a_id", string_prop "첫 번째 노드 ID (general 모드)");
+    ("node_b_id", string_prop "두 번째 노드 ID (general 모드)");
+    ("web_prefix", string_prop "Web 노드 접두사 (batch 모드, 기본: Web)");
+    ("mobile_prefix", string_prop "Mobile 노드 접두사 (batch 모드, 기본: Mobile)");
+    (* regions mode params *)
+    ("image_a", string_prop "기준 이미지 경로 (regions 모드)");
+    ("image_b", string_prop "비교 이미지 경로 (regions 모드)");
+    ("regions", string_prop "비교 영역 JSON [{name, x, y, width, height}] (regions 모드)");
+    ("output_dir", string_prop "결과 저장 디렉토리 (regions 모드)");
+    ("generate_diff", bool_prop "차이 이미지 생성 (regions 모드, 기본: true)");
+    (* elements mode params *)
+    ("type", enum_prop ["color"; "box"; "full"] "비교 타입 (elements 모드)");
+    ("color1", string_prop "첫 번째 색상 (elements 모드)");
+    ("color2", string_prop "두 번째 색상 (elements 모드)");
+    ("box1", string_prop "첫 번째 박스 x,y,w,h (elements 모드)");
+    ("box2", string_prop "두 번째 박스 x,y,w,h (elements 모드)");
+    (* evolution mode params *)
+    ("run_dir", string_prop "Evolution 디렉토리 (evolution 모드, 없으면 목록 반환)");
+    ("generate_image", bool_prop "비교 이미지 생성 (evolution 모드, 기본: true)");
+  ] ["mode"];
 }
 
 let tool_figma_tree : tool_def = {
@@ -935,9 +952,55 @@ let tool_figma_cache_invalidate : tool_def = {
   ] [];
 }
 
-(** ============== 모든 도구 목록 ============== *)
+(** ============== 카테고리 시스템 (Tool Dive) ============== *)
 
-let all_tools = [
+(** 카테고리별 도구 그룹 *)
+type tool_category = {
+  name: string;
+  description: string;
+  tools: string list;
+}
+
+let tool_categories = [
+  { name = "core";
+    description = "File/Node 기본 조회";
+    tools = ["get_file"; "get_file_meta"; "get_node"; "get_nodes"; "get_node_bundle";
+             "get_node_chunk"; "get_node_summary"; "select_nodes"; "list_screens";
+             "tree"; "get_file_versions"; "parse_url"; "get_me"; "query"; "search"] };
+  { name = "visual";
+    description = "시각 검증 (SSIM, 비교)";
+    (* NOTE: compare_elements, compare_regions, evolution_report는 DEPRECATED → figma_compare(mode=...)로 통합 *)
+    tools = ["verify_visual"; "image_similarity"; "compare"; "fidelity_loop"; "fidelity_review"] };
+  { name = "plugin";
+    description = "Figma 플러그인 브릿지";
+    tools = ["plugin"; "plugin_connect"; "plugin_use_channel"; "plugin_status";
+             "plugin_read_selection"; "plugin_get_node"; "plugin_export_node_image";
+             "plugin_get_variables"; "plugin_apply_ops"] };
+  { name = "team";
+    description = "팀/프로젝트 관리";
+    tools = ["list_projects"; "list_files"; "crawl_team"; "team_tree"; "export_team";
+             "get_team_components"; "get_team_component_sets"; "get_team_styles"] };
+  { name = "export";
+    description = "이미지/토큰 내보내기";
+    tools = ["export_image"; "export_smart"; "export_tokens"; "get_image_fills"] };
+  { name = "components";
+    description = "컴포넌트/스타일/변수";
+    tools = ["get_file_components"; "get_file_component_sets"; "get_file_styles";
+             "get_component"; "get_component_set"; "get_style"; "get_variables"] };
+]
+
+(** 카테고리에서 도구 찾기 *)
+let find_tool_in_category category_name tool_name =
+  List.find_opt (fun cat -> cat.name = category_name) tool_categories
+  |> Option.map (fun cat -> List.mem tool_name cat.tools)
+  |> Option.value ~default:false
+
+(** 최상위 유지 도구 (자주 사용) *)
+let featured_tool_names = ["codegen"; "doctor"; "stats"; "cache_stats"; "cache_invalidate"; "read_large_result"; "error_troubleshoot"; "post_comment"; "get_file_comments"]
+
+(** ============== 모든 도구 목록 (내부용) ============== *)
+
+let all_detailed_tools = [
   (* 기존 도구 *)
   tool_figma_codegen;
   tool_figma_get_file;
@@ -992,6 +1055,42 @@ let all_tools = [
   tool_figma_cache_stats;
   tool_figma_cache_invalidate;
 ]
+
+(** 카테고리 도구 정의 생성 *)
+let make_category_tool cat : tool_def =
+  let tool_list = String.concat ", " cat.tools in
+  {
+    name = "figma_" ^ cat.name;
+    description = sprintf "[Category] %s. 도구: %s" cat.description tool_list;
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("tool", `Assoc [
+          ("type", `String "string");
+          ("description", `String "실행할 도구 이름 (예: verify_visual). 생략시 목록 반환");
+        ]);
+        ("args", `Assoc [
+          ("type", `String "object");
+          ("description", `String "도구에 전달할 인자");
+        ]);
+      ]);
+    ];
+  }
+
+(** 카테고리 도구들 *)
+let category_tools : tool_def list = List.map make_category_tool tool_categories
+
+(** 최상위 유지 도구 필터 *)
+let featured_tools : tool_def list =
+  List.filter (fun (t: tool_def) ->
+    List.exists (fun name -> t.name = "figma_" ^ name) featured_tool_names
+  ) all_detailed_tools
+
+(** 공개 도구 목록 (카테고리 + 자주 쓰는 도구) *)
+let public_tools : tool_def list = category_tools @ featured_tools
+
+(** 전체 도구 (핸들러용) - 기존 all_tools 호환 *)
+let all_tools = all_detailed_tools
 
 (** ============== Tool 핸들러 구현 ============== *)
 
@@ -6778,69 +6877,77 @@ let handle_search args : (Yojson.Safe.t, string) result =
        | Error err -> Error err)
   | _ -> Error "Missing required parameters: file_key, token, query"
 
-(** figma_compare 핸들러 *)
+(** figma_compare 핸들러 - P1.1: 통합 비교 도구 *)
 let handle_compare args : (Yojson.Safe.t, string) result =
-  let file_key = get_string "file_key" args in
-  let token = resolve_token args in
-  let node_a_id = get_string "node_a_id" args in
-  let node_b_id = get_string "node_b_id" args in
-  let mode = get_string_or "mode" "single" args in
-  let web_prefix = get_string_or "web_prefix" "Web" args in
-  let mobile_prefix = get_string_or "mobile_prefix" "Mobile" args in
+  let mode = get_string_or "mode" "general" args in
 
-  match file_key, token with
-  | Some file_key, Some token ->
-      (match Figma_effects.Perform.get_file ~token ~file_key () with
-       | Ok file_data ->
-           (match Yojson.Safe.Util.member "document" file_data with
-            | `Null -> Error "Document not found"
-            | doc_json ->
-                (match Figma_parser.parse_node doc_json with
-                 | Some root ->
-                     let all_nodes = Figma_query.collect_nodes ~max_depth:None root in
+  (* P1.1: Mode-based dispatch to appropriate handler *)
+  match mode with
+  | "regions" -> handle_compare_regions args
+  | "elements" -> handle_compare_elements args
+  | "evolution" -> handle_evolution_report args
+  | "batch" | "general" | _ ->
+      (* Original general/batch logic *)
+      let file_key = get_string "file_key" args in
+      let token = resolve_token args in
+      let node_a_id = get_string "node_a_id" args in
+      let node_b_id = get_string "node_b_id" args in
+      let web_prefix = get_string_or "web_prefix" "Web" args in
+      let mobile_prefix = get_string_or "mobile_prefix" "Mobile" args in
 
-                     if mode = "batch" then begin
-                       (* Batch 모드: Web/Mobile 이름 매칭 *)
-                       let web_nodes = List.filter (fun n ->
-                         String.length n.Figma_types.name >= String.length web_prefix &&
-                         String.sub (String.lowercase_ascii n.Figma_types.name) 0 (String.length web_prefix) =
-                         String.lowercase_ascii web_prefix
-                       ) all_nodes in
-                       let mobile_nodes = List.filter (fun n ->
-                         String.length n.Figma_types.name >= String.length mobile_prefix &&
-                         String.sub (String.lowercase_ascii n.Figma_types.name) 0 (String.length mobile_prefix) =
-                         String.lowercase_ascii mobile_prefix
-                       ) all_nodes in
+      match file_key, token with
+      | Some file_key, Some token ->
+          (match Figma_effects.Perform.get_file ~token ~file_key () with
+           | Ok file_data ->
+               (match Yojson.Safe.Util.member "document" file_data with
+                | `Null -> Error "Document not found"
+                | doc_json ->
+                    (match Figma_parser.parse_node doc_json with
+                     | Some root ->
+                         let all_nodes = Figma_query.collect_nodes ~max_depth:None root in
 
-                       let (results, total, avg_sim, critical, major) =
-                         Figma_compare.compare_web_mobile ~web_nodes ~mobile_nodes
-                       in
+                         if mode = "batch" then begin
+                           (* Batch 모드: Web/Mobile 이름 매칭 *)
+                           let web_nodes = List.filter (fun n ->
+                             String.length n.Figma_types.name >= String.length web_prefix &&
+                             String.sub (String.lowercase_ascii n.Figma_types.name) 0 (String.length web_prefix) =
+                             String.lowercase_ascii web_prefix
+                           ) all_nodes in
+                           let mobile_nodes = List.filter (fun n ->
+                             String.length n.Figma_types.name >= String.length mobile_prefix &&
+                             String.sub (String.lowercase_ascii n.Figma_types.name) 0 (String.length mobile_prefix) =
+                             String.lowercase_ascii mobile_prefix
+                           ) all_nodes in
 
-                       let summary = Printf.sprintf
-                         "=== Web/Mobile 일관성 검사 결과 ===\n매칭된 쌍: %d개\n평균 유사도: %.0f%%\nCritical 차이: %d개\nMajor 차이: %d개\n\n"
-                         total (avg_sim *. 100.) critical major
-                       in
-                       let details = String.concat "\n---\n"
-                         (List.map Figma_compare.result_to_string results)
-                       in
-                       Ok (make_text_content (summary ^ details))
-                     end
-                     else begin
-                       (* Single 모드: 특정 노드 쌍 비교 *)
-                       match node_a_id, node_b_id with
-                       | Some id_a, Some id_b ->
-                           let find_node id = List.find_opt (fun n -> n.Figma_types.id = id) all_nodes in
-                           (match find_node id_a, find_node id_b with
-                            | Some node_a, Some node_b ->
-                                let result = Figma_compare.compare_nodes node_a node_b in
-                                Ok (make_text_content (Figma_compare.result_to_string result))
-                            | None, _ -> Error (Printf.sprintf "Node A not found: %s" id_a)
-                            | _, None -> Error (Printf.sprintf "Node B not found: %s" id_b))
-                       | _ -> Error "Single mode requires node_a_id and node_b_id"
-                     end
-                 | None -> Error "Failed to parse document"))
-       | Error err -> Error err)
-  | _ -> Error "Missing required parameters: file_key, token"
+                           let (results, total, avg_sim, critical, major) =
+                             Figma_compare.compare_web_mobile ~web_nodes ~mobile_nodes
+                           in
+
+                           let summary = Printf.sprintf
+                             "=== Web/Mobile 일관성 검사 결과 ===\n매칭된 쌍: %d개\n평균 유사도: %.0f%%\nCritical 차이: %d개\nMajor 차이: %d개\n\n"
+                             total (avg_sim *. 100.) critical major
+                           in
+                           let details = String.concat "\n---\n"
+                             (List.map Figma_compare.result_to_string results)
+                           in
+                           Ok (make_text_content (summary ^ details))
+                         end
+                         else begin
+                           (* General 모드: 특정 노드 쌍 비교 *)
+                           match node_a_id, node_b_id with
+                           | Some id_a, Some id_b ->
+                               let find_node id = List.find_opt (fun n -> n.Figma_types.id = id) all_nodes in
+                               (match find_node id_a, find_node id_b with
+                                | Some node_a, Some node_b ->
+                                    let result = Figma_compare.compare_nodes node_a node_b in
+                                    Ok (make_text_content (Figma_compare.result_to_string result))
+                                | None, _ -> Error (Printf.sprintf "Node A not found: %s" id_a)
+                                | _, None -> Error (Printf.sprintf "Node B not found: %s" id_b))
+                           | _ -> Error "General mode requires node_a_id and node_b_id"
+                         end
+                     | None -> Error "Failed to parse document"))
+           | Error err -> Error err)
+      | _ -> Error "Missing required parameters: file_key, token"
 
 (** figma_tree 핸들러 *)
 let handle_tree args : (Yojson.Safe.t, string) result =
@@ -7119,6 +7226,45 @@ let handle_codegen_sync args : (Yojson.Safe.t, string) result =
        | Ok result -> Ok (make_text_content result)
        | Error msg -> Error msg)
 
+(** 카테고리 도구 핸들러 - tool 파라미터로 하위 도구 실행 또는 목록 반환 *)
+let handle_category category_name args =
+  let tool_param = get_string "tool" args in
+  let args_param = member "args" args in
+  match tool_param with
+  | None ->
+      (* tool 미지정: 카테고리 도구 목록 반환 *)
+      (match List.find_opt (fun c -> c.name = category_name) tool_categories with
+       | Some cat ->
+           let tools_info = List.map (fun tool_name ->
+             `Assoc [
+               ("name", `String tool_name);
+               ("full_name", `String ("figma_" ^ tool_name));
+             ]
+           ) cat.tools in
+           let info = `Assoc [
+             ("category", `String category_name);
+             ("description", `String cat.description);
+             ("tool_count", `Int (List.length cat.tools));
+             ("tools", `List tools_info);
+             ("usage", `String (sprintf "figma_%s tool=<tool_name> args={...}" category_name));
+           ] in
+           Ok (make_text_content (Yojson.Safe.pretty_to_string info))
+       | None ->
+           Error (sprintf "Unknown category: %s" category_name))
+  | Some tool_name ->
+      (* tool 지정: 해당 도구 핸들러 호출 *)
+      let full_name = "figma_" ^ tool_name in
+      match Hashtbl.find_opt handler_registry full_name with
+      | Some handler ->
+          let actual_args = Option.value ~default:(`Assoc []) args_param in
+          handler actual_args
+      | None ->
+          (* 카테고리에 속하는지 확인 *)
+          if find_tool_in_category category_name tool_name then
+            Error (sprintf "Tool '%s' exists but handler not found. Try 'figma_%s' directly." tool_name tool_name)
+          else
+            Error (sprintf "Tool '%s' not found in category '%s'. Use 'figma_%s' to see available tools." tool_name category_name category_name)
+
 (** 동기 핸들러 리스트 - HTTP/Eio 모드에서 사용 *)
 
 let all_handlers_sync : (string * tool_handler_sync) list = [
@@ -7175,6 +7321,13 @@ let all_handlers_sync : (string * tool_handler_sync) list = [
   (* 캐시 관리 *)
   ("figma_cache_stats", wrap_sync_pure handle_cache_stats);
   ("figma_cache_invalidate", wrap_sync_pure handle_cache_invalidate);
+  (* 카테고리 도구 핸들러 *)
+  ("figma_core", wrap_sync_pure (handle_category "core"));
+  ("figma_visual", wrap_sync_pure (handle_category "visual"));
+  ("figma_plugin", wrap_sync_pure (handle_category "plugin"));
+  ("figma_team", wrap_sync_pure (handle_category "team"));
+  ("figma_export", wrap_sync_pure (handle_category "export"));
+  ("figma_components", wrap_sync_pure (handle_category "components"));
 ]
 
 (** 핸들러 레지스트리 초기화 - module load 시 자동 실행 *)
@@ -7386,4 +7539,4 @@ let read_resource uri =
 (** ============== 서버 생성 ============== *)
 
 let create_figma_server () =
-  Mcp_protocol.create_server ~handlers_sync:all_handlers_sync all_tools resources prompts read_resource
+  Mcp_protocol.create_server ~handlers_sync:all_handlers_sync public_tools resources prompts read_resource

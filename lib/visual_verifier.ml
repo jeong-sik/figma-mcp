@@ -930,3 +930,74 @@ let cleanup_temp_files () =
       with Unix.Unix_error _ -> ()
     ) files
   end
+
+(** ============== SSIM 개선 로그 (Feedback Loop) ============== *)
+
+(** SSIM 검증 로그 파일 경로 *)
+let ssim_log_path = ".figma-ssim.log"
+
+(** 검증 결과를 로컬 파일에 append
+
+    @param node_id Figma 노드 ID
+    @param ssim 측정된 SSIM 값
+    @param notes 변경 설명 (optional)
+*)
+let log_verification ~node_id ~ssim ?(notes="") () =
+  let timestamp = Unix.gettimeofday () in
+  let iso_time =
+    let tm = Unix.localtime timestamp in
+    Printf.sprintf "%04d-%02d-%02d %02d:%02d:%02d"
+      (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1) tm.Unix.tm_mday
+      tm.Unix.tm_hour tm.Unix.tm_min tm.Unix.tm_sec
+  in
+  let line = Printf.sprintf "%s|%s|%.4f|%s\n" iso_time node_id ssim notes in
+  let oc = open_out_gen [Open_append; Open_creat; Open_text] 0o644 ssim_log_path in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr oc)
+    (fun () -> output_string oc line)
+
+(** SSIM 개선 기록 (before/after 비교)
+
+    @param node_id Figma 노드 ID
+    @param before_ssim 이전 SSIM 값
+    @param after_ssim 이후 SSIM 값
+    @param change_description 변경 설명
+    @return SSIM 개선율 (percentage)
+*)
+let log_improvement ~node_id ~before_ssim ~after_ssim ~change_description =
+  let improvement = (after_ssim -. before_ssim) *. 100.0 in
+  let notes = Printf.sprintf "%s (%.1f%% improvement)" change_description improvement in
+  log_verification ~node_id ~ssim:after_ssim ~notes ();
+  improvement
+
+(** 최근 SSIM 로그 조회
+
+    @param count 조회할 개수 (기본: 20)
+    @return (timestamp, node_id, ssim, notes) 리스트
+*)
+let get_recent_logs ?(count=20) () =
+  if Sys.file_exists ssim_log_path then begin
+    let ic = open_in ssim_log_path in
+    let lines = ref [] in
+    (try while true do lines := input_line ic :: !lines done
+     with End_of_file -> close_in ic);
+    let recent = List.filteri (fun i _ -> i < count) !lines in
+    List.filter_map (fun line ->
+      match String.split_on_char '|' line with
+      | [ts; node_id; ssim_str; notes] ->
+          (try Some (ts, node_id, float_of_string ssim_str, notes)
+           with _ -> None)
+      | _ -> None
+    ) recent
+  end else []
+
+(** 노드별 SSIM 추세 조회
+
+    @param node_id Figma 노드 ID
+    @return SSIM 값 리스트 (시간순)
+*)
+let get_ssim_trend ~node_id =
+  get_recent_logs ~count:1000 ()
+  |> List.filter (fun (_, nid, _, _) -> nid = node_id)
+  |> List.map (fun (_, _, ssim, _) -> ssim)
+  |> List.rev
