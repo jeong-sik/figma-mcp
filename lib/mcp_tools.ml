@@ -785,6 +785,30 @@ let tool_figma_crawl_team : tool_def = {
   ] ["team_id"];
 }
 
+let tool_figma_team_tree : tool_def = {
+  name = "figma_team_tree";
+  description = "🌳 TREE: 팀 구조를 ASCII 트리로 출력 (Neo4j 불필요). Team→Projects→Files 빠른 탐색.";
+  input_schema = object_schema [
+    ("team_id", string_prop "팀 ID");
+    ("team_name", string_prop "팀 이름 (선택)");
+    ("token", string_prop "Figma Personal Access Token (optional if FIGMA_TOKEN env var is set)");
+    ("include_nodes", bool_prop "파일 내 노드 포함 여부 (기본값: false)");
+    ("node_depth", string_prop "노드 탐색 깊이 (기본값: 2, include_nodes=true일 때만 적용)");
+  ] ["team_id"];
+}
+
+let tool_figma_export_team : tool_def = {
+  name = "figma_export_team";
+  description = "💾 EXPORT: 팀 전체를 파일 시스템으로 내보내기. 프로젝트/파일/노드를 JSON 파일로 저장.";
+  input_schema = object_schema [
+    ("team_id", string_prop "팀 ID");
+    ("team_name", string_prop "팀 이름 (선택)");
+    ("token", string_prop "Figma Personal Access Token (optional if FIGMA_TOKEN env var is set)");
+    ("output_dir", string_prop "출력 디렉토리 경로 (필수)");
+    ("max_depth", string_prop "노드 깊이 (0=파일만, 1=페이지까지, 2+=노드까지, 기본값: 2)");
+  ] ["team_id"; "output_dir"];
+}
+
 let tool_figma_get_variables : tool_def = {
   name = "figma_get_variables";
   description = "📦 TOKENS: 파일의 디자인 토큰/변수. 색상, 타이포, 간격 등.";
@@ -951,6 +975,8 @@ let all_tools = [
   tool_figma_list_projects;
   tool_figma_list_files;
   tool_figma_crawl_team;
+  tool_figma_team_tree;
+  tool_figma_export_team;
   tool_figma_get_variables;
   (* Phase 2: 고급 쿼리 *)
   tool_figma_query;
@@ -6547,6 +6573,48 @@ let handle_crawl_team args : (Yojson.Safe.t, string) result =
   | (None, _) -> Error "Missing required parameter: team_id"
   | (_, None) -> Error "Missing required parameter: token (set FIGMA_TOKEN or pass token parameter)"
 
+(** figma_team_tree 핸들러 - 팀 구조 트리 출력 (Neo4j 불필요) *)
+let handle_team_tree args : (Yojson.Safe.t, string) result =
+  let team_id = get_string "team_id" args in
+  let team_name = get_string_or "team_name" "Unknown Team" args in
+  let token = resolve_token args in
+  let include_nodes = get_bool_or "include_nodes" false args in
+  let node_depth = get_string "node_depth" args |> Option.map int_of_string |> Option.value ~default:2 in
+
+  match (team_id, token) with
+  | (Some team_id, Some token) ->
+      (match Figma_crawl.team_tree ~token ~team_id ~team_name ~include_nodes ~node_depth () with
+       | Ok (tree_str, progress) ->
+           Ok (make_text_content (sprintf "```\n%s```\n\n%s"
+             tree_str (Yojson.Safe.pretty_to_string (`Assoc [("summary", Figma_crawl.progress_to_json progress)]))))
+       | Error err -> Error err)
+  | (None, _) -> Error "Missing required parameter: team_id"
+  | (_, None) -> Error "Missing required parameter: token (set FIGMA_TOKEN or pass token parameter)"
+
+(** figma_export_team 핸들러 - 파일 시스템으로 내보내기 *)
+let handle_export_team args : (Yojson.Safe.t, string) result =
+  let team_id = get_string "team_id" args in
+  let team_name = get_string_or "team_name" "Unknown Team" args in
+  let token = resolve_token args in
+  let output_dir = get_string "output_dir" args in
+  let max_depth = get_string "max_depth" args |> Option.map int_of_string |> Option.value ~default:2 in
+
+  match (team_id, token, output_dir) with
+  | (Some team_id, Some token, Some output_dir) ->
+      let (on_progress, get_log) = Figma_crawl.buffer_progress () in
+      (match Figma_crawl.export_team_to_fs ~token ~team_id ~output_dir ~max_depth ~team_name ~on_progress () with
+       | Ok progress ->
+           Ok (make_text_content (sprintf "```\n%s```\n\n%s"
+             (get_log ()) (Yojson.Safe.pretty_to_string (`Assoc [
+               ("status", `String "success");
+               ("output_dir", `String output_dir);
+               ("summary", Figma_crawl.progress_to_json progress);
+             ]))))
+       | Error err -> Error err)
+  | (None, _, _) -> Error "Missing required parameter: team_id"
+  | (_, None, _) -> Error "Missing required parameter: token"
+  | (_, _, None) -> Error "Missing required parameter: output_dir"
+
 (** figma_get_variables 핸들러 - 디자인 토큰/변수 *)
 let handle_get_variables args : (Yojson.Safe.t, string) result =
   let file_key = get_string "file_key" args in
@@ -7091,6 +7159,8 @@ let all_handlers_sync : (string * tool_handler_sync) list = [
   ("figma_list_projects", wrap_sync_pure handle_list_projects);
   ("figma_list_files", wrap_sync_pure handle_list_files);
   ("figma_crawl_team", wrap_sync_pure handle_crawl_team);
+  ("figma_team_tree", wrap_sync_pure handle_team_tree);
+  ("figma_export_team", wrap_sync_pure handle_export_team);
   ("figma_get_variables", wrap_sync_pure handle_get_variables);
   (* Phase 2: 고급 쿼리 *)
   ("figma_query", wrap_sync_pure handle_query);

@@ -426,3 +426,264 @@ let buffer_progress () =
     Buffer.add_char buf '\n'
   in
   (callback, fun () -> Buffer.contents buf)
+
+(** ============== Tree-only Mode (No Neo4j) ============== *)
+
+(** 노드를 트리 형태로 출력 *)
+let rec render_node_tree ~indent ~max_depth ~depth node buf =
+  if depth > max_depth then ()
+  else begin
+    let node_id = get_string_or "id" "" node in
+    let name = get_string_or "name" "" node in
+    let node_type = get_string_or "type" "" node in
+    let prefix = String.make (indent * 2) ' ' in
+    let icon = match node_type with
+      | "DOCUMENT" -> "📄"
+      | "CANVAS" | "PAGE" -> "📑"
+      | "FRAME" -> "🖼️"
+      | "GROUP" -> "📦"
+      | "COMPONENT" -> "🧩"
+      | "COMPONENT_SET" -> "🎨"
+      | "INSTANCE" -> "🔗"
+      | "TEXT" -> "✏️"
+      | "RECTANGLE" | "ELLIPSE" | "POLYGON" | "STAR" | "LINE" | "VECTOR" -> "🔷"
+      | "BOOLEAN_OPERATION" -> "⊕"
+      | "SECTION" -> "📂"
+      | _ -> "•"
+    in
+    Buffer.add_string buf (sprintf "%s%s %s [%s] (%s)\n" prefix icon name node_type node_id);
+
+    let children = get_list "children" node in
+    List.iter (fun child ->
+      render_node_tree ~indent:(indent + 1) ~max_depth ~depth:(depth + 1) child buf
+    ) children
+  end
+
+(** 팀 전체를 트리 형태로 출력 (Neo4j 없음, Effects 사용)
+
+    @return ASCII 트리 문자열
+*)
+let team_tree ~token ~team_id
+    ?(max_depth=3)
+    ?(team_name="Unknown Team")
+    ?(include_nodes=false)
+    ?(node_depth=2)
+    () =
+
+  let buf = Buffer.create 4096 in
+  let progress = create_progress () in
+
+  Buffer.add_string buf (sprintf "🏢 %s (%s)\n" team_name team_id);
+
+  match fetch_projects ~token ~team_id with
+  | Ok projects ->
+      progress.teams <- 1;
+      List.iter (fun (project_id, project_name) ->
+        progress.projects <- progress.projects + 1;
+        Buffer.add_string buf (sprintf "├── 📁 %s (%s)\n" project_name project_id);
+
+        (match fetch_files ~token ~project_id with
+         | Ok files ->
+             let file_count = List.length files in
+             List.iteri (fun i (file_key, file_name, last_modified) ->
+               progress.files <- progress.files + 1;
+               let is_last = (i = file_count - 1) in
+               let prefix = if is_last then "│   └── " else "│   ├── " in
+               Buffer.add_string buf (sprintf "%s📄 %s (%s) [%s]\n" prefix file_name file_key last_modified);
+
+               (* 노드 트리 포함 옵션 *)
+               if include_nodes && max_depth > 0 then begin
+                 rate_limit 50;
+                 match fetch_file_nodes ~token ~file_key with
+                 | Ok document ->
+                     let flat_nodes = flatten_nodes ~file_key ~parent_id:None ~depth:0 ~max_depth:node_depth document [] in
+                     progress.nodes <- progress.nodes + List.length flat_nodes;
+                     let inner_prefix = if is_last then "│       " else "│   │   " in
+                     Buffer.add_string buf (sprintf "%s└── 📊 %d nodes (depth=%d)\n" inner_prefix (List.length flat_nodes) node_depth);
+                     (* 상세 노드 트리 렌더링 *)
+                     if node_depth > 0 then
+                       render_node_tree ~indent:5 ~max_depth:node_depth ~depth:0 document buf
+                 | Error _ -> ()
+               end
+             ) files
+         | Error err ->
+             progress.errors <- err :: progress.errors;
+             Buffer.add_string buf (sprintf "│   └── ⚠️ Error: %s\n" err))
+      ) projects;
+
+      (* 요약 *)
+      Buffer.add_string buf "─────────────────────────────────────────\n";
+      Buffer.add_string buf (sprintf "📊 Summary: %d teams, %d projects, %d files"
+        progress.teams progress.projects progress.files);
+      if include_nodes then
+        Buffer.add_string buf (sprintf ", %d nodes" progress.nodes);
+      Buffer.add_string buf "\n";
+
+      Ok (Buffer.contents buf, progress)
+
+  | Error err ->
+      Error err
+
+(** ============== File System Export (No Neo4j) ============== *)
+
+(** 디렉토리 생성 (재귀) *)
+let rec mkdir_p path =
+  if Sys.file_exists path then ()
+  else begin
+    mkdir_p (Filename.dirname path);
+    try Unix.mkdir path 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ()
+  end
+
+(** 안전한 파일명 생성 *)
+let sanitize_filename name =
+  let safe = Str.global_replace (Str.regexp "[^a-zA-Z0-9가-힣_-]") "_" name in
+  if String.length safe > 50 then String.sub safe 0 50 else safe
+
+(** 노드를 파일로 저장 (재귀) *)
+let rec export_node_to_fs ~base_path ~depth ~max_depth node =
+  if depth > max_depth then 0
+  else begin
+    let node_id = get_string_or "id" "unknown" node in
+    let name = get_string_or "name" "unnamed" node in
+    let node_type = get_string_or "type" "UNKNOWN" node in
+    let safe_name = sanitize_filename name in
+    let filename = sprintf "%s_%s.json" safe_name (String.sub node_id 0 (min 8 (String.length node_id))) in
+    let filepath = Filename.concat base_path filename in
+
+    (* 현재 노드 저장 *)
+    let node_json = Yojson.Safe.pretty_to_string node in
+    let oc = open_out filepath in
+    output_string oc node_json;
+    close_out oc;
+
+    let count = 1 in
+
+    (* 자식이 있고 FRAME/GROUP/COMPONENT 등이면 하위 디렉토리 생성 *)
+    let children = get_list "children" node in
+    if children <> [] && List.mem node_type ["FRAME"; "GROUP"; "COMPONENT"; "COMPONENT_SET"; "SECTION"; "CANVAS"; "PAGE"] then begin
+      let child_dir = Filename.concat base_path (sprintf "%s_%s" safe_name (String.sub node_id 0 (min 8 (String.length node_id)))) in
+      mkdir_p child_dir;
+      count + List.fold_left (fun acc child ->
+        acc + export_node_to_fs ~base_path:child_dir ~depth:(depth + 1) ~max_depth child
+      ) 0 children
+    end else
+      count
+  end
+
+(** 팀 전체를 파일 시스템으로 내보내기 (Effects 사용)
+
+    구조:
+    output_dir/
+    ├── _meta.json (팀 메타데이터)
+    ├── project-name/
+    │   ├── _meta.json (프로젝트 메타데이터)
+    │   ├── file-name/
+    │   │   ├── _meta.json (파일 메타데이터)
+    │   │   ├── Page_1/
+    │   │   │   ├── Frame_abc123.json
+    │   │   │   └── ...
+    │   │   └── ...
+    │   └── ...
+    └── ...
+
+    @param output_dir 출력 디렉토리
+    @param max_depth 노드 깊이 (0=파일만, 1=페이지까지, 2+=노드까지)
+*)
+let export_team_to_fs ~token ~team_id ~output_dir
+    ?(max_depth=2)
+    ?(team_name="Unknown Team")
+    ~on_progress
+    () =
+
+  let progress = create_progress () in
+
+  (* 기본 디렉토리 생성 *)
+  mkdir_p output_dir;
+
+  on_progress (sprintf "📁 Exporting team to: %s" output_dir);
+
+  (* 팀 메타데이터 저장 *)
+  let team_meta = `Assoc [
+    ("id", `String team_id);
+    ("name", `String team_name);
+    ("exported_at", `String (Unix.gettimeofday () |> string_of_float));
+  ] in
+  let team_meta_path = Filename.concat output_dir "_meta.json" in
+  let oc = open_out team_meta_path in
+  output_string oc (Yojson.Safe.pretty_to_string team_meta);
+  close_out oc;
+  progress.teams <- 1;
+
+  match fetch_projects ~token ~team_id with
+  | Ok projects ->
+      on_progress (sprintf "Found %d projects" (List.length projects));
+
+      List.iter (fun (project_id, project_name) ->
+        let safe_project = sanitize_filename project_name in
+        let project_dir = Filename.concat output_dir safe_project in
+        mkdir_p project_dir;
+
+        (* 프로젝트 메타데이터 *)
+        let project_meta = `Assoc [
+          ("id", `String project_id);
+          ("name", `String project_name);
+        ] in
+        let project_meta_path = Filename.concat project_dir "_meta.json" in
+        let oc = open_out project_meta_path in
+        output_string oc (Yojson.Safe.pretty_to_string project_meta);
+        close_out oc;
+        progress.projects <- progress.projects + 1;
+
+        on_progress (sprintf "  📁 %s/" safe_project);
+
+        match fetch_files ~token ~project_id with
+        | Ok files ->
+            List.iter (fun (file_key, file_name, last_modified) ->
+              let safe_file = sanitize_filename file_name in
+              let file_dir = Filename.concat project_dir safe_file in
+              mkdir_p file_dir;
+
+              (* 파일 메타데이터 *)
+              let file_meta = `Assoc [
+                ("key", `String file_key);
+                ("name", `String file_name);
+                ("last_modified", `String last_modified);
+              ] in
+              let file_meta_path = Filename.concat file_dir "_meta.json" in
+              let oc = open_out file_meta_path in
+              output_string oc (Yojson.Safe.pretty_to_string file_meta);
+              close_out oc;
+              progress.files <- progress.files + 1;
+
+              on_progress (sprintf "    📄 %s/" safe_file);
+
+              (* 노드 내보내기 *)
+              if max_depth > 0 then begin
+                rate_limit 50;
+                match fetch_file_nodes ~token ~file_key with
+                | Ok document ->
+                    let node_count = export_node_to_fs ~base_path:file_dir ~depth:0 ~max_depth document in
+                    progress.nodes <- progress.nodes + node_count;
+                    on_progress (sprintf "       └── %d nodes exported" node_count)
+                | Error err ->
+                    progress.errors <- err :: progress.errors;
+                    on_progress (sprintf "       └── ⚠️ %s" err)
+              end
+            ) files
+        | Error err ->
+            progress.errors <- err :: progress.errors;
+            on_progress (sprintf "    ⚠️ %s" err)
+      ) projects;
+
+      (* 요약 *)
+      on_progress "─────────────────────────────────────────";
+      on_progress (sprintf "📊 Exported: %d teams, %d projects, %d files, %d nodes"
+        progress.teams progress.projects progress.files progress.nodes);
+      if progress.errors <> [] then
+        on_progress (sprintf "⚠️ Errors: %d" (List.length progress.errors));
+
+      Ok progress
+
+  | Error err ->
+      on_progress (sprintf "❌ Failed: %s" err);
+      Error err
