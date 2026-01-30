@@ -7,6 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.2] - 2026-01-30
+
+### Changed
+- `hints_to_json` → `correction_hints_to_json` (더 명확한 네이밍)
+- Docstring + 사용 예시 추가
+
+## [0.5.1] - 2026-01-30
+
+### Changed
+- LLM 오버엔지니어링 제거 (-70줄)
+- JSON 힌트 반환에 집중 (MCP 철학: Tool은 데이터, Agent는 지능)
+
+### Removed
+- `hints_to_enhanced_summary` (불필요한 LLM 통합)
+- `Figma_config.Llm` 확장 설정들
+
+## [0.5.0] - 2026-01-30
+
+### Added
+- **피드백 루프 시스템**
+  - SSIM 로그: `log_verification`, `log_improvement`, `log_hint_application`
+  - 토큰 중복 경고: Delta-E (CIEDE2000) 기반 색상 유사도 체크
+  - 자연어 힌트: `hint_to_description`, `hints_to_summary`
+
+- **Category Tool 시스템** (60 → 15 visible tools)
+  - `figma_core`, `figma_visual`, `figma_plugin`, `figma_team`
+  - `figma_export`, `figma_components` + 9 featured tools
+  - 다이브 패턴: category tool 호출 → 개별 tool 선택
+
+### Changed
+- MCP Protocol: deprecated 필드 자동 감지 (`[DEPRECATED]` prefix)
+
 ## [0.3.16] - 2026-01-29
 
 ### Changed
