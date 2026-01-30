@@ -14,6 +14,11 @@ if [ -z "$FIGMA_TOKEN" ]; then
   fi
 fi
 
+# Ensure system trust store is available for HTTPS
+if [ -z "${SSL_CERT_FILE:-}" ] && [ -f "/etc/ssl/cert.pem" ]; then
+  export SSL_CERT_FILE="/etc/ssl/cert.pem"
+fi
+
 # Ensure OCaml environment
 if command -v opam >/dev/null 2>&1; then
   eval "$(opam env 2>/dev/null)" >/dev/null 2>/dev/null || true
