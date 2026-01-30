@@ -28,7 +28,7 @@ cd "$SCRIPT_DIR"
 
 EXPECTED_VERSION=""
 if [ -f "$SCRIPT_DIR/dune-project" ]; then
-  EXPECTED_VERSION=$(sed -n 's/^[[:space:]]*(version[[:space:]]\([^)]\+\)).*/\1/p' "$SCRIPT_DIR/dune-project" | head -n1)
+  EXPECTED_VERSION=$(awk '/^[[:space:]]*\\(version[[:space:]]+/ { gsub(/[()]/, "", $2); print $2; exit }' "$SCRIPT_DIR/dune-project")
 fi
 
 get_binary_version() {
