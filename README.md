@@ -129,6 +129,12 @@ export FIGMA_TOKEN="YOUR_TOKEN"
 security add-generic-password -s "figma-mcp" -a "FIGMA_TOKEN" -w "YOUR_TOKEN"
 ```
 
+## 요청 크기 제한
+
+- 요청 바디 최대 크기는 기본 50MB입니다.
+- `FIGMA_MCP_MAX_BODY_BYTES` 또는 `MCP_MAX_BODY_BYTES`로 조정하세요.
+- `Content-Length`가 없으면 스트리밍 누적 바이트로 제한하며, 초과 시 413을 반환합니다.
+
 상세 가이드(토큰 발급 경로, 릴리즈 바이너리 설치, 설정 JSON 예시):
 - `docs/INSTALL-MANUAL.md`
 
