@@ -364,8 +364,16 @@ let hints_to_summary hints =
       (List.length hints)
       (String.concat "\n" (List.mapi (fun i d -> sprintf "  %d. %s" (i+1) d) descriptions))
 
-(** 힌트 목록을 JSON 배열로 변환 (MCP 클라이언트용) *)
-let hints_to_json hints =
+(** 힌트 목록을 JSON 배열로 변환 (MCP 클라이언트용)
+
+    @param hints correction_hint list
+    @return JSON array: [{"type": "padding", ...}, ...]
+
+    Usage:
+      let json = correction_hints_to_json [AdjustPadding (10., 0., 0., 0.)]
+      (* Returns: [{"type":"padding","top":10,"right":0,"bottom":0,"left":0}] *)
+*)
+let correction_hints_to_json hints =
   `List (List.map hint_to_json hints)
 
 (** SSIM 점수와 영역별 diff 분석 기반 조정 힌트 생성
