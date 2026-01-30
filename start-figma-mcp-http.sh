@@ -4,6 +4,11 @@
 
 set -e
 
+# Ensure system CA bundle is available for TLS (macOS ca-certs can be empty)
+if [ -z "${SSL_CERT_FILE:-}" ] && [ -f "/etc/ssl/cert.pem" ]; then
+  export SSL_CERT_FILE="/etc/ssl/cert.pem"
+fi
+
 # Load FIGMA_TOKEN from Keychain if not already set
 if [ -z "$FIGMA_TOKEN" ]; then
   FIGMA_TOKEN=$(security find-generic-password -s "figma-mcp" -a "FIGMA_TOKEN" -w 2>/dev/null || true)

@@ -107,6 +107,11 @@ fi
 
 export FIGMA_TOKEN
 
+# macOS에서 TLS 오류(Empty trust anchors)가 나면
+if [ -z "${SSL_CERT_FILE:-}" ] && [ -f "/etc/ssl/cert.pem" ]; then
+  export SSL_CERT_FILE="/etc/ssl/cert.pem"
+fi
+
 # Allow overriding the binary path if needed.
 FIGMA_MCP_BIN="${FIGMA_MCP_BIN:-$HOME/bin/figma-mcp}"
 exec "$FIGMA_MCP_BIN" "$@"
