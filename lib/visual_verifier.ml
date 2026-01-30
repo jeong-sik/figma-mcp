@@ -364,39 +364,9 @@ let hints_to_summary hints =
       (List.length hints)
       (String.concat "\n" (List.mapi (fun i d -> sprintf "  %d. %s" (i+1) d) descriptions))
 
-(** LLM 향상 힌트 생성 (설정 활성화 시)
-
-    LLM_HINT_ENABLED=true 설정 시:
-    - 기존 rule-based 힌트를 LLM에 전달
-    - 더 상세한 CSS 수정 제안과 설명 반환
-
-    비활성화 시 기본 hints_to_summary 반환
-*)
-let hints_to_enhanced_summary ~node_id ~ssim hints =
-  let basic_summary = hints_to_summary hints in
-  if not Figma_config.Llm.hint_enabled then
-    basic_summary
-  else if hints = [] then
-    basic_summary
-  else
-    (* LLM 향상: rule-based 힌트 + 컨텍스트를 제공 *)
-    let hint_json = `List (List.map hint_to_json hints) in
-    let context = sprintf
-      {|Node: %s
-SSIM: %.3f (target: 0.95+)
-Rule-based hints:
-%s
-
-JSON for programmatic use:
-%s|}
-      node_id ssim basic_summary (Yojson.Safe.to_string hint_json)
-    in
-    (* TODO: llm-mcp 연동 시 실제 LLM 호출로 대체
-       현재는 컨텍스트 포함 향상 포맷만 반환 *)
-    sprintf "%s\n\n💡 LLM 향상 가능 (endpoint: %s)\n컨텍스트:\n%s"
-      basic_summary
-      Figma_config.Llm.endpoint
-      context
+(** 힌트 목록을 JSON 배열로 변환 (MCP 클라이언트용) *)
+let hints_to_json hints =
+  `List (List.map hint_to_json hints)
 
 (** SSIM 점수와 영역별 diff 분석 기반 조정 힌트 생성
     diff_regions의 영역별 차이 비율을 분석하여 타겟 조정을 제안합니다.
