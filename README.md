@@ -577,6 +577,16 @@ dune exec ./test/test_codegen_p0.exe
 dune exec ./test/bench_p0.exe
 ```
 
+### 커밋 & 푸시 예시
+
+```bash
+# 테스트 후 커밋/푸시
+git checkout -b feature/your-branch
+git add <files>
+git commit -m "your message"
+git push -u origin feature/your-branch
+```
+
 ---
 
 ## Future Work: 다중 유사도 측정 시스템
