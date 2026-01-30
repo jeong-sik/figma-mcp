@@ -276,14 +276,17 @@ export FIGMA_TOKEN="YOUR_TOKEN"
 security add-generic-password -s "figma-mcp" -a "FIGMA_TOKEN" -w "YOUR_TOKEN"
 ```
 
-## Troubleshooting: TLS (macOS)
+## Troubleshooting: TLS (macOS/Linux)
 
 `ca-certs: empty trust anchors` 에러가 나는 경우가 있습니다.  
-`start-figma-mcp*.sh` 스크립트는 macOS에서 자동으로 `SSL_CERT_FILE=/etc/ssl/cert.pem`을 설정합니다.  
+`start-figma-mcp*.sh` 스크립트는 macOS/Linux에서 대표 CA 번들을 자동 탐색해 `SSL_CERT_FILE`을 설정합니다.  
 바이너리를 직접 실행하는 경우에만 아래를 추가하세요.
 
 ```bash
+# macOS
 export SSL_CERT_FILE="/etc/ssl/cert.pem"
+# Linux (예시)
+export SSL_CERT_FILE="/etc/ssl/certs/ca-certificates.crt"
 ```
 
 상세 가이드(토큰 발급 경로, 릴리즈 바이너리 설치, 설정 JSON 예시):

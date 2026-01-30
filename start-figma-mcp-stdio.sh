@@ -6,9 +6,20 @@
 
 set -e
 
-# Ensure system CA bundle is available for TLS (macOS ca-certs can be empty)
-if [ -z "${SSL_CERT_FILE:-}" ] && [ -f "/etc/ssl/cert.pem" ]; then
-  export SSL_CERT_FILE="/etc/ssl/cert.pem"
+# Ensure system CA bundle is available for TLS (macOS/Linux ca-certs can be empty)
+if [ -z "${SSL_CERT_FILE:-}" ]; then
+  for candidate in \
+    "/etc/ssl/cert.pem" \
+    "/etc/ssl/certs/ca-certificates.crt" \
+    "/etc/pki/tls/certs/ca-bundle.crt" \
+    "/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem" \
+    "/etc/ssl/ca-bundle.pem" \
+    "/usr/local/share/certs/ca-root-nss.crt"; do
+    if [ -f "$candidate" ]; then
+      export SSL_CERT_FILE="$candidate"
+      break
+    fi
+  done
 fi
 
 # Load FIGMA_TOKEN from Keychain if not already set
