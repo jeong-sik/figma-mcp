@@ -120,9 +120,42 @@ end
 (** {1 LLM Integration Configuration} *)
 
 module Llm = struct
-  (** LLM provider (openai, anthropic, gemini, ollama) *)
+  (** LLM provider (openai, anthropic, gemini, ollama, llm-mcp) *)
   let provider =
     get_string ~default:"" "LLM_PROVIDER"
+
+  (** LLM model name (e.g., gpt-4o, claude-sonnet-4-20250514, gemini-2.0-flash) *)
+  let model =
+    get_string ~default:"" "LLM_MODEL"
+
+  (** LLM API endpoint (for custom endpoints or llm-mcp) *)
+  let endpoint =
+    get_string ~default:"http://127.0.0.1:8932" "LLM_ENDPOINT"
+
+  (** Enable LLM-enhanced hint generation *)
+  let hint_enabled =
+    get_string ~default:"false" "FIGMA_MCP_LLM_HINT_ENABLED" = "true"
+
+  (** Temperature for hint generation (0.0-1.0) *)
+  let hint_temperature =
+    get_float ~default:0.3 "FIGMA_MCP_LLM_HINT_TEMPERATURE"
+
+  (** Maximum tokens for hint response *)
+  let hint_max_tokens =
+    get_int ~default:500 "FIGMA_MCP_LLM_HINT_MAX_TOKENS"
+
+  (** Timeout for LLM requests (milliseconds) *)
+  let timeout_ms =
+    get_int ~default:30000 "FIGMA_MCP_LLM_TIMEOUT_MS"
+
+  (** Check if LLM is configured and available *)
+  let is_available () =
+    provider <> "" || endpoint <> "http://127.0.0.1:8932"
+
+  (** Get configuration summary for debugging *)
+  let summary () =
+    Printf.sprintf "provider=%s model=%s endpoint=%s hint=%b temp=%.1f"
+      provider model endpoint hint_enabled hint_temperature
 end
 
 (** Print configuration summary *)
@@ -132,4 +165,6 @@ let print_summary () =
   Printf.eprintf "[figma_config] Plugin: ttl=%.0fs poll_max=%dms\n%!"
     Plugin.ttl_seconds Plugin.poll_max_ms;
   Printf.eprintf "[figma_config] Response: max_inline=%d dir=%s ttl=%ds\n%!"
-    Response.max_inline Response.large_dir Response.ttl_seconds
+    Response.max_inline Response.large_dir Response.ttl_seconds;
+  if Llm.is_available () then
+    Printf.eprintf "[figma_config] LLM: %s\n%!" (Llm.summary ())

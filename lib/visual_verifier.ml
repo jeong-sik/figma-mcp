@@ -332,6 +332,72 @@ let hint_to_json = function
   | AdjustBorderRadius r ->
     `Assoc [("type", `String "border_radius"); ("value", `Float r)]
 
+(** 힌트를 자연어 설명으로 변환 *)
+let hint_to_description = function
+  | AdjustPadding (t, r, b, l) ->
+    let parts = [] in
+    let parts = if t > 0. then (sprintf "상단 %.0fpx" t) :: parts else parts in
+    let parts = if r > 0. then (sprintf "우측 %.0fpx" r) :: parts else parts in
+    let parts = if b > 0. then (sprintf "하단 %.0fpx" b) :: parts else parts in
+    let parts = if l > 0. then (sprintf "좌측 %.0fpx" l) :: parts else parts in
+    if parts = [] then "여백 미세 조정 필요"
+    else sprintf "여백(padding) 추가 필요: %s" (String.concat ", " (List.rev parts))
+  | AdjustGap g ->
+    sprintf "요소 간격(gap) %.0fpx 조정 필요" g
+  | AdjustColor (sel, rgba) ->
+    sprintf "'%s' 색상을 rgba(%.0f,%.0f,%.0f,%.2f)로 변경 필요"
+      sel (rgba.r *. 255.) (rgba.g *. 255.) (rgba.b *. 255.) rgba.a
+  | AdjustSize (w, h) ->
+    sprintf "크기 조정 필요: 너비 %+.0fpx, 높이 %+.0fpx" w h
+  | AdjustFontSize s ->
+    sprintf "폰트 크기 %+.0fpx 조정 필요" s
+  | AdjustBorderRadius r ->
+    sprintf "모서리 둥글기(border-radius) %.0fpx로 조정 필요" r
+
+(** 힌트 목록을 자연어 요약으로 변환 *)
+let hints_to_summary hints =
+  if hints = [] then
+    "✅ 조정 불필요 - 시각적 일치도가 충분합니다."
+  else
+    let descriptions = List.map hint_to_description hints in
+    sprintf "📋 %d개 조정 제안:\n%s"
+      (List.length hints)
+      (String.concat "\n" (List.mapi (fun i d -> sprintf "  %d. %s" (i+1) d) descriptions))
+
+(** LLM 향상 힌트 생성 (설정 활성화 시)
+
+    LLM_HINT_ENABLED=true 설정 시:
+    - 기존 rule-based 힌트를 LLM에 전달
+    - 더 상세한 CSS 수정 제안과 설명 반환
+
+    비활성화 시 기본 hints_to_summary 반환
+*)
+let hints_to_enhanced_summary ~node_id ~ssim hints =
+  let basic_summary = hints_to_summary hints in
+  if not Figma_config.Llm.hint_enabled then
+    basic_summary
+  else if hints = [] then
+    basic_summary
+  else
+    (* LLM 향상: rule-based 힌트 + 컨텍스트를 제공 *)
+    let hint_json = `List (List.map hint_to_json hints) in
+    let context = sprintf
+      {|Node: %s
+SSIM: %.3f (target: 0.95+)
+Rule-based hints:
+%s
+
+JSON for programmatic use:
+%s|}
+      node_id ssim basic_summary (Yojson.Safe.to_string hint_json)
+    in
+    (* TODO: llm-mcp 연동 시 실제 LLM 호출로 대체
+       현재는 컨텍스트 포함 향상 포맷만 반환 *)
+    sprintf "%s\n\n💡 LLM 향상 가능 (endpoint: %s)\n컨텍스트:\n%s"
+      basic_summary
+      Figma_config.Llm.endpoint
+      context
+
 (** SSIM 점수와 영역별 diff 분석 기반 조정 힌트 생성
     diff_regions의 영역별 차이 비율을 분석하여 타겟 조정을 제안합니다.
 
@@ -969,6 +1035,25 @@ let log_improvement ~node_id ~before_ssim ~after_ssim ~change_description =
   let notes = Printf.sprintf "%s (%.1f%% improvement)" change_description improvement in
   log_verification ~node_id ~ssim:after_ssim ~notes ();
   improvement
+
+(** 힌트 적용 결과를 SSIM 로그에 기록 *)
+let log_hint_application ~node_id ~before_ssim ~after_ssim ~hints =
+  let hint_names = List.map (function
+    | AdjustPadding _ -> "padding"
+    | AdjustGap _ -> "gap"
+    | AdjustColor _ -> "color"
+    | AdjustSize _ -> "size"
+    | AdjustFontSize _ -> "font_size"
+    | AdjustBorderRadius _ -> "border_radius"
+  ) hints in
+  let hints_str = String.concat "+" hint_names in
+  let improvement = (after_ssim -. before_ssim) *. 100. in
+  let notes = Printf.sprintf "hints:%s (%.1f%% %s)"
+    hints_str
+    (abs_float improvement)
+    (if improvement >= 0. then "↑" else "↓")
+  in
+  log_verification ~node_id ~ssim:after_ssim ~notes ()
 
 (** 최근 SSIM 로그 조회
 

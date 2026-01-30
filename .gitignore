@@ -40,3 +40,4 @@ figma-mcp-linux-x64
 .figma-ssim.log
 tokens.json
 .figma-experiments.log
+data/telemetry.jsonl
