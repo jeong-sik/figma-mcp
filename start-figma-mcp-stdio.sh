@@ -26,6 +26,18 @@ fi
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
+EXPECTED_VERSION=""
+if [ -f "$SCRIPT_DIR/dune-project" ]; then
+  EXPECTED_VERSION=$(sed -n 's/^[[:space:]]*(version[[:space:]]\([^)]\+\)).*/\1/p' "$SCRIPT_DIR/dune-project" | head -n1)
+fi
+
+get_binary_version() {
+  local bin="$1"
+  if [ -x "$bin" ]; then
+    "$bin" --version 2>/dev/null | awk '{print $NF}' | tr -d '\r'
+  fi
+}
+
 # Detect HTTP mode (--port or --http argument)
 HTTP_MODE=false
 for arg in "$@"; do
@@ -77,6 +89,19 @@ if [ -z "$FIGMA_EXE" ] && [ "$HTTP_MODE" = true ]; then
     chmod +x "$RELEASE_BINARY"
     FIGMA_EXE="$RELEASE_BINARY"
     echo "Downloaded: $RELEASE_BINARY" >&2
+  fi
+fi
+
+# Version check (prefer rebuilding when mismatch)
+if [ -n "$FIGMA_EXE" ] && [ -n "$EXPECTED_VERSION" ]; then
+  BIN_VERSION="$(get_binary_version "$FIGMA_EXE")"
+  if [ -n "$BIN_VERSION" ] && [ "$BIN_VERSION" != "$EXPECTED_VERSION" ]; then
+    if command -v dune >/dev/null 2>&1; then
+      echo "Binary version $BIN_VERSION != expected $EXPECTED_VERSION. Rebuilding..." >&2
+      FIGMA_EXE=""
+    else
+      echo "Warning: binary version $BIN_VERSION != expected $EXPECTED_VERSION (dune not found; using existing binary)" >&2
+    fi
   fi
 fi
 
