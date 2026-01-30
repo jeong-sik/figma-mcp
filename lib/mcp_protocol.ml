@@ -190,6 +190,13 @@ type mcp_server = {
 let mcp_instructions = {|
 ## Figma MCP - UI 구현 가이드라인
 
+### 💡 핵심 원칙 (Best Programmer Principles)
+
+1. **Parse, Don't Validate**: URL은 항상 `figma_parse_url`로 파싱 먼저
+2. **Simple Made Easy**: 복잡한 워크플로우보다 단순한 3단계
+3. **Trust but Verify**: 생성한 코드는 `figma_verify_visual`로 항상 검증
+4. **Fail Fast**: 에러 메시지의 suggestion을 즉시 따르기
+
 ### 🎯 목표: 95%+ Fidelity UI 구현
 
 ### 📐 두 가지 구현 패턴
@@ -227,11 +234,77 @@ F(Card 320×200 col gap:12 ax:min cx:stretch bg:#FFF r:12,16,12,16)
 - 분할정복 플랜은 gRPC `PlanTasks`의 `recursive=true`로 생성
 
 ### 🔄 권장 워크플로우
-1. `figma_list_screens` → 화면 목록 확인
-2. `figma_get_node_summary` → 구조 파악 (Outside-In)
-3. `figma_tree` → 계층 시각화
-4. `figma_get_node` → 상세 구현
-5. `figma_export_tokens` → 디자인 토큰 추출
+1. `figma_parse_url` → **먼저** URL 파싱 (Parse, Don't Validate)
+2. `figma_list_screens` → 화면 목록 확인
+3. `figma_get_node_summary` → 구조 파악 (Outside-In)
+4. `figma_tree` → 계층 시각화
+5. `figma_get_node` → 상세 구현
+6. `figma_export_tokens` → 디자인 토큰 추출
+
+### 🔐 Parse, Don't Validate (필수 원칙)
+
+**항상 `figma_parse_url`로 시작하세요:**
+```
+URL: https://figma.com/design/ABC123/File?node-id=1-234
+     ↓ figma_parse_url
+{ file_key: "ABC123", node_id: "1:234" }  ← 파싱된 안전한 값
+```
+
+**왜 중요한가:**
+- URL의 `node-id=1-234`는 `-`를 사용 (API는 `:`를 요구)
+- 직접 추출하면 형식 오류 발생 → `figma_parse_url`이 자동 변환
+- 파싱 결과를 그대로 사용하면 에러 없음
+
+### 🎛️ 도구 선택 가이드 (언제 어떤 도구?)
+
+| 상황 | 권장 도구 | 이유 |
+|------|----------|------|
+| URL만 있음 | `figma_parse_url` | file_key/node_id 추출, API 호출 없음 |
+| 구조 파악 | `figma_get_node_summary` | 경량, 자식 목록만 |
+| 텍스트/이름 검색 | `figma_search` | 키워드 기반 빠른 검색 |
+| 조건부 필터 | `figma_query` | type/크기/색상 조합 |
+| 단일 노드 구현 | `figma_get_node` | DSL 변환 |
+| 전체 번들 필요 | `figma_get_node_bundle` | DSL + 이미지 + 변수 한번에 |
+| 계층 시각화 | `figma_tree` | ASCII 트리 출력 |
+| 시각 검증 | `figma_verify_visual` | SSIM 자동 비교/보정 |
+| 대형 노드 분할 | `figma_get_node_chunk` | depth 범위 지정 |
+| 디자인 토큰 | `figma_export_tokens` | CSS/Tailwind/JSON 출력 |
+
+### ⚠️ 흔한 에러와 해결법
+
+| 에러 | 원인 | 해결 |
+|------|------|------|
+| `Invalid node_id format` | node_id가 `123:456` 형식 아님 | URL에서 `node-id=` 파라미터 확인, `-`를 `:`로 변환 |
+| `404 Not Found` | file_key 또는 node_id 잘못됨 | `figma_parse_url`로 URL 파싱 재확인 |
+| `403 Forbidden` | 토큰 권한 부족 또는 파일 비공개 | FIGMA_TOKEN 환경변수 확인, 파일 공유 설정 확인 |
+| `Rate Limited` | API 호출 과다 | 대기 후 재시도, depth 제한으로 호출 수 줄이기 |
+| `large_result` 반환 | 응답이 너무 큼 | `figma_read_large_result`로 분할 읽기 |
+| `children_present=false` | depth 부족 | depth 파라미터 증가 |
+| `image_fills` 누락 | 이미지 데이터 미포함 | `include_image_fills=true` 추가 |
+| SSIM 낮음 | 색상/크기/폰트 불일치 | `figma_compare_elements`로 상세 비교 |
+
+### 🔄 에러 복구 (Simple Made Easy)
+
+**에러 발생 시 3단계:**
+1. **suggestion 읽기** → 에러 메시지에 해결책 포함
+2. **URL 재파싱** → `figma_parse_url`로 파라미터 검증
+3. **재시도** → 수정된 파라미터로 호출
+
+**복잡하게 생각하지 마세요:**
+- 대부분의 에러는 node_id 형식 문제 (`-` vs `:`)
+- `figma_parse_url` 한 번이면 해결
+
+### 🛡️ 에러 예방 체크리스트
+
+**API 호출 전 확인:**
+- [ ] URL을 `figma_parse_url`로 파싱했는가?
+- [ ] node_id가 `숫자:숫자` 형식인가? (예: `123:456`)
+- [ ] file_key가 영문+숫자인가? (예: `ABC123xyz`)
+- [ ] FIGMA_TOKEN 환경변수가 설정되어 있는가?
+
+**대형 노드 작업 전:**
+- [ ] `figma_get_node_summary`로 크기를 먼저 확인했는가?
+- [ ] 자식이 100개 이상이면 `depth` 제한을 설정했는가?
 
 ### 🎯 99%+ SSIM 달성 핵심 (Visual Verification)
 
@@ -254,10 +327,23 @@ align-items: center;
 justify-content: center;
 ```
 
-**5. `figma_verify_visual` 도구 사용**
-- target_ssim: 0.95 (95% 이상 통과)
-- max_iterations: 3 (자동 보정 시도)
-- 초기 품질이 높으면 보정 불필요 (99%+ 즉시 달성)
+**5. `figma_verify_visual` 도구 사용 (테스트 원칙)**
+
+**항상 검증하세요** - 작성한 코드가 워킹하지 않을 수 있음:
+```
+figma_verify_visual(
+  file_key="...",
+  node_id="...",
+  html="<생성한 HTML>",
+  target_ssim=0.95,      // 95% 이상 통과
+  max_iterations=3       // 자동 보정 시도
+)
+```
+
+**검증 실패 시:**
+1. `figma_compare_elements`로 색상/박스 상세 비교
+2. `figma_evolution_report`로 진화 과정 확인
+3. CSS 수동 조정 후 재검증
 
 ### ⚠️ TEXT 노드 정확도 (Critical - SSIM은 텍스트를 검증하지 않음)
 
@@ -308,6 +394,18 @@ chrome 도구 불가 시 `figma_verify_visual` 내장 Playwright 사용:
 4. [Chrome 불가 시]
    - figma_verify_visual html=<생성한HTML>
 ```
+
+### 🩺 환경 점검
+
+시각 검증이 실패하면 `figma_doctor`로 의존성 점검:
+- Node.js, Playwright, ImageMagick 설치 상태
+- 스크립트 경로 유효성
+- 필요 시 `npx playwright install chromium` 실행
+
+### 🔗 MCP 리소스 활용
+
+- `figma://docs/fidelity` - Fidelity DSL v3 스펙
+- `figma://docs/usage` - 사용 가이드 (도구 선택 예시)
 |}
 
 let handle_initialize params : Yojson.Safe.t =

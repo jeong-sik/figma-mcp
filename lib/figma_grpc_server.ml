@@ -1198,7 +1198,8 @@ let create_service () =
 
 let create_server ~port () =
   let config = { Grpc_eio.Server.default_config with port } in
-  Grpc_eio.Server.create ~config ()
+  (* Use reflection-enabled server for grpcurl discovery *)
+  Grpc_eio.Reflection.create_server_with_reflection ~config ()
   |> Grpc_eio.Server.add_service (create_service ())
   |> Grpc_eio.Server.with_interceptor (Grpc_eio.Interceptor.logging ())
 

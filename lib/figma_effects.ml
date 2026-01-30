@@ -115,6 +115,24 @@ type _ Effect.t +=
   | Log_info : string -> unit Effect.t
   | Log_error : string -> unit Effect.t
 
+(** Neo4j effects - HTTP calls to Neo4j *)
+type neo4j_result = (Yojson.Safe.t, string) result
+
+type _ Effect.t +=
+  | Neo4j_run_cypher : {
+      uri: string;
+      database: string;
+      auth_header: string;
+      query: string;
+      params: (string * Yojson.Safe.t) list;
+    } -> neo4j_result Effect.t
+  | Neo4j_run_batch : {
+      uri: string;
+      database: string;
+      auth_header: string;
+      queries: (string * (string * Yojson.Safe.t) list) list;
+    } -> neo4j_result Effect.t
+
 (** {1 Effect Performers - API for business logic} *)
 
 module Perform = struct
@@ -210,6 +228,14 @@ module Perform = struct
   let log_debug msg = Effect.perform (Log_debug msg)
   let log_info msg = Effect.perform (Log_info msg)
   let log_error msg = Effect.perform (Log_error msg)
+
+  (** Neo4j - Run single Cypher query *)
+  let neo4j_run_cypher ~uri ~database ~auth_header ~query ~params =
+    Effect.perform (Neo4j_run_cypher { uri; database; auth_header; query; params })
+
+  (** Neo4j - Run batch Cypher queries *)
+  let neo4j_run_batch ~uri ~database ~auth_header ~queries =
+    Effect.perform (Neo4j_run_batch { uri; database; auth_header; queries })
 end
 
 (** {1 Mock Handler for Testing} *)
@@ -402,6 +428,68 @@ let run_with_mock : 'a. mock_store -> (unit -> 'a) -> 'a = fun store computation
 
         | _ -> None
     }
+
+(** {1 Neo4j HTTP Helpers} *)
+
+(** Create a Neo4j statement from query and params *)
+let make_neo4j_statement query params =
+  let params_json = `Assoc params in
+  `Assoc [
+    ("statement", `String query);
+    ("parameters", params_json);
+  ]
+
+(** Parse Neo4j response and extract results *)
+let parse_neo4j_response body : (Yojson.Safe.t, string) result =
+  try
+    let json = Yojson.Safe.from_string body in
+    let errors = match Yojson.Safe.Util.member "errors" json with
+      | `List errs ->
+          List.filter_map (fun e ->
+            let code = Yojson.Safe.Util.(member "code" e |> to_string_option) |> Option.value ~default:"" in
+            let message = Yojson.Safe.Util.(member "message" e |> to_string_option) |> Option.value ~default:"" in
+            if code = "" && message = "" then None
+            else Some (Printf.sprintf "%s: %s" code message)
+          ) errs
+      | _ -> []
+    in
+    if errors <> [] then Error (String.concat "; " errors)
+    else
+      let results = Yojson.Safe.Util.member "results" json in
+      Ok results
+  with
+  | Yojson.Json_error msg -> Error (Printf.sprintf "JSON parse error: %s" msg)
+  | e -> Error (Printf.sprintf "Parse error: %s" (Printexc.to_string e))
+
+(** Make HTTP POST request to Neo4j Transaction API *)
+let neo4j_http_post ~sw ~net ~clock:_ ~client:_
+    ~uri ~database ~auth_header statements =
+  let endpoint = Printf.sprintf "%s/db/%s/tx/commit" uri database in
+  let body_json = `Assoc [("statements", `List statements)] in
+  let body_str = Yojson.Safe.to_string body_json in
+
+  let uri_parsed = Uri.of_string endpoint in
+  let headers = Cohttp.Header.of_list [
+    ("Content-Type", "application/json");
+    ("Accept", "application/json");
+    ("Authorization", auth_header);
+  ] in
+
+  let http_client = Cohttp_eio.Client.make ~https:None net in
+  let resp, resp_body =
+    Cohttp_eio.Client.post
+      ~sw
+      http_client
+      ~headers
+      ~body:(Cohttp_eio.Body.of_string body_str)
+      uri_parsed
+  in
+  let status = Cohttp.Response.status resp in
+  let body_content = Eio.Buf_read.(parse_exn take_all) resp_body ~max_size:max_int in
+
+  match Cohttp.Code.code_of_status status with
+  | 200 | 201 -> parse_neo4j_response body_content
+  | code -> Error (Printf.sprintf "HTTP %d: %s" code body_content)
 
 (** {1 Pure Eio Handler - No Lwt bridge} *)
 
@@ -600,6 +688,23 @@ let run_with_pure_eio_api ~sw ~net ~clock ~client computation =
             Some (fun (k : (a, _) Effect.Deep.continuation) ->
               Printf.eprintf "[ERROR] %s\n%!" msg;
               Effect.Deep.continue k ())
+
+        (* Neo4j effects - HTTP calls to Neo4j Transactional API *)
+        | Neo4j_run_cypher { uri; database; auth_header; query; params } ->
+            Some (fun (k : (a, _) Effect.Deep.continuation) ->
+              let result = neo4j_http_post ~sw ~net ~clock ~client
+                ~uri ~database ~auth_header
+                [make_neo4j_statement query params]
+              in
+              Effect.Deep.continue k result)
+
+        | Neo4j_run_batch { uri; database; auth_header; queries } ->
+            Some (fun (k : (a, _) Effect.Deep.continuation) ->
+              let statements = List.map (fun (q, p) -> make_neo4j_statement q p) queries in
+              let result = neo4j_http_post ~sw ~net ~clock ~client
+                ~uri ~database ~auth_header statements
+              in
+              Effect.Deep.continue k result)
 
         | _ -> None
     }

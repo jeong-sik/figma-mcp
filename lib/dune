@@ -7,6 +7,7 @@
    str
    unix
    ipaddr
+   base64
    ;; Eio (Pure: HTTP server + gRPC server + Figma API client)
    eio
    eio_main
@@ -20,6 +21,8 @@
    grpc-direct
    grpc-direct-core
    ;; Crypto RNG (for HTTPS/TLS)
-   mirage-crypto-rng.unix)
+   mirage-crypto-rng.unix
+   ;; Version from dune-project (auto-sync)
+   dune-build-info)
  (wrapped false)
  (ocamlopt_flags (:standard -w -50)))

@@ -7,6 +7,69 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.16] - 2026-01-29
+
+### Changed
+- STRAP pattern: Consolidate 8 plugin tools → 1 unified `figma_plugin` tool
+- Tool count: 51 → 44 (14% reduction, ~14% context savings)
+
+### Plugin Actions
+- `connect`, `use_channel`, `status`, `read_selection`
+- `get_node`, `export_image`, `get_variables`, `apply_ops`
+
+### Sources
+- [STRAP Pattern](https://almatuck.com/articles/reduced-mcp-tools-96-to-10-strap-pattern)
+- [MCP Spec 2025-11-25](https://modelcontextprotocol.io/specification/2025-11-25)
+
+## [0.3.15] - 2026-01-29
+
+### Improved
+- Add consistent category markers to all 56 tools (Tool Budget optimization)
+- Categories: 🎯 CORE, 📦 BATCH, ✅ VERIFY, 📋 QUICK, 🔌 PLUGIN, 🖼️ ASSET, 📊 REPORT, 🔧 UTIL, [Advanced]
+- Compress tool descriptions (avg 30% reduction)
+
+### Sources
+- "Less is More" MCP design patterns (Klavis)
+- Docker MCP best practices
+- Figma official MCP server docs
+
+## [0.3.14] - 2026-01-29
+
+### Improved
+- Add `get_int_or`, `get_int_positive`, `get_int_nonneg` helper functions
+- Replace 14 instances of verbose match patterns with concise helpers
+- Remove unused `required` parameter workaround from `string_prop`
+
+## [0.3.13] - 2026-01-29
+
+### Improved
+- Tool descriptions with emoji markers (🎯 CORE, 📦 RECOMMENDED, ✅ VERIFY)
+- MCP Instructions: Parse, Don't Validate principle (always start with `figma_parse_url`)
+- MCP Instructions: Error prevention checklist before API calls
+- MCP Instructions: Tool selection guide table
+- MCP Instructions: Common errors and solutions table
+- MCP Instructions: Simplified 3-step error recovery workflow
+
+### Added
+- New prompt `figma_error_troubleshoot` for systematic error diagnosis
+- Core principles summary section (Best Programmer Principles)
+- `figma_verify_visual` detailed usage guide with code example
+
+## [0.3.12] - 2026-01-29
+
+### Improved
+- Data-driven error suggestions with `first_match` pattern
+- `body_contains`, `body_contains_any` helper functions
+- Cleaner separation: `suggestion_for_400/403/404`
+
+## [0.3.11] - 2026-01-29
+
+### Fixed
+- Include Figma API response body in error messages for better debugging (max 200 chars)
+- Raise ulimit in startup scripts to prevent EMFILE accept crashes under high load
+
+## [0.3.10] - 2026-01-28
+
 ### Changed
 - Drop external `mcp_protocol` dependency in favor of local protocol module to avoid pin conflicts.
 
@@ -15,6 +78,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Record `Result.Error` outcomes as circuit failures in LLM MCP retry flow.
 - Clamp `figma_select_nodes` summary depth/preview scale and emit warnings on clamp.
 - Run Lwt-based Figma API calls in a separate Eio domain in the example tool executor.
+
+### Fixed
+- Ensure cache directory creation works for nested paths (mkdir_p).
+- Sanitize file_key when building asset paths to avoid unsafe characters.
 
 ## [0.3.5] - 2026-01-27
 

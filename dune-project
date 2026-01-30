@@ -1,6 +1,6 @@
 (lang dune 3.15)
 (name figma_mcp)
-(version 0.3.5)
+(version 0.4.5)
 
 (generate_opam_files true)
 
@@ -22,10 +22,17 @@
   (grpc-direct (>= 0.1.0))
   ; Standard dependencies
   (yojson (>= 2.0))
-  (cohttp-lwt-unix (>= 5.0))
-  (conduit-lwt-unix (>= 5.0))
-  (lwt (>= 5.6))
   (uri (>= 4.2))
   (cmdliner (>= 1.1))
+  (ppx_deriving_yojson (>= 3.6))
+  ; Eio ecosystem
   (eio (>= 1.0))
-  (ppx_deriving_yojson (>= 3.6))))
+  (eio_main (>= 1.0))
+  (httpun-eio (>= 0.1))
+  (gluten-eio (>= 0.4))
+  (cohttp-eio (>= 6.0))
+  (tls-eio (>= 1.0))
+  (ca-certs (>= 0.2))
+  (bigstringaf (>= 0.9))
+  (mirage-crypto-rng (>= 1.0))
+  (ipaddr (>= 5.0))))
