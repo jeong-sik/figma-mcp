@@ -34,7 +34,7 @@ GRPC_PORT="${FIGMA_MCP_GRPC_PORT:-}"
 
 EXPECTED_VERSION=""
 if [ -f "$SCRIPT_DIR/dune-project" ]; then
-  EXPECTED_VERSION=$(awk '/^[[:space:]]*\\(version[[:space:]]+/ { gsub(/[()]/, "", $2); print $2; exit }' "$SCRIPT_DIR/dune-project")
+  EXPECTED_VERSION=$(awk '/^[[:space:]]*[(]version[[:space:]]+/ { gsub(/[()]/, "", $2); print $2; exit }' "$SCRIPT_DIR/dune-project")
 fi
 
 get_binary_version() {
