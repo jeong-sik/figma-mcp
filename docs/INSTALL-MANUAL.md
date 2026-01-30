@@ -107,6 +107,22 @@ fi
 
 export FIGMA_TOKEN
 
+# TLS 오류(Empty trust anchors)가 나면
+if [ -z "${SSL_CERT_FILE:-}" ]; then
+  for candidate in \
+    "/etc/ssl/cert.pem" \
+    "/etc/ssl/certs/ca-certificates.crt" \
+    "/etc/pki/tls/certs/ca-bundle.crt" \
+    "/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem" \
+    "/etc/ssl/ca-bundle.pem" \
+    "/usr/local/share/certs/ca-root-nss.crt"; do
+    if [ -f "$candidate" ]; then
+      export SSL_CERT_FILE="$candidate"
+      break
+    fi
+  done
+fi
+
 # Allow overriding the binary path if needed.
 FIGMA_MCP_BIN="${FIGMA_MCP_BIN:-$HOME/bin/figma-mcp}"
 exec "$FIGMA_MCP_BIN" "$@"

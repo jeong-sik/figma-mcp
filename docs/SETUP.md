@@ -34,6 +34,11 @@ dune exec figma-mcp
 # 1) 환경변수로 실행 (일회성)
 export FIGMA_TOKEN="YOUR_TOKEN"
 
+# TLS 오류(Empty trust anchors)가 나면
+# macOS: /etc/ssl/cert.pem
+# Linux: /etc/ssl/certs/ca-certificates.crt (배포판별 상이)
+export SSL_CERT_FILE="/etc/ssl/cert.pem"
+
 # 2) Keychain 저장 (권장)
 security add-generic-password -s "figma-mcp" -a "FIGMA_TOKEN" -w "YOUR_TOKEN"
 ```
