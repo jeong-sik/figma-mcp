@@ -424,6 +424,84 @@ const handlers = {
     return { count: nodes.length, nodes: nodes.slice(0, 100).map(n => ({ id: n.id, name: n.name, type: n.type })) };
   }),
 
+  // === DSL Execution (Code → Figma) ===
+  execute_dsl: H.simple(async (p) => {
+    var operations = p.operations || [];
+    var createdNodes = [];
+
+    function parseColor(hex) {
+      if (!hex || typeof hex !== "string") return { r: 0.5, g: 0.5, b: 0.5 };
+      hex = hex.replace("#", "");
+      if (hex.length === 3) hex = hex[0]+hex[0]+hex[1]+hex[1]+hex[2]+hex[2];
+      var r = parseInt(hex.substring(0, 2), 16) / 255;
+      var g = parseInt(hex.substring(2, 4), 16) / 255;
+      var b = parseInt(hex.substring(4, 6), 16) / 255;
+      return { r: r, g: g, b: b };
+    }
+
+    function applyFills(node, fills) {
+      if (!fills || !fills.length) return;
+      var figmaFills = fills.map(function(f) {
+        if (f.type === "SOLID") {
+          return { type: "SOLID", color: parseColor(f.color) };
+        }
+        return { type: "SOLID", color: { r: 1, g: 1, b: 1 } };
+      });
+      node.fills = figmaFills;
+    }
+
+    async function executeOp(op, parent) {
+      var node;
+      var action = op.action || op.type;
+
+      if (action === "create_frame" || action === "frame") {
+        node = figma.createFrame();
+      } else if (action === "create_rectangle" || action === "rectangle") {
+        node = figma.createRectangle();
+      } else if (action === "create_ellipse" || action === "ellipse") {
+        node = figma.createEllipse();
+      } else if (action === "create_text" || action === "text") {
+        node = figma.createText();
+        await figma.loadFontAsync({ family: "Inter", style: "Regular" });
+        node.characters = op.text || op.characters || "Text";
+        if (op.fontSize || op.font_size) node.fontSize = op.fontSize || op.font_size;
+      } else {
+        return null;
+      }
+
+      node.name = op.name || action;
+      if (op.width && op.height) node.resize(op.width, op.height);
+      if (op.x !== undefined) node.x = op.x;
+      if (op.y !== undefined) node.y = op.y;
+      if (op.cornerRadius || op.corner_radius) {
+        if (node.cornerRadius !== undefined) node.cornerRadius = op.cornerRadius || op.corner_radius;
+      }
+      applyFills(node, op.fills);
+
+      if (parent && parent.appendChild) {
+        parent.appendChild(node);
+      }
+
+      createdNodes.push({ id: node.id, name: node.name, type: node.type });
+
+      // Process children recursively
+      if (op.children && op.children.length) {
+        for (var i = 0; i < op.children.length; i++) {
+          await executeOp(op.children[i], node);
+        }
+      }
+
+      return node;
+    }
+
+    // Execute all root operations
+    for (var i = 0; i < operations.length; i++) {
+      await executeOp(operations[i], figma.currentPage);
+    }
+
+    return { created: createdNodes.length, nodes: createdNodes };
+  }),
+
   // === Create (11) ===
   create_frame: H.simple((p) => {
     const frame = figma.createFrame();
@@ -1025,25 +1103,198 @@ async function handleCommand(command) {
 
 // ============== Message Handler ==============
 
-// Helper: Get selection data for inspector
+// Helper: Convert color to hex
+function colorToHex(c, opacity) {
+  var r = Math.round(c.r * 255).toString(16).padStart(2, "0");
+  var g = Math.round(c.g * 255).toString(16).padStart(2, "0");
+  var b = Math.round(c.b * 255).toString(16).padStart(2, "0");
+  if (opacity !== undefined && opacity < 1) {
+    var a = Math.round(opacity * 255).toString(16).padStart(2, "0");
+    return "#" + r + g + b + a;
+  }
+  return "#" + r + g + b;
+}
+
+// Helper: Extract fill info
+function extractFills(fills) {
+  if (!fills || fills === figma.mixed) return null;
+  var result = [];
+  for (var i = 0; i < fills.length && i < 5; i++) {
+    var fill = fills[i];
+    if (!fill.visible) continue;
+    var f = { type: fill.type };
+    if (fill.type === "SOLID") {
+      f.color = colorToHex(fill.color, fill.opacity);
+    } else if (fill.type === "GRADIENT_LINEAR" || fill.type === "GRADIENT_RADIAL") {
+      f.gradientStops = fill.gradientStops.map(function(s) {
+        return { color: colorToHex(s.color), position: s.position };
+      });
+    } else if (fill.type === "IMAGE") {
+      f.scaleMode = fill.scaleMode;
+    }
+    result.push(f);
+  }
+  return result.length > 0 ? result : null;
+}
+
+// Helper: Extract stroke info
+function extractStrokes(strokes, strokeWeight) {
+  if (!strokes || strokes === figma.mixed || strokes.length === 0) return null;
+  var result = [];
+  for (var i = 0; i < strokes.length && i < 3; i++) {
+    var stroke = strokes[i];
+    if (!stroke.visible) continue;
+    var s = { type: stroke.type };
+    if (stroke.type === "SOLID") {
+      s.color = colorToHex(stroke.color, stroke.opacity);
+    }
+    result.push(s);
+  }
+  if (result.length === 0) return null;
+  return { strokes: result, weight: strokeWeight };
+}
+
+// Helper: Extract effects (shadows, blur)
+function extractEffects(effects) {
+  if (!effects || effects === figma.mixed || effects.length === 0) return null;
+  var result = [];
+  for (var i = 0; i < effects.length && i < 5; i++) {
+    var effect = effects[i];
+    if (!effect.visible) continue;
+    var e = { type: effect.type };
+    if (effect.type === "DROP_SHADOW" || effect.type === "INNER_SHADOW") {
+      e.color = colorToHex(effect.color, effect.color.a);
+      e.offset = { x: effect.offset.x, y: effect.offset.y };
+      e.radius = effect.radius;
+      e.spread = effect.spread;
+    } else if (effect.type === "LAYER_BLUR" || effect.type === "BACKGROUND_BLUR") {
+      e.radius = effect.radius;
+    }
+    result.push(e);
+  }
+  return result.length > 0 ? result : null;
+}
+
+// Helper: Extract auto-layout info
+function extractAutoLayout(n) {
+  if (!("layoutMode" in n) || n.layoutMode === "NONE") return null;
+  var layout = {
+    mode: n.layoutMode,
+    spacing: n.itemSpacing,
+    padding: {
+      top: n.paddingTop,
+      right: n.paddingRight,
+      bottom: n.paddingBottom,
+      left: n.paddingLeft
+    }
+  };
+  if (n.primaryAxisAlignItems) layout.mainAlign = n.primaryAxisAlignItems;
+  if (n.counterAxisAlignItems) layout.crossAlign = n.counterAxisAlignItems;
+  if (n.layoutWrap) layout.wrap = n.layoutWrap;
+  return layout;
+}
+
+// Helper: Extract text info
+function extractTextInfo(n) {
+  if (n.type !== "TEXT") return null;
+  var text = {
+    characters: n.characters.substring(0, 200),
+    fontSize: n.fontSize !== figma.mixed ? n.fontSize : "mixed",
+    fontName: n.fontName !== figma.mixed ? n.fontName.family + " " + n.fontName.style : "mixed"
+  };
+  if (n.textAlignHorizontal) text.alignH = n.textAlignHorizontal;
+  if (n.textAlignVertical) text.alignV = n.textAlignVertical;
+  if (n.lineHeight !== figma.mixed && n.lineHeight.unit !== "AUTO") {
+    text.lineHeight = n.lineHeight.value;
+  }
+  return text;
+}
+
+// Helper: Extract constraints
+function extractConstraints(n) {
+  if (!("constraints" in n)) return null;
+  return {
+    horizontal: n.constraints.horizontal,
+    vertical: n.constraints.vertical
+  };
+}
+
+// Helper: Recursively extract node tree (limited depth)
+function extractNodeTree(n, depth) {
+  if (depth > 3) return { id: n.id, name: n.name, type: n.type, truncated: true };
+
+  var data = {
+    id: n.id,
+    name: n.name,
+    type: n.type,
+    x: Math.round(n.x * 10) / 10,
+    y: Math.round(n.y * 10) / 10,
+    width: Math.round(n.width * 10) / 10,
+    height: Math.round(n.height * 10) / 10
+  };
+
+  // Opacity
+  if ("opacity" in n && n.opacity < 1) data.opacity = Math.round(n.opacity * 100) / 100;
+
+  // Corner radius
+  if ("cornerRadius" in n && n.cornerRadius !== figma.mixed && n.cornerRadius > 0) {
+    data.cornerRadius = n.cornerRadius;
+  } else if ("topLeftRadius" in n) {
+    var radii = [n.topLeftRadius, n.topRightRadius, n.bottomRightRadius, n.bottomLeftRadius];
+    if (radii.some(function(r) { return r > 0; })) {
+      data.borderRadius = radii;
+    }
+  }
+
+  // Fills
+  var fills = extractFills(n.fills);
+  if (fills) data.fills = fills;
+
+  // Strokes
+  var strokes = extractStrokes(n.strokes, n.strokeWeight);
+  if (strokes) data.stroke = strokes;
+
+  // Effects
+  var effects = extractEffects(n.effects);
+  if (effects) data.effects = effects;
+
+  // Auto-layout
+  var autoLayout = extractAutoLayout(n);
+  if (autoLayout) data.autoLayout = autoLayout;
+
+  // Text
+  var textInfo = extractTextInfo(n);
+  if (textInfo) data.text = textInfo;
+
+  // Constraints
+  var constraints = extractConstraints(n);
+  if (constraints) data.constraints = constraints;
+
+  // Blend mode
+  if ("blendMode" in n && n.blendMode !== "NORMAL") data.blendMode = n.blendMode;
+
+  // Children (recursive)
+  if ("children" in n && n.children.length > 0) {
+    data.children = [];
+    for (var i = 0; i < n.children.length && i < 20; i++) {
+      data.children.push(extractNodeTree(n.children[i], depth + 1));
+    }
+    if (n.children.length > 20) {
+      data.childrenTruncated = n.children.length;
+    }
+  }
+
+  return data;
+}
+
+// Helper: Get selection data for inspector (enhanced)
 function getSelectionData() {
   var sel = figma.currentPage.selection;
   if (sel.length === 0) return { count: 0, nodes: [] };
   return {
     count: sel.length,
     nodes: sel.slice(0, 5).map(function(n) {
-      var data = {
-        id: n.id,
-        name: n.name,
-        type: n.type,
-        x: n.x,
-        y: n.y,
-        width: n.width,
-        height: n.height
-      };
-      if ("opacity" in n) data.opacity = n.opacity;
-      if ("fills" in n && n.fills !== MIXED) data.fills = n.fills.length;
-      return data;
+      return extractNodeTree(n, 0);
     })
   };
 }

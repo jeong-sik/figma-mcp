@@ -22,6 +22,8 @@ let run_grpc_server ~port =
 (** ============== HTTP + gRPC 동시 실행 ============== *)
 
 let run_both_servers ~http_port ~grpc_port =
+  (* Initialize crypto RNG before Eio_main.run - required for TLS/HTTPS *)
+  Mirage_crypto_rng_unix.use_default ();
   Eio_main.run @@ fun env ->
   let net = Eio.Stdenv.net env in
   let clock = Eio.Stdenv.clock env in
