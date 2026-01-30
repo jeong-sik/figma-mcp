@@ -297,6 +297,110 @@
       }
 
       .empty-state { color: var(--text-muted); text-align: center; padding: 15px; font-size: 10px; }
+
+      .insights-header {
+        padding: 6px;
+        background: linear-gradient(135deg, var(--accent) 0%, #a855f7 100%);
+        color: #fff;
+        font-size: 10px;
+        font-weight: 600;
+      }
+      .insights-content {
+        padding: 8px;
+        font-size: 10px;
+        line-height: 1.5;
+        background: var(--bg-tertiary);
+      }
+      .insight-item {
+        padding: 4px 0;
+        display: flex;
+        align-items: flex-start;
+        gap: 6px;
+      }
+      .insight-icon { flex-shrink: 0; }
+      .insight-text { flex: 1; }
+      .insight-pass { color: var(--success); }
+      .insight-warn { color: var(--warning); }
+      .insight-fail { color: var(--error); }
+      .insight-info { color: var(--accent); }
+
+      /* Code Generation Panel */
+      .codegen-header {
+        padding: 6px 8px;
+        background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+        color: #fff;
+        font-size: 10px;
+        font-weight: 600;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+      }
+      .platform-select {
+        font-size: 9px;
+        padding: 2px 4px;
+        border: none;
+        border-radius: 3px;
+        background: rgba(255,255,255,0.2);
+        color: #fff;
+        cursor: pointer;
+      }
+      .platform-select option { color: #000; }
+      .codegen-content { padding: 8px; background: var(--bg-tertiary); }
+      .codegen-status {
+        font-size: 9px;
+        color: var(--text-secondary);
+        margin-bottom: 6px;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .codegen-status.streaming::before {
+        content: "";
+        width: 6px; height: 6px;
+        background: var(--success);
+        border-radius: 50%;
+        animation: pulse 1s infinite;
+      }
+      @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
+      .codegen-output {
+        font-family: "SF Mono", Monaco, monospace;
+        font-size: 10px;
+        line-height: 1.4;
+        background: var(--bg);
+        border: 1px solid var(--border);
+        border-radius: 4px;
+        padding: 8px;
+        max-height: 200px;
+        overflow: auto;
+        white-space: pre-wrap;
+        word-break: break-all;
+        margin: 0;
+      }
+      .codegen-output:empty::before {
+        content: "// Code will appear here...";
+        color: var(--text-secondary);
+      }
+      .codegen-actions {
+        margin-top: 6px;
+        display: flex;
+        gap: 6px;
+      }
+      .btn-primary {
+        background: linear-gradient(135deg, #10b981 0%, #059669 100%) !important;
+        color: #fff !important;
+      }
+      .btn-primary:hover:not(:disabled) { filter: brightness(1.1); }
+      .btn-primary:disabled { opacity: 0.5; }
+      .insight-info { color: var(--accent); }
+      .analyzing {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        padding: 12px;
+        color: var(--text-muted);
+      }
+
       .badge {
         display: inline-block;
         padding: 1px 5px;
@@ -421,11 +525,41 @@
             <span>🔍 Selection</span>
             <span class="badge" id="selectionCount">0</span>
           </span>
-          <span class="section-action" id="toggleInspector">▼</span>
+          <div class="section-actions">
+            <button class="btn-sm btn-secondary" id="analyzeBtn" disabled>🧠 Analyze</button>
+            <button class="btn-sm btn-primary" id="implementBtn" disabled>🚀 Implement</button>
+            <span class="section-action" id="toggleInspector">▼</span>
+          </div>
         </div>
         <div class="section-content" id="inspectorContent">
           <div class="inspector-content" id="inspectorData">
             <div class="empty-state">Select something in Figma</div>
+          </div>
+          <div id="insightsPanel" style="display:none;">
+            <div class="insights-header">💡 AI Insights</div>
+            <div class="insights-content" id="insightsData"></div>
+          </div>
+          <!-- Code Generation Panel -->
+          <div id="codegenPanel" style="display:none;">
+            <div class="codegen-header">
+              <span>🚀 Code Generation</span>
+              <select id="platformSelect" class="platform-select">
+                <option value="react">React/TSX</option>
+                <option value="swiftui">SwiftUI</option>
+                <option value="compose">Jetpack Compose</option>
+                <option value="flutter">Flutter/Dart</option>
+                <option value="html">HTML/CSS</option>
+              </select>
+            </div>
+            <div class="codegen-content">
+              <div class="codegen-status" id="codegenStatus">Ready</div>
+              <pre class="codegen-output" id="codegenOutput"></pre>
+              <div class="codegen-actions">
+                <button class="btn-sm btn-secondary" id="copyCodeBtn" disabled>📋 Copy</button>
+                <button class="btn-sm btn-primary" id="applyToFigmaBtn" disabled>🎨 Apply to Figma</button>
+                <button class="btn-sm btn-secondary" id="stopGenBtn" style="display:none;">⏹ Stop</button>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -490,6 +624,95 @@
         </div>
       </div>
 
+      <!-- Multi-Platform Generation -->
+      <div class="section" id="multiPlatformSection" style="display:none;">
+        <div class="section-header" id="multiPlatformHeader">
+          <span class="section-left">
+            <span>🌐 Multi-Platform</span>
+          </span>
+          <div class="section-actions">
+            <span class="section-action" id="toggleMultiPlatform">▼</span>
+          </div>
+        </div>
+        <div class="section-content" id="multiPlatformContent">
+          <div style="padding: 8px;">
+            <div style="display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 8px;">
+              <label style="display: flex; align-items: center; gap: 4px; margin: 0;">
+                <input type="checkbox" id="mpReact" checked> React
+              </label>
+              <label style="display: flex; align-items: center; gap: 4px; margin: 0;">
+                <input type="checkbox" id="mpSwiftUI" checked> SwiftUI
+              </label>
+              <label style="display: flex; align-items: center; gap: 4px; margin: 0;">
+                <input type="checkbox" id="mpCompose" checked> Compose
+              </label>
+              <label style="display: flex; align-items: center; gap: 4px; margin: 0;">
+                <input type="checkbox" id="mpFlutter"> Flutter
+              </label>
+            </div>
+            <button class="btn btn-primary" id="generateMultiBtn" style="width: 100%;">🚀 Generate All Platforms</button>
+            <div id="multiPlatformResults" style="margin-top: 8px;"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Vision Compare (SSIM) -->
+      <div class="section" id="visionSection" style="display:none;">
+        <div class="section-header" id="visionHeader">
+          <span class="section-left">
+            <span>👁️ Vision Compare</span>
+            <span class="badge" id="ssimScore">-</span>
+          </span>
+          <div class="section-actions">
+            <span class="section-action" id="toggleVision">▼</span>
+          </div>
+        </div>
+        <div class="section-content" id="visionContent">
+          <div style="padding: 8px;">
+            <div style="margin-bottom: 8px;">
+              <label>Reference Image (Figma Export)</label>
+              <input type="text" id="referenceImagePath" placeholder="/path/to/reference.png" style="width: 100%;">
+            </div>
+            <div style="margin-bottom: 8px;">
+              <label>Threshold</label>
+              <input type="range" id="ssimThreshold" min="0.8" max="1.0" step="0.01" value="0.95" style="width: 100%;">
+              <span id="thresholdValue">0.95</span>
+            </div>
+            <button class="btn btn-primary" id="compareVisionBtn" style="width: 100%;">🔍 Compare with Generated Code</button>
+            <div id="visionResult" style="margin-top: 8px;"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Storybook Generation -->
+      <div class="section" id="storybookSection" style="display:none;">
+        <div class="section-header" id="storybookHeader">
+          <span class="section-left">
+            <span>📖 Storybook</span>
+          </span>
+          <div class="section-actions">
+            <span class="section-action" id="toggleStorybook">▼</span>
+          </div>
+        </div>
+        <div class="section-content" id="storybookContent">
+          <div style="padding: 8px;">
+            <div style="margin-bottom: 8px;">
+              <label>Figma URL</label>
+              <input type="text" id="figmaUrlInput" placeholder="https://www.figma.com/design/..." style="width: 100%;">
+            </div>
+            <div style="margin-bottom: 8px;">
+              <label>Framework</label>
+              <select id="storyFramework" style="width: 100%;">
+                <option value="react">React</option>
+                <option value="vue">Vue</option>
+              </select>
+            </div>
+            <button class="btn btn-primary" id="generateStoryBtn" style="width: 100%;">📖 Generate Story</button>
+            <div id="storybookResult" style="margin-top: 8px;"></div>
+          </div>
+        </div>
+      </div>
+
       <!-- Activity Log -->
       <div class="section">
         <div class="section-header" id="logHeader">
@@ -530,6 +753,10 @@
       var testProgress = $("testProgress"), testName = $("testName"), testCount = $("testCount"), testBar = $("testBar");
       var logContent = $("logContent"), logWrapper = $("logWrapper"), logBadge = $("logBadge");
       var inspectorData = $("inspectorData"), selectionCountBadge = $("selectionCount");
+      var analyzeBtn = $("analyzeBtn"), insightsPanel = $("insightsPanel"), insightsData = $("insightsData");
+      var implementBtn = $("implementBtn"), codegenPanel = $("codegenPanel"), platformSelect = $("platformSelect");
+      var codegenStatus = $("codegenStatus"), codegenOutput = $("codegenOutput");
+      var copyCodeBtn = $("copyCodeBtn"), stopGenBtn = $("stopGenBtn"), applyToFigmaBtn = $("applyToFigmaBtn");
       var historyData = $("historyData"), historyCountBadge = $("historyCount");
       var tokenGrid = $("tokenGrid"), tokenCountBadge = $("tokenCount");
       var quickSection = $("quickSection"), historySection = $("historySection"), tokensSection = $("tokensSection");
@@ -545,6 +772,10 @@
       var pings = [], reconnectAttempts = 0, MAX_RECONNECT = 5;
       var autoReconnect = true;
       var lastSelection = null;
+      var isAnalyzing = false;
+      var isGenerating = false;
+      var currentEventSource = null;  // For SSE streaming
+      var generatedCode = "";
 
       // Utility
       function normalizeUrl(raw) {
@@ -653,23 +884,354 @@
       function updateInspector(sel) {
         lastSelection = sel;
         selectionCountBadge.textContent = sel ? sel.count : 0;
-        if (!sel || sel.count === 0) {
+        // Enable/disable analyze and implement buttons
+        var hasSelection = sel && sel.count > 0;
+        analyzeBtn.disabled = !hasSelection || isAnalyzing;
+        implementBtn.disabled = !hasSelection || isGenerating;
+        if (!hasSelection) {
           inspectorData.innerHTML = '<div class="empty-state">Select something in Figma</div>';
+          insightsPanel.style.display = "none";
+          codegenPanel.style.display = "none";
           return;
         }
         var n = sel.nodes[0];
         var rows = [
-          { k: "Name", v: n.name },
+          { k: "Name", v: n.name || "(unnamed)" },
           { k: "Type", v: n.type },
           { k: "ID", v: truncate(n.id, 20) },
           { k: "Size", v: Math.round(n.width) + " × " + Math.round(n.height) },
           { k: "Position", v: Math.round(n.x) + ", " + Math.round(n.y) }
         ];
-        if (n.fills) rows.push({ k: "Fills", v: n.fills + " fill(s)" });
-        if (n.opacity !== undefined) rows.push({ k: "Opacity", v: Math.round(n.opacity * 100) + "%" });
+        // Handle fills (now array of objects)
+        if (n.fills && Array.isArray(n.fills)) {
+          var fillStr = n.fills.map(function(f) {
+            return f.color || f.type;
+          }).join(", ");
+          rows.push({ k: "Fills", v: fillStr || n.fills.length + " fill(s)" });
+        }
+        if (n.opacity !== undefined && n.opacity < 1) rows.push({ k: "Opacity", v: Math.round(n.opacity * 100) + "%" });
+        if (n.cornerRadius) rows.push({ k: "Radius", v: n.cornerRadius + "px" });
+        if (n.autoLayout) rows.push({ k: "Layout", v: n.autoLayout.mode + " (" + n.autoLayout.spacing + "px)" });
+        if (n.text) rows.push({ k: "Text", v: truncate(n.text.characters, 30) });
+        if (n.children) rows.push({ k: "Children", v: n.children.length + " layer(s)" });
         inspectorData.innerHTML = rows.map(function(r) {
           return '<div class="inspector-row"><span class="inspector-key">' + r.k + '</span><span class="inspector-value">' + escapeHtml(String(r.v)) + '</span></div>';
         }).join("");
+      }
+
+      // LLM Analysis
+      function analyzeSelection() {
+        if (!lastSelection || lastSelection.count === 0 || isAnalyzing) return;
+        isAnalyzing = true;
+        analyzeBtn.disabled = true;
+        analyzeBtn.textContent = "⏳ Analyzing...";
+        insightsPanel.style.display = "block";
+        insightsData.innerHTML = '<div style="text-align:center;color:var(--text-secondary);">Analyzing design...</div>';
+
+        var node = lastSelection.nodes[0];
+        var analysisPrompt = buildAnalysisPrompt(node);
+
+        // Check if serverUrl is set
+        if (!serverUrl) {
+          addLog("analyze", "No server URL - please connect first", false);
+          analysisStatus.textContent = "Not connected to server";
+          isAnalyzing = false;
+          analyzeBtn.disabled = false;
+          analyzeBtn.textContent = "🔍 Analyze";
+          return;
+        }
+
+        // Call LLM via server endpoint
+        fetch(serverUrl + "/plugin/analyze", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ channel_id: channelId, node: node, prompt: analysisPrompt })
+        }).then(function(r) {
+          if (!r.ok) throw new Error("HTTP " + r.status);
+          return r.json();
+        }).then(function(d) {
+          displayInsights(d.insights || d.response || "No insights available");
+        }).catch(function(e) {
+          // Fallback: generate local heuristic insights
+          displayInsights(generateLocalInsights(node));
+          addLog("analyze", "Using local heuristics: " + e.message, true);
+        }).finally(function() {
+          isAnalyzing = false;
+          analyzeBtn.disabled = false;
+          analyzeBtn.textContent = "🧠 Analyze";
+        });
+      }
+
+      function buildAnalysisPrompt(node) {
+        return "Analyze this Figma design element and provide brief insights:\n" +
+          "- Name: " + node.name + "\n" +
+          "- Type: " + node.type + "\n" +
+          "- Size: " + Math.round(node.width) + "x" + Math.round(node.height) + "px\n" +
+          "- Position: (" + Math.round(node.x) + ", " + Math.round(node.y) + ")\n" +
+          (node.fills ? "- Fills: " + node.fills + "\n" : "") +
+          "\nProvide 3-4 bullet points about: naming convention, touch target size (44px iOS/48px Android), auto-layout usage, accessibility considerations.";
+      }
+
+      function generateLocalInsights(node) {
+        var insights = [];
+        var w = node.width, h = node.height;
+
+        // Touch target check
+        if ((node.type === "FRAME" || node.type === "COMPONENT" || node.type === "INSTANCE") &&
+            (node.name.toLowerCase().includes("button") || node.name.toLowerCase().includes("btn"))) {
+          if (w >= 44 && h >= 44) {
+            insights.push({ type: "pass", text: "Touch target " + Math.round(w) + "×" + Math.round(h) + "px - iOS HIG OK" });
+          } else {
+            insights.push({ type: "warn", text: "Touch target " + Math.round(w) + "×" + Math.round(h) + "px - Consider 44×44px min" });
+          }
+        }
+
+        // Naming convention
+        var nameParts = node.name.split(/[_\-\/]/);
+        if (nameParts.length > 1 && /^[A-Z]/.test(nameParts[0])) {
+          insights.push({ type: "pass", text: "Naming: PascalCase with separator - Good" });
+        } else if (node.name.includes(" ")) {
+          insights.push({ type: "warn", text: "Naming: Contains spaces - Use underscore/hyphen" });
+        } else {
+          insights.push({ type: "pass", text: "Naming: " + truncate(node.name, 20) + " - OK" });
+        }
+
+        // Auto-layout hint
+        if (node.type === "FRAME") {
+          insights.push({ type: "info", text: "Frame detected - Consider Auto Layout for responsiveness" });
+        }
+
+        // Size checks
+        if (w > 1440) {
+          insights.push({ type: "warn", text: "Width " + Math.round(w) + "px > 1440px - May overflow desktop" });
+        }
+        if (h > 900 && node.type === "FRAME") {
+          insights.push({ type: "info", text: "Height " + Math.round(h) + "px - Consider scrollable content" });
+        }
+
+        if (insights.length === 0) {
+          insights.push({ type: "pass", text: "Basic checks passed" });
+        }
+
+        return insights;
+      }
+
+      function displayInsights(insights) {
+        if (typeof insights === "string") {
+          // Parse LLM text response
+          insightsData.innerHTML = '<div class="insight-item"><span style="white-space:pre-wrap;">' + escapeHtml(insights) + '</span></div>';
+          return;
+        }
+        // Array of insight objects
+        insightsData.innerHTML = insights.map(function(i) {
+          var cls = i.type === "pass" ? "insight-pass" : (i.type === "warn" ? "insight-warn" : (i.type === "fail" ? "insight-fail" : (i.type === "info" ? "insight-info" : "")));
+          var icon = i.type === "pass" ? "✓" : (i.type === "warn" ? "⚠" : (i.type === "fail" ? "✗" : (i.type === "info" ? "ℹ" : "•")));
+          return '<div class="insight-item ' + cls + '"><span>' + icon + '</span><span>' + escapeHtml(i.text) + '</span></div>';
+        }).join("");
+      }
+
+      // Code Generation
+      function implementSelection() {
+        if (!lastSelection || lastSelection.count === 0 || isGenerating) return;
+        isGenerating = true;
+        implementBtn.disabled = true;
+        implementBtn.textContent = "⏳ Generating...";
+        codegenPanel.style.display = "block";
+        codegenStatus.className = "codegen-status streaming";
+        codegenStatus.textContent = "Connecting to LLM...";
+        codegenOutput.textContent = "";
+        generatedCode = "";
+        copyCodeBtn.disabled = true;
+        stopGenBtn.style.display = "inline-flex";
+
+        var node = lastSelection.nodes[0];
+        var platform = platformSelect.value;
+        var prompt = buildCodegenPrompt(node, platform);
+
+        // Direct fetch (SSE streaming can be added later)
+        tryRegularCodegen(node, platform, prompt);
+      }
+
+      function tryRegularCodegen(node, platform, prompt) {
+        codegenStatus.textContent = "Queuing request for AI agent...";
+
+        // Debug: check if serverUrl is set
+        if (!serverUrl) {
+          addLog("codegen", "No server URL - using local templates", false);
+          codegenStatus.textContent = "No server - using local templates...";
+          generatedCode = generateLocalCode(node, platform);
+          codegenOutput.textContent = generatedCode;
+          finishCodegen(true);
+          return;
+        }
+
+        // Direct inline Ollama call via figma-mcp (simpler, no external agent needed)
+        codegenStatus.textContent = "Calling Ollama via figma-mcp...";
+        fetch(serverUrl + "/plugin/codegen", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ node: node, platform: platform, prompt: prompt })
+        }).then(function(r) {
+          if (!r.ok) throw new Error("HTTP " + r.status);
+          return r.json();
+        }).then(function(d) {
+          generatedCode = d.code || "";
+          codegenOutput.textContent = generatedCode;
+          finishCodegen(true);
+          var source = d.source || "unknown";
+          addLog("codegen", "Generated via " + source, true);
+        }).catch(function(e) {
+          // Fallback: local template generation
+          codegenStatus.textContent = "Using local templates...";
+          generatedCode = generateLocalCode(node, platform);
+          codegenOutput.textContent = generatedCode;
+          finishCodegen(true);
+          addLog("codegen", "Local fallback: " + e.message, true);
+        });
+      }
+
+      function stopCodegen() {
+        if (currentEventSource) {
+          currentEventSource.close();
+          currentEventSource = null;
+        }
+        finishCodegen(false);
+        codegenStatus.textContent = "Stopped";
+      }
+
+      function finishCodegen(success) {
+        isGenerating = false;
+        implementBtn.disabled = false;
+        implementBtn.textContent = "🚀 Implement";
+        stopGenBtn.style.display = "none";
+        codegenStatus.className = "codegen-status";
+        codegenStatus.textContent = success ? "Complete ✓" : "Stopped";
+        copyCodeBtn.disabled = !generatedCode;
+        applyToFigmaBtn.disabled = !generatedCode;
+        if (success && generatedCode) {
+          addLog("codegen", platformSelect.value + " code generated", true);
+        }
+      }
+
+      function buildCodegenPrompt(node, platform) {
+        var platformNames = {
+          react: "React with TypeScript (TSX)",
+          swiftui: "SwiftUI",
+          compose: "Jetpack Compose (Kotlin)",
+          flutter: "Flutter (Dart)",
+          html: "HTML with CSS"
+        };
+        return "Convert this Figma design to " + platformNames[platform] + " code:\n\n" +
+          "Node: " + node.name + "\n" +
+          "Type: " + node.type + "\n" +
+          "Size: " + Math.round(node.width) + " x " + Math.round(node.height) + "px\n" +
+          "Position: (" + Math.round(node.x) + ", " + Math.round(node.y) + ")\n" +
+          (node.fills ? "Fills: " + node.fills + "\n" : "") +
+          (node.opacity !== undefined ? "Opacity: " + Math.round(node.opacity * 100) + "%\n" : "") +
+          "\nGenerate clean, production-ready code with proper styling.";
+      }
+
+      function generateLocalCode(node, platform) {
+        var name = node.name.replace(/[^a-zA-Z0-9]/g, "_");
+        if (/^[0-9]/.test(name)) name = "_" + name;
+        var w = Math.round(node.width), h = Math.round(node.height);
+
+        // Extract background color
+        var bgColor = null;
+        if (node.fills && Array.isArray(node.fills) && node.fills.length > 0) {
+          var firstFill = node.fills[0];
+          if (firstFill.color) bgColor = firstFill.color;
+        }
+
+        // Extract children info for structure
+        var childrenCode = "";
+        var childrenComments = "";
+        if (node.children && node.children.length > 0) {
+          childrenComments = "\n  // Children (" + node.children.length + "):\n";
+          node.children.slice(0, 10).forEach(function(child, i) {
+            var childName = child.name || "Layer " + i;
+            var childType = child.type || "UNKNOWN";
+            childrenComments += "  // - " + childName + " (" + childType + ")\n";
+          });
+          if (node.children.length > 10) {
+            childrenComments += "  // ... and " + (node.children.length - 10) + " more\n";
+          }
+        }
+
+        // Auto-layout info
+        var layoutComment = "";
+        if (node.autoLayout) {
+          layoutComment = "\n  // Layout: " + node.autoLayout.mode + ", spacing: " + node.autoLayout.spacing + "px\n";
+        }
+
+        switch (platform) {
+          case "react":
+            var reactBg = bgColor ? "backgroundColor: '" + bgColor + "'," : "";
+            var reactFlex = node.autoLayout ? "display: 'flex', flexDirection: '" + (node.autoLayout.mode === "HORIZONTAL" ? "row" : "column") + "', gap: " + node.autoLayout.spacing + "," : "";
+            return "import React from 'react';\n\n" +
+              "interface " + name + "Props {\n  className?: string;\n}\n" + childrenComments + layoutComment + "\n" +
+              "export const " + name + ": React.FC<" + name + "Props> = ({ className }) => {\n" +
+              "  return (\n    <div\n      className={className}\n      style={{\n" +
+              "        width: " + w + ",\n        height: " + h + ",\n" +
+              (reactBg ? "        " + reactBg + "\n" : "") +
+              (reactFlex ? "        " + reactFlex + "\n" : "") +
+              "      }}\n    >\n" +
+              "      {/* TODO: Add " + (node.children ? node.children.length : 0) + " child components */}\n" +
+              "    </div>\n  );\n};\n";
+
+          case "swiftui":
+            var swiftBg = bgColor ? "\n            .background(Color(hex: \"" + bgColor + "\"))" : "";
+            var swiftStack = node.autoLayout ? (node.autoLayout.mode === "HORIZONTAL" ? "HStack(spacing: " + node.autoLayout.spacing + ")" : "VStack(spacing: " + node.autoLayout.spacing + ")") : "ZStack";
+            return "import SwiftUI\n" + childrenComments + layoutComment + "\n" +
+              "struct " + name + ": View {\n" +
+              "    var body: some View {\n" +
+              "        " + swiftStack + " {\n" +
+              "            // TODO: Add " + (node.children ? node.children.length : 0) + " child views\n" +
+              "        }\n" +
+              "        .frame(width: " + w + ", height: " + h + ")" + swiftBg + "\n" +
+              "    }\n}\n\n#Preview {\n    " + name + "()\n}\n";
+
+          case "compose":
+            var composeBg = bgColor ? "\n            .background(Color(0xFF" + bgColor.replace("#", "").toUpperCase() + "))" : "";
+            var composeLayout = node.autoLayout ? (node.autoLayout.mode === "HORIZONTAL" ? "Row(horizontalArrangement = Arrangement.spacedBy(" + node.autoLayout.spacing + ".dp))" : "Column(verticalArrangement = Arrangement.spacedBy(" + node.autoLayout.spacing + ".dp))") : "Box";
+            return "import androidx.compose.foundation.layout.*\nimport androidx.compose.foundation.background\nimport androidx.compose.runtime.Composable\nimport androidx.compose.ui.Modifier\nimport androidx.compose.ui.graphics.Color\nimport androidx.compose.ui.unit.dp\n" + childrenComments + layoutComment + "\n" +
+              "@Composable\nfun " + name + "(\n    modifier: Modifier = Modifier\n) {\n" +
+              "    " + composeLayout + " {\n" +
+              "        modifier = modifier\n" +
+              "            .width(" + w + ".dp)\n            .height(" + h + ".dp)" + composeBg + "\n" +
+              "        // TODO: Add " + (node.children ? node.children.length : 0) + " child composables\n" +
+              "    }\n}\n";
+
+          case "flutter":
+            var flutterBg = bgColor ? "color: Color(0xFF" + bgColor.replace("#", "").toUpperCase() + ")," : "";
+            var flutterLayout = node.autoLayout ? (node.autoLayout.mode === "HORIZONTAL" ? "Row" : "Column") : "Stack";
+            return "import 'package:flutter/material.dart';\n" + childrenComments.replace(/\/\//g, "//") + layoutComment.replace(/\/\//g, "//") + "\n" +
+              "class " + name + " extends StatelessWidget {\n" +
+              "  const " + name + "({super.key});\n\n" +
+              "  @override\n  Widget build(BuildContext context) {\n" +
+              "    return Container(\n" +
+              "      width: " + w + ",\n      height: " + h + ",\n" +
+              (flutterBg ? "      " + flutterBg + "\n" : "") +
+              "      child: " + flutterLayout + "(\n" +
+              "        children: [\n" +
+              "          // TODO: Add " + (node.children ? node.children.length : 0) + " child widgets\n" +
+              "        ],\n" +
+              "      ),\n    );\n  }\n}\n";
+
+          case "html":
+          default:
+            var htmlBg = bgColor ? "background-color: " + bgColor + ";" : "";
+            var htmlFlex = node.autoLayout ? "display: flex; flex-direction: " + (node.autoLayout.mode === "HORIZONTAL" ? "row" : "column") + "; gap: " + node.autoLayout.spacing + "px;" : "";
+            return "<!-- " + node.name + " -->" + childrenComments.replace(/\/\//g, "<!--").replace(/\n/g, " -->\n<!-- ") + "\n" +
+              "<div class=\"" + name.toLowerCase() + "\">\n" +
+              "  <!-- TODO: Add " + (node.children ? node.children.length : 0) + " child elements -->\n" +
+              "</div>\n\n" +
+              "<style>\n." + name.toLowerCase() + " {\n" +
+              "  width: " + w + "px;\n  height: " + h + "px;\n" +
+              (htmlBg ? "  " + htmlBg + "\n" : "") +
+              (htmlFlex ? "  " + htmlFlex + "\n" : "") +
+              "}\n</style>\n";
+        }
       }
 
       // Tokens
@@ -696,6 +1258,9 @@
         quickSection.style.display = connected ? "block" : "none";
         historySection.style.display = connected ? "block" : "none";
         tokensSection.style.display = connected ? "block" : "none";
+        if (typeof multiPlatformSection !== "undefined") multiPlatformSection.style.display = connected ? "block" : "none";
+        if (typeof visionSection !== "undefined") visionSection.style.display = connected ? "block" : "none";
+        if (typeof storybookSection !== "undefined") storybookSection.style.display = connected ? "block" : "none";
         sessionBar.style.display = connected ? "flex" : "none";
         if (connected) {
           sessionStart = Date.now();
@@ -846,6 +1411,77 @@
         autoReconnectToggle.className = "toggle" + (autoReconnect ? " on" : "");
       };
 
+      // Analyze button
+      analyzeBtn.onclick = function() { analyzeSelection(); };
+
+      // Code generation buttons
+      implementBtn.onclick = function() { implementSelection(); };
+      copyCodeBtn.onclick = function() {
+        if (generatedCode) {
+          navigator.clipboard.writeText(generatedCode).then(function() {
+            addLog("copy", "Code copied!", true);
+            copyCodeBtn.textContent = "✓ Copied";
+            setTimeout(function() { copyCodeBtn.textContent = "📋 Copy"; }, 1500);
+          });
+        }
+      };
+      stopGenBtn.onclick = function() { stopCodegen(); };
+
+      // Apply generated code to Figma (Code → Figma via LLM)
+      applyToFigmaBtn.onclick = function() {
+        if (!generatedCode || !channelId) return;
+        applyToFigmaBtn.disabled = true;
+        applyToFigmaBtn.textContent = "⏳ Converting...";
+        addLog("apply", "Converting code to Figma DSL...", true);
+
+        var nodeName = lastSelection && lastSelection.nodes[0] ? lastSelection.nodes[0].name + "_Generated" : "GeneratedComponent";
+
+        // Step 1: Send code to server for DSL conversion
+        if (!serverUrl) {
+          addLog("apply", "No server - cannot convert code", false);
+          applyToFigmaBtn.disabled = false;
+          applyToFigmaBtn.textContent = "🎨 Apply to Figma";
+          return;
+        }
+
+        fetch(serverUrl + "/plugin/code-to-figma", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ code: generatedCode, name: nodeName })
+        }).then(function(r) {
+          if (!r.ok) throw new Error("HTTP " + r.status);
+          return r.json();
+        }).then(function(d) {
+          if (d.error) {
+            addLog("apply", "Error: " + d.error, false);
+            return;
+          }
+
+          var operations = d.operations || [];
+          addLog("apply", "Got " + operations.length + " operations", true);
+          applyToFigmaBtn.textContent = "⏳ Creating nodes...";
+
+          // Step 2: Execute DSL in Figma
+          var execCmd = {
+            id: "exec-dsl-" + Date.now(),
+            name: "execute_dsl",
+            payload: { operations: operations }
+          };
+          parent.postMessage({ pluginMessage: { type: "command", command: execCmd } }, "*");
+          addLog("apply", "Executing DSL in Figma", true);
+          stats.cmd++; updateStats();
+
+          setTimeout(function() {
+            applyToFigmaBtn.disabled = false;
+            applyToFigmaBtn.textContent = "🎨 Apply to Figma";
+          }, 1500);
+        }).catch(function(e) {
+          addLog("apply", "Failed: " + e.message, false);
+          applyToFigmaBtn.disabled = false;
+          applyToFigmaBtn.textContent = "🎨 Apply to Figma";
+        });
+      };
+
       // Filters
       document.querySelectorAll(".filter-btn").forEach(function(b) {
         b.onclick = function(e) {
@@ -977,10 +1613,204 @@
       // Selection polling
       setInterval(function() { if (channelId) requestSelectionUpdate(); }, 2000);
 
-      // Load saved state
+      // ============== NEW FEATURES ==============
+
+      // Multi-Platform Generation
+      var multiPlatformSection = $("multiPlatformSection");
+      var generateMultiBtn = $("generateMultiBtn");
+      var multiPlatformResults = $("multiPlatformResults");
+
+      generateMultiBtn.onclick = function() {
+        if (!lastSelection || !lastSelection.nodes || !lastSelection.nodes[0]) {
+          addLog("multi", "No selection", false);
+          return;
+        }
+        var platforms = [];
+        if ($("mpReact").checked) platforms.push("react");
+        if ($("mpSwiftUI").checked) platforms.push("swiftui");
+        if ($("mpCompose").checked) platforms.push("compose");
+        if ($("mpFlutter").checked) platforms.push("flutter");
+
+        if (platforms.length === 0) {
+          addLog("multi", "Select at least one platform", false);
+          return;
+        }
+
+        generateMultiBtn.disabled = true;
+        generateMultiBtn.textContent = "⏳ Generating...";
+        addLog("multi", "Generating for " + platforms.join(", "), true);
+
+        fetch(serverUrl + "/plugin/codegen-multi", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ node: lastSelection.nodes[0], platforms: platforms })
+        }).then(function(r) {
+          if (!r.ok) throw new Error("HTTP " + r.status);
+          return r.json();
+        }).then(function(data) {
+          var html = '<div style="font-size:10px;">';
+          html += '<strong>' + data.componentName + '</strong> - ' + platforms.length + ' platforms<br>';
+          platforms.forEach(function(p) {
+            html += '<details style="margin-top:4px;"><summary style="cursor:pointer;">' + p.toUpperCase() + '</summary>';
+            html += '<pre style="font-size:9px;background:var(--bg-secondary);padding:4px;overflow-x:auto;max-height:150px;">' + (data.code[p] || "N/A").replace(/</g, "&lt;") + '</pre></details>';
+          });
+          html += '</div>';
+          multiPlatformResults.innerHTML = html;
+          addLog("multi", "Generated " + platforms.length + " platforms", true);
+        }).catch(function(e) {
+          addLog("multi", "Error: " + e.message, false);
+          multiPlatformResults.innerHTML = '<div style="color:var(--error);">Error: ' + e.message + '</div>';
+        }).finally(function() {
+          generateMultiBtn.disabled = false;
+          generateMultiBtn.textContent = "🚀 Generate All Platforms";
+        });
+      };
+
+      // Vision Compare (SSIM)
+      var visionSection = $("visionSection");
+      var compareVisionBtn = $("compareVisionBtn");
+      var ssimThreshold = $("ssimThreshold");
+      var thresholdValue = $("thresholdValue");
+      var ssimScoreBadge = $("ssimScore");
+      var visionResult = $("visionResult");
+
+      ssimThreshold.oninput = function() {
+        thresholdValue.textContent = ssimThreshold.value;
+      };
+
+      compareVisionBtn.onclick = function() {
+        var refPath = $("referenceImagePath").value.trim();
+        if (!refPath) {
+          addLog("vision", "Reference image path required", false);
+          return;
+        }
+        if (!generatedCode) {
+          addLog("vision", "Generate code first", false);
+          return;
+        }
+
+        compareVisionBtn.disabled = true;
+        compareVisionBtn.textContent = "⏳ Comparing...";
+        addLog("vision", "Comparing with SSIM...", true);
+
+        fetch(serverUrl + "/plugin/vision-compare", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            reference: refPath,
+            code: generatedCode,
+            threshold: parseFloat(ssimThreshold.value)
+          })
+        }).then(function(r) {
+          if (!r.ok) throw new Error("HTTP " + r.status);
+          return r.json();
+        }).then(function(data) {
+          var ssim = data.ssim || 0;
+          var pass = data.pass;
+          ssimScoreBadge.textContent = (ssim * 100).toFixed(1) + "%";
+          ssimScoreBadge.style.background = pass ? "var(--success)" : "var(--error)";
+          ssimScoreBadge.style.color = "#fff";
+          visionResult.innerHTML = '<div style="color:' + (pass ? "var(--success)" : "var(--error)") + ';">' +
+            (pass ? "✓ PASS" : "✗ FAIL") + ' - SSIM: ' + (ssim * 100).toFixed(2) + '% (threshold: ' + (data.threshold * 100) + '%)</div>';
+          addLog("vision", (pass ? "PASS" : "FAIL") + " SSIM=" + ssim.toFixed(3), pass);
+        }).catch(function(e) {
+          addLog("vision", "Error: " + e.message, false);
+          visionResult.innerHTML = '<div style="color:var(--error);">Error: ' + e.message + '</div>';
+        }).finally(function() {
+          compareVisionBtn.disabled = false;
+          compareVisionBtn.textContent = "🔍 Compare with Generated Code";
+        });
+      };
+
+      // Storybook Generation
+      var storybookSection = $("storybookSection");
+      var generateStoryBtn = $("generateStoryBtn");
+      var storybookResult = $("storybookResult");
+
+      generateStoryBtn.onclick = function() {
+        if (!lastSelection || !lastSelection.nodes || !lastSelection.nodes[0]) {
+          addLog("storybook", "No selection", false);
+          return;
+        }
+
+        var figmaUrl = $("figmaUrlInput").value.trim();
+        var framework = $("storyFramework").value;
+
+        generateStoryBtn.disabled = true;
+        generateStoryBtn.textContent = "⏳ Generating...";
+        addLog("storybook", "Generating Storybook story...", true);
+
+        fetch(serverUrl + "/plugin/generate-story", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            node: lastSelection.nodes[0],
+            code: generatedCode || "",
+            figmaUrl: figmaUrl,
+            framework: framework
+          })
+        }).then(function(r) {
+          if (!r.ok) throw new Error("HTTP " + r.status);
+          return r.json();
+        }).then(function(data) {
+          var html = '<div style="font-size:10px;">';
+          html += '<strong>' + data.componentName + '</strong><br>';
+          html += '<details style="margin-top:4px;"><summary style="cursor:pointer;">📖 ' + data.storyFile + '</summary>';
+          html += '<pre style="font-size:9px;background:var(--bg-secondary);padding:4px;overflow-x:auto;max-height:200px;">' + data.storyCode.replace(/</g, "&lt;") + '</pre></details>';
+          html += '<details style="margin-top:4px;"><summary style="cursor:pointer;">📄 ' + data.componentFile + '</summary>';
+          html += '<pre style="font-size:9px;background:var(--bg-secondary);padding:4px;overflow-x:auto;max-height:200px;">' + data.componentCode.replace(/</g, "&lt;") + '</pre></details>';
+          html += '</div>';
+          storybookResult.innerHTML = html;
+          addLog("storybook", "Generated " + data.storyFile, true);
+        }).catch(function(e) {
+          addLog("storybook", "Error: " + e.message, false);
+          storybookResult.innerHTML = '<div style="color:var(--error);">Error: ' + e.message + '</div>';
+        }).finally(function() {
+          generateStoryBtn.disabled = false;
+          generateStoryBtn.textContent = "📖 Generate Story";
+        });
+      };
+
+      // Show new sections when connected
+      function showNewSections(show) {
+        multiPlatformSection.style.display = show ? "block" : "none";
+        visionSection.style.display = show ? "block" : "none";
+        storybookSection.style.display = show ? "block" : "none";
+      }
+
+      // Toggle handlers for new sections
+      $("toggleMultiPlatform").onclick = function() {
+        var content = $("multiPlatformContent");
+        content.classList.toggle("collapsed");
+        this.textContent = content.classList.contains("collapsed") ? "▶" : "▼";
+      };
+      $("toggleVision").onclick = function() {
+        var content = $("visionContent");
+        content.classList.toggle("collapsed");
+        this.textContent = content.classList.contains("collapsed") ? "▶" : "▼";
+      };
+      $("toggleStorybook").onclick = function() {
+        var content = $("storybookContent");
+        content.classList.toggle("collapsed");
+        this.textContent = content.classList.contains("collapsed") ? "▶" : "▼";
+      };
+
+      // ============== END NEW FEATURES ==============
+
+      // Load saved state and auto-connect
       var state = loadState();
       if (state.serverUrl) serverInput.value = state.serverUrl;
       if (state.channelId) channelInput.value = state.channelId;
+
+      // Auto-connect if we have a saved server URL
+      if (state.serverUrl) {
+        setTimeout(function() {
+          addLog("init", "Auto-connecting to " + state.serverUrl, true);
+          connect().catch(function() {
+            addLog("init", "Auto-connect failed, manual connect required", false);
+          });
+        }, 500);
+      }
     </script>
   </body>
 </html>

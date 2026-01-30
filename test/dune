@@ -92,3 +92,8 @@
 (test
  (name test_similarity_effects_coverage)
  (libraries figma_mcp alcotest yojson str fmt))
+
+; Plugin Features Tests (Animation, Accessibility, Variants, Responsive, Webhook)
+(test
+ (name test_plugin_features)
+ (libraries figma_mcp alcotest yojson str))

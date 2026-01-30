@@ -770,6 +770,21 @@ let tool_figma_list_files : tool_def = {
   ] ["project_id"];
 }
 
+let tool_figma_crawl_team : tool_def = {
+  name = "figma_crawl_team";
+  description = "🕷️ CRAWL: 팀 전체를 재귀적으로 크롤링하여 Neo4j에 저장. Team→Projects→Files→Nodes 구조.";
+  input_schema = object_schema [
+    ("team_id", string_prop "팀 ID");
+    ("team_name", string_prop "팀 이름 (선택, 그래프 노드에 표시)");
+    ("token", string_prop "Figma Personal Access Token (optional if FIGMA_TOKEN env var is set)");
+    ("neo4j_uri", string_prop "Neo4j URI (기본값: NEO4J_URI 환경변수)");
+    ("neo4j_user", string_prop "Neo4j 사용자 (기본값: NEO4J_USER 환경변수)");
+    ("neo4j_password", string_prop "Neo4j 비밀번호 (기본값: NEO4J_PASSWORD 환경변수)");
+    ("max_depth", string_prop "노드 탐색 최대 깊이 (기본값: 10)");
+    ("rate_limit_ms", string_prop "API 호출 간 대기 시간 ms (기본값: 100)");
+  ] ["team_id"];
+}
+
 let tool_figma_get_variables : tool_def = {
   name = "figma_get_variables";
   description = "📦 TOKENS: 파일의 디자인 토큰/변수. 색상, 타이포, 간격 등.";
@@ -935,6 +950,7 @@ let all_tools = [
   tool_figma_get_me;
   tool_figma_list_projects;
   tool_figma_list_files;
+  tool_figma_crawl_team;
   tool_figma_get_variables;
   (* Phase 2: 고급 쿼리 *)
   tool_figma_query;
@@ -6478,6 +6494,59 @@ let handle_list_files args : (Yojson.Safe.t, string) result =
        | Error err -> Error err)
   | _ -> Error "Missing required parameters: project_id, token"
 
+(** figma_crawl_team 핸들러 - 팀 전체 크롤링 + Neo4j 저장 *)
+(* TODO: Effects 통합 후 실제 구현 활성화 *)
+let handle_crawl_team args : (Yojson.Safe.t, string) result =
+  let team_id = get_string "team_id" args in
+  let team_name = get_string_or "team_name" "Unknown Team" args in
+  let token = resolve_token args in
+  let max_depth = get_string "max_depth" args |> Option.map int_of_string |> Option.value ~default:10 in
+  let rate_limit_ms = get_string "rate_limit_ms" args |> Option.map int_of_string |> Option.value ~default:100 in
+
+  match (team_id, token) with
+  | (Some team_id, Some token) ->
+      (* Neo4j 설정 (환경변수에서 또는 파라미터에서) *)
+      let neo4j_uri = get_string "neo4j_uri" args
+        |> Option.value ~default:(Sys.getenv_opt "NEO4J_URI" |> Option.value ~default:"http://localhost:7474") in
+      let neo4j_user = get_string "neo4j_user" args
+        |> Option.value ~default:(Sys.getenv_opt "NEO4J_USER" |> Option.value ~default:"neo4j") in
+      let neo4j_password = get_string "neo4j_password" args
+        |> Option.value ~default:(Sys.getenv_opt "NEO4J_PASSWORD" |> Option.value ~default:"") in
+      let neo4j_database = Sys.getenv_opt "NEO4J_DATABASE" |> Option.value ~default:"neo4j" in
+
+      let neo4j_cfg = Figma_crawl.create_neo4j_config
+        ~uri:neo4j_uri ~database:neo4j_database ~user:neo4j_user ~password:neo4j_password () in
+
+      let options = {
+        Figma_crawl.max_depth;
+        include_hidden = false;
+        batch_size = 100;
+        rate_limit_ms;
+        skip_files = [];
+      } in
+
+      (* 진행 상황 버퍼 *)
+      let (on_progress, get_log) = Figma_crawl.buffer_progress () in
+
+      (* 크롤링 실행 (Effects 기반) *)
+      (match Figma_crawl.crawl_team ~token ~team_id ~neo4j_cfg ~options ~team_name ~on_progress () with
+       | Ok progress ->
+           let result_json = `Assoc [
+             ("status", `String "success");
+             ("summary", Figma_crawl.progress_to_json progress);
+             ("log", `String (get_log ()));
+           ] in
+           Ok (make_text_content (Yojson.Safe.pretty_to_string result_json))
+       | Error err ->
+           let result_json = `Assoc [
+             ("status", `String "error");
+             ("error", `String err);
+             ("log", `String (get_log ()));
+           ] in
+           Ok (make_text_content (Yojson.Safe.pretty_to_string result_json)))
+  | (None, _) -> Error "Missing required parameter: team_id"
+  | (_, None) -> Error "Missing required parameter: token (set FIGMA_TOKEN or pass token parameter)"
+
 (** figma_get_variables 핸들러 - 디자인 토큰/변수 *)
 let handle_get_variables args : (Yojson.Safe.t, string) result =
   let file_key = get_string "file_key" args in
@@ -7021,6 +7090,7 @@ let all_handlers_sync : (string * tool_handler_sync) list = [
   ("figma_get_me", wrap_sync_pure handle_get_me);
   ("figma_list_projects", wrap_sync_pure handle_list_projects);
   ("figma_list_files", wrap_sync_pure handle_list_files);
+  ("figma_crawl_team", wrap_sync_pure handle_crawl_team);
   ("figma_get_variables", wrap_sync_pure handle_get_variables);
   (* Phase 2: 고급 쿼리 *)
   ("figma_query", wrap_sync_pure handle_query);
