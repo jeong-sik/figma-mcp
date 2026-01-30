@@ -32,6 +32,18 @@ cd "$SCRIPT_DIR"
 PORT="${FIGMA_MCP_PORT:-8940}"
 GRPC_PORT="${FIGMA_MCP_GRPC_PORT:-}"
 
+EXPECTED_VERSION=""
+if [ -f "$SCRIPT_DIR/dune-project" ]; then
+  EXPECTED_VERSION=$(sed -n 's/^[[:space:]]*(version[[:space:]]\([^)]\+\)).*/\1/p' "$SCRIPT_DIR/dune-project" | head -n1)
+fi
+
+get_binary_version() {
+  local bin="$1"
+  if [ -x "$bin" ]; then
+    "$bin" --version 2>/dev/null | awk '{print $NF}' | tr -d '\r'
+  fi
+}
+
 # Parse arguments
 while [[ $# -gt 0 ]]; do
   case $1 in
@@ -74,6 +86,18 @@ elif [ -x "$LOCAL_EXE" ]; then
   FIGMA_EXE="$LOCAL_EXE"
 elif [ -n "$INSTALLED_EXE" ]; then
   FIGMA_EXE="$INSTALLED_EXE"
+fi
+
+if [ -n "$FIGMA_EXE" ] && [ -n "$EXPECTED_VERSION" ]; then
+  BIN_VERSION="$(get_binary_version "$FIGMA_EXE")"
+  if [ -n "$BIN_VERSION" ] && [ "$BIN_VERSION" != "$EXPECTED_VERSION" ]; then
+    if command -v dune >/dev/null 2>&1; then
+      echo "Binary version $BIN_VERSION != expected $EXPECTED_VERSION. Rebuilding..." >&2
+      FIGMA_EXE=""
+    else
+      echo "Warning: binary version $BIN_VERSION != expected $EXPECTED_VERSION (dune not found; using existing binary)" >&2
+    fi
+  fi
 fi
 
 # Build if needed (requires dune on PATH)
