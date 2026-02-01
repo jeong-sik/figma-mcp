@@ -27,22 +27,76 @@ let default_config = {
 
 (** ============== Agent Queue for MCP-style async codegen ============== *)
 
+type agent_status =
+  | Pending
+  | Claimed
+  | Completed
+  | Failed
+
+let agent_status_to_string = function
+  | Pending -> "pending"
+  | Claimed -> "claimed"
+  | Completed -> "completed"
+  | Failed -> "failed"
+
 type agent_request = {
   id: string;
   node: Yojson.Safe.t;
   platform: string;
   prompt: string;
+  context_digest: string;
+  priority: int;
   created_at: float;
+  mutable status: agent_status;
+  mutable claimed_by: string option;
+  mutable claimed_at: float option;
+  mutable last_heartbeat: float option;
+  mutable attempts: int;
   mutable result: string option;
-  mutable completed: bool;
+  mutable error: string option;
+  mutable drifted: bool;
 }
 
 let agent_queue : (string, agent_request) Hashtbl.t = Hashtbl.create 16
 let agent_queue_mutex = Eio.Mutex.create ()
 
-let agent_add_request node platform prompt =
-  let id = Printf.sprintf "req-%d-%d" (int_of_float (Unix.gettimeofday () *. 1000.0)) (Random.int 10000) in
-  let req = { id; node; platform; prompt; created_at = Unix.gettimeofday (); result = None; completed = false } in
+let now () = Unix.gettimeofday ()
+
+let parse_positive_int value =
+  try
+    let v = int_of_string value in
+    if v > 0 then Some v else None
+  with _ -> None
+
+let env_int ~name ~default =
+  match Sys.getenv_opt name with
+  | Some v -> (match parse_positive_int v with Some n -> n | None -> default)
+  | None -> default
+
+let agent_claim_ttl_sec = env_int ~name:"FIGMA_MCP_AGENT_CLAIM_TTL_SEC" ~default:120
+let agent_heartbeat_ttl_sec = env_int ~name:"FIGMA_MCP_AGENT_HEARTBEAT_TTL_SEC" ~default:45
+let agent_max_age_sec = env_int ~name:"FIGMA_MCP_AGENT_MAX_AGE_SEC" ~default:900
+let agent_max_attempts = env_int ~name:"FIGMA_MCP_AGENT_MAX_ATTEMPTS" ~default:3
+
+let agent_add_request ~priority ~context_digest node platform prompt =
+  let id = Printf.sprintf "req-%d-%d" (int_of_float (now () *. 1000.0)) (Random.int 10000) in
+  let req = {
+    id;
+    node;
+    platform;
+    prompt;
+    context_digest;
+    priority;
+    created_at = now ();
+    status = Pending;
+    claimed_by = None;
+    claimed_at = None;
+    last_heartbeat = None;
+    attempts = 0;
+    result = None;
+    error = None;
+    drifted = false;
+  } in
   Eio.Mutex.use_rw ~protect:true agent_queue_mutex (fun () ->
     Hashtbl.add agent_queue id req;
     id)
@@ -50,91 +104,325 @@ let agent_add_request node platform prompt =
 let agent_get_pending () =
   Eio.Mutex.use_rw ~protect:true agent_queue_mutex (fun () ->
     let pending = Hashtbl.fold (fun _ req acc ->
-      if not req.completed then req :: acc else acc
+      if req.status = Pending then req :: acc else acc
     ) agent_queue [] in
-    List.sort (fun a b -> compare a.created_at b.created_at) pending)
+    List.sort (fun a b ->
+      let by_priority = compare b.priority a.priority in
+      if by_priority <> 0 then by_priority else compare a.created_at b.created_at
+    ) pending)
 
-let agent_submit_result id code =
+let agent_claim ~worker_id =
   Eio.Mutex.use_rw ~protect:true agent_queue_mutex (fun () ->
-    match Hashtbl.find_opt agent_queue id with
-    | Some req -> req.result <- Some code; req.completed <- true
-    | None -> ())
+    let pending = Hashtbl.fold (fun _ req acc ->
+      if req.status = Pending then req :: acc else acc
+    ) agent_queue [] in
+    let sorted = List.sort (fun a b ->
+      let by_priority = compare b.priority a.priority in
+      if by_priority <> 0 then by_priority else compare a.created_at b.created_at
+    ) pending in
+    let rec pick = function
+      | [] -> None
+      | req :: rest ->
+          if req.attempts >= agent_max_attempts then begin
+            req.status <- Failed;
+            req.error <- Some "max_attempts_exceeded";
+            pick rest
+          end else begin
+            req.status <- Claimed;
+            req.claimed_by <- Some worker_id;
+            req.claimed_at <- Some (now ());
+            req.last_heartbeat <- Some (now ());
+            req.attempts <- req.attempts + 1;
+            Some req
+          end
+    in
+    pick sorted)
 
-let agent_get_result id =
+let agent_heartbeat ~worker_id req_id =
   Eio.Mutex.use_rw ~protect:true agent_queue_mutex (fun () ->
-    match Hashtbl.find_opt agent_queue id with
-    | Some req when req.completed -> req.result
-    | _ -> None)
+    match Hashtbl.find_opt agent_queue req_id with
+    | Some req when req.status = Claimed && req.claimed_by = Some worker_id ->
+        req.last_heartbeat <- Some (now ());
+        Ok ()
+    | Some _ -> Error "not_claimed_by_worker"
+    | None -> Error "not_found")
+
+let agent_abandon ~worker_id ~reason req_id =
+  Eio.Mutex.use_rw ~protect:true agent_queue_mutex (fun () ->
+    match Hashtbl.find_opt agent_queue req_id with
+    | Some req when req.status = Claimed && req.claimed_by = Some worker_id ->
+        req.status <- Pending;
+        req.claimed_by <- None;
+        req.claimed_at <- None;
+        req.last_heartbeat <- None;
+        req.error <- Some reason;
+        Ok ()
+    | Some _ -> Error "not_claimed_by_worker"
+    | None -> Error "not_found")
+
+let agent_submit_result ?worker_id ?context_digest req_id code =
+  Eio.Mutex.use_rw ~protect:true agent_queue_mutex (fun () ->
+    match Hashtbl.find_opt agent_queue req_id with
+    | None -> Error "not_found"
+    | Some req ->
+        let drifted = ref req.drifted in
+        let error = ref None in
+        (match req.status, worker_id, req.claimed_by with
+         | Claimed, Some w, Some c when w <> c ->
+             drifted := true;
+             error := Some "worker_mismatch"
+         | Claimed, None, Some _ ->
+             drifted := true
+         | Pending, _, _ ->
+             drifted := true
+         | _ -> ());
+        (match context_digest with
+         | Some d when d <> "" && d <> req.context_digest ->
+             drifted := true;
+             error := Some "context_drift"
+         | _ -> ());
+        req.drifted <- !drifted;
+        (match !error with
+         | Some msg ->
+             req.error <- Some msg;
+             Error msg
+         | None ->
+             req.result <- Some code;
+             req.status <- Completed;
+             Ok ()))
+
+let agent_get_result req_id =
+  Eio.Mutex.use_rw ~protect:true agent_queue_mutex (fun () ->
+    Hashtbl.find_opt agent_queue req_id)
 
 let agent_cleanup_old () =
-  let now = Unix.gettimeofday () in
+  let t = now () in
+  let claim_ttl = float_of_int agent_claim_ttl_sec in
+  let heartbeat_ttl = float_of_int agent_heartbeat_ttl_sec in
+  let max_age = float_of_int agent_max_age_sec in
   Eio.Mutex.use_rw ~protect:true agent_queue_mutex (fun () ->
-    let old_ids = Hashtbl.fold (fun id req acc ->
-      if now -. req.created_at > 300.0 then id :: acc else acc  (* 5분 후 삭제 *)
-    ) agent_queue [] in
-    List.iter (Hashtbl.remove agent_queue) old_ids)
+    let to_remove = ref [] in
+    Hashtbl.iter (fun id req ->
+      (match req.status with
+       | Claimed ->
+           let last = Option.value ~default:(Option.value ~default:req.created_at req.claimed_at) req.last_heartbeat in
+           if (t -. last) > heartbeat_ttl || (t -. Option.value ~default:req.created_at req.claimed_at) > claim_ttl then begin
+             req.status <- Pending;
+             req.claimed_by <- None;
+             req.claimed_at <- None;
+             req.last_heartbeat <- None;
+             req.error <- Some "claim_timeout";
+           end
+       | _ -> ());
+      if (t -. req.created_at) > max_age then to_remove := id :: !to_remove
+    ) agent_queue;
+    List.iter (Hashtbl.remove agent_queue) !to_remove)
+
+type agent_queue_stats = {
+  total: int;
+  pending: int;
+  claimed: int;
+  completed: int;
+  failed: int;
+  drifted: int;
+  oldest_pending_sec: float option;
+  oldest_claimed_sec: float option;
+  claim_ttl_sec: int;
+  heartbeat_ttl_sec: int;
+  max_age_sec: int;
+  max_attempts: int;
+}
+
+let agent_queue_stats () =
+  let t = now () in
+  Eio.Mutex.use_rw ~protect:true agent_queue_mutex (fun () ->
+    let total = ref 0 in
+    let pending = ref 0 in
+    let claimed = ref 0 in
+    let completed = ref 0 in
+    let failed = ref 0 in
+    let drifted = ref 0 in
+    let oldest_pending = ref None in
+    let oldest_claimed = ref None in
+    Hashtbl.iter (fun _ (req : agent_request) ->
+      total := !total + 1;
+      if req.drifted then drifted := !drifted + 1;
+      (match req.status with
+       | Pending ->
+           pending := !pending + 1;
+           let age = t -. req.created_at in
+           (match !oldest_pending with
+            | None -> oldest_pending := Some age
+            | Some v when age > v -> oldest_pending := Some age
+            | _ -> ())
+       | Claimed ->
+           claimed := !claimed + 1;
+           let base = Option.value ~default:req.created_at req.claimed_at in
+           let age = t -. base in
+           (match !oldest_claimed with
+            | None -> oldest_claimed := Some age
+            | Some v when age > v -> oldest_claimed := Some age
+            | _ -> ())
+       | Completed -> completed := !completed + 1
+       | Failed -> failed := !failed + 1)
+    ) agent_queue;
+    {
+      total = !total;
+      pending = !pending;
+      claimed = !claimed;
+      completed = !completed;
+      failed = !failed;
+      drifted = !drifted;
+      oldest_pending_sec = !oldest_pending;
+      oldest_claimed_sec = !oldest_claimed;
+      claim_ttl_sec = agent_claim_ttl_sec;
+      heartbeat_ttl_sec = agent_heartbeat_ttl_sec;
+      max_age_sec = agent_max_age_sec;
+      max_attempts = agent_max_attempts;
+    })
+
+let agent_queue_stats_json () =
+  let s = agent_queue_stats () in
+  `Assoc [
+    ("total", `Int s.total);
+    ("pending", `Int s.pending);
+    ("claimed", `Int s.claimed);
+    ("completed", `Int s.completed);
+    ("failed", `Int s.failed);
+    ("drifted", `Int s.drifted);
+    ("oldest_pending_sec", (match s.oldest_pending_sec with Some v -> `Float v | None -> `Null));
+    ("oldest_claimed_sec", (match s.oldest_claimed_sec with Some v -> `Float v | None -> `Null));
+    ("claim_ttl_sec", `Int s.claim_ttl_sec);
+    ("heartbeat_ttl_sec", `Int s.heartbeat_ttl_sec);
+    ("max_age_sec", `Int s.max_age_sec);
+    ("max_attempts", `Int s.max_attempts);
+  ]
 
 (** ============== Request/Response Helpers ============== *)
 
+module Cors = struct
+  let mode = String.lowercase_ascii Figma_config.Cors.mode
+  let allowed_origins = Figma_config.Cors.allowed_origins
+  let allow_private_network = Figma_config.Cors.allow_private_network
+  let allow_headers = Figma_config.Cors.allow_headers
+
+  let origin_of reqd =
+    let request = Httpun.Reqd.request reqd in
+    Httpun.Headers.get request.headers "origin"
+
+  let has_prefix ~prefix s =
+    let lp = String.length prefix in
+    String.length s >= lp && String.sub s 0 lp = prefix
+
+  let has_suffix ~suffix s =
+    let ls = String.length suffix in
+    let len = String.length s in
+    len >= ls && String.sub s (len - ls) ls = suffix
+
+  let matches_pattern origin pattern =
+    let pattern = String.trim pattern in
+    if pattern = "*" then true
+    else if String.length pattern > 0 && pattern.[String.length pattern - 1] = '*'
+    then
+      let prefix = String.sub pattern 0 (String.length pattern - 1) in
+      has_prefix ~prefix origin
+    else if String.length pattern > 0 && pattern.[0] = '*'
+    then
+      let suffix = String.sub pattern 1 (String.length pattern - 1) in
+      has_suffix ~suffix origin
+    else origin = pattern
+
+  let origin_allowed origin =
+    List.exists (matches_pattern origin) allowed_origins
+
+  let is_allowed reqd =
+    match mode with
+    | "restrict" -> (
+        match origin_of reqd with
+        | None -> true
+        | Some origin -> origin_allowed origin)
+    | _ -> true
+
+  let allow_origin_value reqd =
+    match mode with
+    | "permissive" -> Some "*"
+    | "restrict" -> (
+        match origin_of reqd with
+        | Some origin when origin_allowed origin -> Some origin
+        | _ -> None)
+    | _ -> Some "*"
+
+  let headers reqd ~include_methods ~include_headers =
+    let base =
+      match allow_origin_value reqd with
+      | Some origin ->
+          let vary = if origin = "*" then [] else [("vary", "Origin")] in
+          ("access-control-allow-origin", origin) :: vary
+      | None -> []
+    in
+    let headers =
+      if include_methods then
+        ("access-control-allow-methods", "GET, POST, OPTIONS") :: base
+      else base
+    in
+    let headers =
+      if include_headers then
+        ("access-control-allow-headers", allow_headers) :: headers
+      else headers
+    in
+    if allow_private_network then
+      ("access-control-allow-private-network", "true") :: headers
+    else headers
+end
+
 module Response = struct
   let text ?(status = `OK) body reqd =
-    let headers = Httpun.Headers.of_list [
+    let headers = Httpun.Headers.of_list ([
       ("content-type", "text/plain; charset=utf-8");
       ("content-length", string_of_int (String.length body));
-      ("access-control-allow-origin", "*");
-      ("access-control-allow-private-network", "true");
-    ] in
+    ] @ Cors.headers reqd ~include_methods:false ~include_headers:false) in
     let response = Httpun.Response.create ~headers status in
-    Httpun.Reqd.respond_with_string reqd response body
+    Httpun.Reqd.respond_with_string reqd response body;
+    Server_metrics.finish_reqd ~bytes:(String.length body) reqd status
 
   let json ?(status = `OK) body reqd =
-    let headers = Httpun.Headers.of_list [
+    let headers = Httpun.Headers.of_list ([
       ("content-type", "application/json; charset=utf-8");
       ("content-length", string_of_int (String.length body));
-      ("access-control-allow-origin", "*");
-      ("access-control-allow-methods", "GET, POST, OPTIONS");
-      ("access-control-allow-headers", "Content-Type, Accept, Access-Control-Request-Private-Network");
-      ("access-control-allow-private-network", "true");
-    ] in
+    ] @ Cors.headers reqd ~include_methods:true ~include_headers:true) in
     let response = Httpun.Response.create ~headers status in
-    Httpun.Reqd.respond_with_string reqd response body
+    Httpun.Reqd.respond_with_string reqd response body;
+    Server_metrics.finish_reqd ~bytes:(String.length body) reqd status
 
   let accepted reqd =
-    let headers = Httpun.Headers.of_list [
+    let headers = Httpun.Headers.of_list ([
       ("content-length", "0");
-      ("access-control-allow-origin", "*");
-      ("access-control-allow-methods", "GET, POST, OPTIONS");
-      ("access-control-allow-headers", "Content-Type, Accept, Access-Control-Request-Private-Network");
-      ("access-control-allow-private-network", "true");
-    ] in
+    ] @ Cors.headers reqd ~include_methods:true ~include_headers:true) in
     let response = Httpun.Response.create ~headers `Accepted in
-    Httpun.Reqd.respond_with_string reqd response ""
+    Httpun.Reqd.respond_with_string reqd response "";
+    Server_metrics.finish_reqd ~bytes:0 reqd `Accepted
 
   let not_found reqd =
     text ~status:`Not_found "404 Not Found" reqd
 
   let cors_preflight reqd =
-    let headers = Httpun.Headers.of_list [
-      ("access-control-allow-origin", "*");
-      ("access-control-allow-methods", "GET, POST, OPTIONS");
-      ("access-control-allow-headers", "Content-Type, Accept, Access-Control-Request-Private-Network");
-      ("access-control-allow-private-network", "true");
+    let headers = Httpun.Headers.of_list ([
       ("content-length", "0");
-    ] in
+    ] @ Cors.headers reqd ~include_methods:true ~include_headers:true) in
     let response = Httpun.Response.create ~headers `No_content in
-    Httpun.Reqd.respond_with_string reqd response ""
+    Httpun.Reqd.respond_with_string reqd response "";
+    Server_metrics.finish_reqd ~bytes:0 reqd `No_content
 
   (** SSE streaming response for MCP streamable-http protocol *)
   let sse_stream reqd ~on_write =
-    let headers = Httpun.Headers.of_list [
+    let headers = Httpun.Headers.of_list ([
       ("content-type", "text/event-stream");
       ("cache-control", "no-cache");
       ("connection", "keep-alive");
-      ("access-control-allow-origin", "*");
-      ("access-control-allow-private-network", "true");
-    ] in
+    ] @ Cors.headers reqd ~include_methods:false ~include_headers:false) in
     let response = Httpun.Response.create ~headers `OK in
     let body = Httpun.Reqd.respond_with_streaming reqd response in
+    Server_metrics.finish_reqd ~bytes:0 reqd `OK;
     on_write body
 
   (** SSE single message response for POST→SSE (MCP Streamable HTTP) *)
@@ -148,13 +436,11 @@ module Response = struct
       ("content-type", "text/event-stream");
       ("content-length", string_of_int (String.length body));
       ("cache-control", "no-cache");
-      ("access-control-allow-origin", "*");
-      ("access-control-allow-methods", "GET, POST, OPTIONS");
-      ("access-control-allow-headers", "Content-Type, Accept, Access-Control-Request-Private-Network");
-      ("access-control-allow-private-network", "true");
-    ] @ session_headers) in
+    ] @ Cors.headers reqd ~include_methods:true ~include_headers:true
+      @ session_headers) in
     let response = Httpun.Response.create ~headers `OK in
-    Httpun.Reqd.respond_with_string reqd response body
+    Httpun.Reqd.respond_with_string reqd response body;
+    Server_metrics.finish_reqd ~bytes:(String.length body) reqd `OK
 end
 
 module Request = struct
@@ -182,17 +468,14 @@ module Request = struct
          | None -> default_max_body_bytes)
 
   let respond_error reqd status body =
-    let headers = Httpun.Headers.of_list [
+    let headers = Httpun.Headers.of_list ([
       ("content-type", "text/plain; charset=utf-8");
       ("content-length", string_of_int (String.length body));
-      ("access-control-allow-origin", "*");
-      ("access-control-allow-methods", "GET, POST, OPTIONS");
-      ("access-control-allow-headers", "Content-Type, Accept, Access-Control-Request-Private-Network");
-      ("access-control-allow-private-network", "true");
       ("connection", "close");
-    ] in
+    ] @ Cors.headers reqd ~include_methods:true ~include_headers:true) in
     let response = Httpun.Response.create ~headers status in
-    Httpun.Reqd.respond_with_string reqd response body
+    Httpun.Reqd.respond_with_string reqd response body;
+    Server_metrics.finish_reqd ~bytes:(String.length body) reqd status
 
   let respond_too_large reqd max_bytes =
     let body = Printf.sprintf
@@ -332,13 +615,19 @@ let register_sse_client body =
   let id = !sse_client_counter in
   let client = { body; mutex = Eio.Mutex.create (); connected = true } in
   Hashtbl.add sse_clients id client;
+  Server_metrics.sse_open ();
   (id, client)
 
 let unregister_sse_client id =
-  (match Hashtbl.find_opt sse_clients id with
-   | Some c -> c.connected <- false
-   | None -> ());
-  Hashtbl.remove sse_clients id
+  let was_connected =
+    match Hashtbl.find_opt sse_clients id with
+    | Some c ->
+        c.connected <- false;
+        true
+    | None -> false
+  in
+  Hashtbl.remove sse_clients id;
+  if was_connected then Server_metrics.sse_close ()
 
 (** Send SSE event and flush immediately *)
 let send_sse_event client ~event ~data =
@@ -367,8 +656,10 @@ let close_all_sse_connections () =
   List.iter (fun id ->
     (match Hashtbl.find_opt sse_clients id with
      | Some client ->
+         let was_connected = client.connected in
          client.connected <- false;
          (try Httpun.Body.Writer.close client.body with _ -> ())
+         ; if was_connected then Server_metrics.sse_close ()
      | None -> ());
     Hashtbl.remove sse_clients id
   ) client_ids;
@@ -697,9 +988,30 @@ let plugin_result_handler _request reqd =
 let plugin_status_handler _request reqd =
   plugin_cleanup ();
   let channels = Figma_plugin_bridge.list_channels () in
+  let stats = Figma_plugin_bridge.list_channel_stats () in
   let default_channel = Figma_plugin_bridge.get_default_channel () in
+  let stats_json =
+    `List (List.map (fun (s : Figma_plugin_bridge.channel_stats) ->
+      `Assoc [
+        ("id", `String s.id);
+        ("last_seen", `Float s.last_seen);
+        ("commands", `Int s.commands);
+        ("results", `Int s.results);
+        ("waiters", `Int s.waiters);
+      ]) stats)
+  in
+  let limits = `Assoc [
+    ("max_commands", `Int Figma_config.Plugin.max_commands);
+    ("max_results", `Int Figma_config.Plugin.max_results);
+    ("max_waiters", `Int Figma_config.Plugin.max_waiters);
+    ("result_ttl_seconds", `Float Figma_config.Plugin.result_ttl_seconds);
+    ("cleanup_interval_seconds", `Float Figma_config.Plugin.cleanup_interval_seconds);
+    ("poll_max_ms", `Int Figma_config.Plugin.poll_max_ms);
+  ] in
   let body = `Assoc [
     ("channels", `List (List.map (fun id -> `String id) channels));
+    ("stats", stats_json);
+    ("limits", limits);
     ("default_channel", match default_channel with Some id -> `String id | None -> `Null);
   ] in
   Response.json (Yojson.Safe.to_string body) reqd
@@ -1175,6 +1487,25 @@ let plugin_analyze_handler ~sw:_ ~eio_ctx:_ _request reqd =
 
 (** ============== Agent Queue Handlers ============== *)
 
+let agent_request_json ~include_node ~include_prompt req =
+  let base = [
+    ("id", `String req.id);
+    ("platform", `String req.platform);
+    ("priority", `Int req.priority);
+    ("context_digest", `String req.context_digest);
+    ("status", `String (agent_status_to_string req.status));
+    ("attempts", `Int req.attempts);
+    ("claimed_by", (match req.claimed_by with Some v -> `String v | None -> `Null));
+    ("claimed_at", (match req.claimed_at with Some v -> `Float v | None -> `Null));
+    ("last_heartbeat", (match req.last_heartbeat with Some v -> `Float v | None -> `Null));
+    ("drifted", `Bool req.drifted);
+    ("error", (match req.error with Some v -> `String v | None -> `Null));
+    ("age_sec", `Float (Unix.gettimeofday () -. req.created_at));
+  ] in
+  let with_prompt = if include_prompt then ("prompt", `String req.prompt) :: base else base in
+  let with_node = if include_node then ("node", req.node) :: with_prompt else with_prompt in
+  `Assoc with_node
+
 (** POST /agent/request - Plugin submits a codegen request to queue *)
 let agent_request_handler _request reqd =
   Request.read_body_async reqd (fun body_str ->
@@ -1185,12 +1516,23 @@ let agent_request_handler _request reqd =
         let node = member "node" json in
         let platform = member "platform" json |> to_string_option |> Option.value ~default:"react" in
         let prompt = member "prompt" json |> to_string_option |> Option.value ~default:"" in
+        let priority = member "priority" json |> to_int_option |> Option.value ~default:0 in
+        let ctx_digest = member "context_digest" json |> to_string_option |> Option.value ~default:"" in
         let node_info = Yojson.Safe.to_string node in
         let full_prompt = if prompt = "" then
           sprintf "Convert this Figma node to %s code:\n%s\n\nGenerate clean, production-ready code." platform node_info
         else prompt in
-        let req_id = agent_add_request node platform full_prompt in
-        let result = `Assoc [("request_id", `String req_id); ("status", `String "queued")] in
+        let context_digest =
+          if ctx_digest <> "" then ctx_digest
+          else Digest.to_hex (Digest.string (full_prompt ^ "\n" ^ node_info))
+        in
+        let req_id = agent_add_request ~priority ~context_digest node platform full_prompt in
+        let result = `Assoc [
+          ("request_id", `String req_id);
+          ("status", `String "queued");
+          ("priority", `Int priority);
+          ("context_digest", `String context_digest);
+        ] in
         Response.json (Yojson.Safe.to_string result) reqd
   )
 
@@ -1199,16 +1541,73 @@ let agent_pending_handler _request reqd =
   agent_cleanup_old ();
   let pending = agent_get_pending () in
   let requests = List.map (fun req ->
-    `Assoc [
-      ("id", `String req.id);
-      ("platform", `String req.platform);
-      ("prompt", `String req.prompt);
-      ("node", req.node);
-      ("age_sec", `Float (Unix.gettimeofday () -. req.created_at));
-    ]
+    agent_request_json ~include_node:true ~include_prompt:true req
   ) pending in
   let result = `Assoc [("pending", `List requests); ("count", `Int (List.length pending))] in
   Response.json (Yojson.Safe.to_string result) reqd
+
+(** POST /agent/claim - Agent claims a pending request *)
+let agent_claim_handler _request reqd =
+  Request.read_body_async reqd (fun body_str ->
+    match parse_json body_str with
+    | Error msg -> json_error msg reqd
+    | Ok json ->
+        let open Yojson.Safe.Util in
+        let worker_id = member "worker_id" json |> to_string_option |> Option.value ~default:"" in
+        if worker_id = "" then json_error "worker_id required" reqd
+        else begin
+          agent_cleanup_old ();
+          match agent_claim ~worker_id with
+          | None ->
+              let result = `Assoc [("status", `String "empty")] in
+              Response.json (Yojson.Safe.to_string result) reqd
+          | Some req ->
+              let result = `Assoc [
+                ("status", `String "claimed");
+                ("request", agent_request_json ~include_node:true ~include_prompt:true req);
+              ] in
+              Response.json (Yojson.Safe.to_string result) reqd
+        end
+  )
+
+(** POST /agent/heartbeat - Agent keeps claim alive *)
+let agent_heartbeat_handler _request reqd =
+  Request.read_body_async reqd (fun body_str ->
+    match parse_json body_str with
+    | Error msg -> json_error msg reqd
+    | Ok json ->
+        let open Yojson.Safe.Util in
+        let worker_id = member "worker_id" json |> to_string_option |> Option.value ~default:"" in
+        let req_id = member "request_id" json |> to_string_option |> Option.value ~default:"" in
+        if worker_id = "" || req_id = "" then
+          json_error "worker_id and request_id required" reqd
+        else
+          match agent_heartbeat ~worker_id req_id with
+          | Ok () ->
+              let result = `Assoc [("status", `String "ok"); ("request_id", `String req_id)] in
+              Response.json (Yojson.Safe.to_string result) reqd
+          | Error msg -> json_error msg reqd
+  )
+
+(** POST /agent/abandon - Agent releases claim *)
+let agent_abandon_handler _request reqd =
+  Request.read_body_async reqd (fun body_str ->
+    match parse_json body_str with
+    | Error msg -> json_error msg reqd
+    | Ok json ->
+        let open Yojson.Safe.Util in
+        let worker_id = member "worker_id" json |> to_string_option |> Option.value ~default:"" in
+        let req_id = member "request_id" json |> to_string_option |> Option.value ~default:"" in
+        let reason = member "reason" json |> to_string_option |> Option.value ~default:"abandoned" in
+        if worker_id = "" || req_id = "" then
+          json_error "worker_id and request_id required" reqd
+        else
+          match agent_abandon ~worker_id ~reason req_id with
+          | Ok () ->
+              let result = `Assoc [("status", `String "ok"); ("request_id", `String req_id)] in
+              Response.json (Yojson.Safe.to_string result) reqd
+          | Error msg -> json_error msg reqd
+  )
 
 (** POST /agent/result - Agent submits generated code *)
 let agent_result_handler _request reqd =
@@ -1217,11 +1616,17 @@ let agent_result_handler _request reqd =
     | Error msg -> json_error msg reqd
     | Ok json ->
         let open Yojson.Safe.Util in
-        let req_id = member "request_id" json |> to_string in
-        let code = member "code" json |> to_string in
-        agent_submit_result req_id code;
-        let result = `Assoc [("status", `String "submitted"); ("request_id", `String req_id)] in
-        Response.json (Yojson.Safe.to_string result) reqd
+        let req_id = member "request_id" json |> to_string_option |> Option.value ~default:"" in
+        let code = member "code" json |> to_string_option |> Option.value ~default:"" in
+        let worker_id = member "worker_id" json |> to_string_option in
+        let context_digest = member "context_digest" json |> to_string_option in
+        if req_id = "" || code = "" then json_error "request_id and code required" reqd
+        else
+          match agent_submit_result ?worker_id ?context_digest req_id code with
+          | Ok () ->
+              let result = `Assoc [("status", `String "submitted"); ("request_id", `String req_id)] in
+              Response.json (Yojson.Safe.to_string result) reqd
+          | Error msg -> json_error msg reqd
   )
 
 (** GET /agent/status/:id - Check request status *)
@@ -1229,12 +1634,46 @@ let agent_status_handler request reqd =
   let path = Request.path request in
   let req_id = String.sub path 14 (String.length path - 14) in (* /agent/status/ = 14 chars *)
   match agent_get_result req_id with
-  | Some code ->
-      let result = `Assoc [("status", `String "completed"); ("code", `String code)] in
+  | Some req ->
+      let base = [
+        ("status", `String (agent_status_to_string req.status));
+        ("request_id", `String req.id);
+        ("priority", `Int req.priority);
+        ("context_digest", `String req.context_digest);
+        ("claimed_by", (match req.claimed_by with Some v -> `String v | None -> `Null));
+        ("claimed_at", (match req.claimed_at with Some v -> `Float v | None -> `Null));
+        ("last_heartbeat", (match req.last_heartbeat with Some v -> `Float v | None -> `Null));
+        ("attempts", `Int req.attempts);
+        ("drifted", `Bool req.drifted);
+        ("error", (match req.error with Some v -> `String v | None -> `Null));
+        ("age_sec", `Float (Unix.gettimeofday () -. req.created_at));
+      ] in
+      let result =
+        match req.status, req.result with
+        | Completed, Some code -> `Assoc (("code", `String code) :: base)
+        | _ -> `Assoc base
+      in
       Response.json (Yojson.Safe.to_string result) reqd
   | None ->
-      let result = `Assoc [("status", `String "pending")] in
+      let result = `Assoc [("status", `String "not_found")] in
       Response.json (Yojson.Safe.to_string result) reqd
+
+(** GET /agent/queue - Queue monitoring *)
+let agent_queue_handler _request reqd =
+  agent_cleanup_old ();
+  let items =
+    Eio.Mutex.use_rw ~protect:true agent_queue_mutex (fun () ->
+      Hashtbl.fold (fun _ req acc -> req :: acc) agent_queue [])
+  in
+  let payload = List.map (fun req ->
+    agent_request_json ~include_node:false ~include_prompt:false req
+  ) items in
+  let result = `Assoc [
+    ("stats", agent_queue_stats_json ());
+    ("items", `List payload);
+    ("count", `Int (List.length items));
+  ] in
+  Response.json (Yojson.Safe.to_string result) reqd
 
 (** POST /plugin/extract-tokens - Extract design tokens from Figma node *)
 let extract_tokens_handler ~sw:_ ~eio_ctx:_ _request reqd =
@@ -2645,12 +3084,25 @@ let route_request ~clock ~domain_mgr ~sw ~eio_ctx server request reqd =
   let path = Request.path request in
   let meth = Request.method_ request in
 
-  match (meth, path) with
+  if not (Cors.is_allowed reqd) then
+    Response.text ~status:`Forbidden "Forbidden" reqd
+  else
+    match (meth, path) with
   | `OPTIONS, _ ->
       Response.cors_preflight reqd
 
   | `GET, "/health" ->
       health_handler request reqd
+
+  | `GET, "/metrics" ->
+      Response.text (Server_metrics.to_prometheus_text ()) reqd
+
+  | `GET, "/stats" ->
+      let result = `Assoc [
+        ("server_metrics", Server_metrics.to_json ());
+        ("agent_queue", agent_queue_stats_json ());
+      ] in
+      Response.json (Yojson.Safe.to_string result) reqd
 
   | `GET, "/" ->
       Response.text (sprintf "🎨 %s MCP Server (Eio)" Mcp_protocol.server_name) reqd
@@ -2720,6 +3172,15 @@ let route_request ~clock ~domain_mgr ~sw ~eio_ctx server request reqd =
   | `POST, "/agent/request" ->
       agent_request_handler request reqd
 
+  | `POST, "/agent/claim" ->
+      agent_claim_handler request reqd
+
+  | `POST, "/agent/heartbeat" ->
+      agent_heartbeat_handler request reqd
+
+  | `POST, "/agent/abandon" ->
+      agent_abandon_handler request reqd
+
   | `GET, "/agent/pending" ->
       agent_pending_handler request reqd
 
@@ -2728,6 +3189,9 @@ let route_request ~clock ~domain_mgr ~sw ~eio_ctx server request reqd =
 
   | `GET, path when String.length path > 14 && String.sub path 0 14 = "/agent/status/" ->
       agent_status_handler request reqd
+
+  | `GET, "/agent/queue" ->
+      agent_queue_handler request reqd
 
   | _ ->
       Response.not_found reqd
@@ -2738,6 +3202,7 @@ let make_request_handler ~clock ~domain_mgr ~sw ~eio_ctx server =
   fun _client_addr gluten_reqd ->
     let reqd = gluten_reqd.Gluten.Reqd.reqd in
     let request = Httpun.Reqd.request reqd in
+    Server_metrics.register_reqd reqd request;
     try
       route_request ~clock ~domain_mgr ~sw ~eio_ctx server request reqd
     with exn ->
