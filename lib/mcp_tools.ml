@@ -1995,12 +1995,55 @@ let make_error_content msg : Yojson.Safe.t =
 
 (** ============== Generic Plugin Handler Builders ============== *)
 
+let truncate_string ?(max_len=2000) s =
+  if String.length s <= max_len then s
+  else (String.sub s 0 max_len) ^ "…"
+
+let plugin_error_message payload =
+  let list_hd_opt = function
+    | [] -> None
+    | x :: _ -> Some x
+  in
+  let first_string_in_list = function
+    | `List items ->
+        items
+        |> List.filter_map (function `String s -> Some s | _ -> None)
+        |> list_hd_opt
+    | _ -> None
+  in
+  let assoc_string key fields =
+    match List.assoc_opt key fields with
+    | Some (`String s) -> Some s
+    | Some v -> (
+        match first_string_in_list v with
+        | Some s -> Some s
+        | None -> None)
+    | None -> None
+  in
+  let raw =
+    match payload with
+    | `String s -> s
+    | `Assoc fields -> (
+        match assoc_string "error" fields with
+        | Some s -> s
+        | None -> (
+            match assoc_string "message" fields with
+            | Some s -> s
+            | None -> Yojson.Safe.to_string payload))
+    | _ -> Yojson.Safe.to_string payload
+  in
+  truncate_string raw
+
 (** Execute plugin command and return result *)
 let plugin_exec ~channel_id ~name ~payload ~timeout_ms =
   let command_id = Figma_plugin_bridge.enqueue_command ~channel_id ~name ~payload in
   match plugin_wait ~channel_id ~command_id ~timeout_ms with
   | Error err -> Error err
-  | Ok result -> Ok (make_text_content (Yojson.Safe.pretty_to_string result.payload))
+  | Ok result ->
+      if result.ok then
+        Ok (make_text_content (Yojson.Safe.pretty_to_string result.payload))
+      else
+        Error (Printf.sprintf "Plugin error: %s" (plugin_error_message result.payload))
 
 (** Simple handler - just needs channel_id *)
 let plugin_simple ~name ?(default_timeout=10000) ~build_payload args =
@@ -4586,9 +4629,30 @@ let handle_plugin_use_channel args : (Yojson.Safe.t, string) result =
 (** figma_plugin_status 핸들러 *)
 let handle_plugin_status _args : (Yojson.Safe.t, string) result =
   let channels = Figma_plugin_bridge.list_channels () in
+  let stats = Figma_plugin_bridge.list_channel_stats () in
   let default_channel = Figma_plugin_bridge.get_default_channel () in
+  let stats_json =
+    `List (List.map (fun (s : Figma_plugin_bridge.channel_stats) ->
+      `Assoc [
+        ("id", `String s.id);
+        ("last_seen", `Float s.last_seen);
+        ("commands", `Int s.commands);
+        ("results", `Int s.results);
+        ("waiters", `Int s.waiters);
+      ]) stats)
+  in
+  let limits = `Assoc [
+    ("max_commands", `Int Figma_config.Plugin.max_commands);
+    ("max_results", `Int Figma_config.Plugin.max_results);
+    ("max_waiters", `Int Figma_config.Plugin.max_waiters);
+    ("result_ttl_seconds", `Float Figma_config.Plugin.result_ttl_seconds);
+    ("cleanup_interval_seconds", `Float Figma_config.Plugin.cleanup_interval_seconds);
+    ("poll_max_ms", `Int Figma_config.Plugin.poll_max_ms);
+  ] in
   let result = `Assoc [
     ("channels", `List (List.map (fun id -> `String id) channels));
+    ("stats", stats_json);
+    ("limits", limits);
     ("default_channel", match default_channel with Some id -> `String id | None -> `Null);
   ] in
   Ok (make_text_content (Yojson.Safe.pretty_to_string result))

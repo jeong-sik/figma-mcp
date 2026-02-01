@@ -24,6 +24,27 @@ let get_float ~default name =
   | Some v -> (try float_of_string v with _ -> default)
   | None -> default
 
+let get_bool ~default name =
+  match Sys.getenv_opt name with
+  | None -> default
+  | Some v ->
+      let lower = String.lowercase_ascii v in
+      if lower = "1" || lower = "true" || lower = "yes" || lower = "y" || lower = "on" then true
+      else if lower = "0" || lower = "false" || lower = "no" || lower = "n" || lower = "off" then false
+      else default
+
+let get_string_list ~default name =
+  match Sys.getenv_opt name with
+  | None -> default
+  | Some v ->
+      let items =
+        v
+        |> String.split_on_char ','
+        |> List.map String.trim
+        |> List.filter (fun s -> s <> "")
+      in
+      if items = [] then default else items
+
 (** {1 Cache Configuration} *)
 
 module Cache = struct
@@ -58,6 +79,30 @@ module Plugin = struct
   (** Maximum poll wait time (milliseconds) *)
   let poll_max_ms =
     get_int ~default:30000 "FIGMA_MCP_PLUGIN_POLL_MAX_MS"
+
+  (** Maximum queued commands per channel *)
+  let max_commands =
+    get_int ~default:256 "FIGMA_MCP_PLUGIN_MAX_COMMANDS"
+
+  (** Maximum stored results per channel *)
+  let max_results =
+    get_int ~default:512 "FIGMA_MCP_PLUGIN_MAX_RESULTS"
+
+  (** Maximum payload size (bytes), 0 disables limit *)
+  let max_payload_bytes =
+    get_int ~default:(5 * 1024 * 1024) "FIGMA_MCP_PLUGIN_MAX_PAYLOAD_BYTES"
+
+  (** Maximum waiting pollers per channel *)
+  let max_waiters =
+    get_int ~default:128 "FIGMA_MCP_PLUGIN_MAX_WAITERS"
+
+  (** TTL for stored results (seconds) *)
+  let result_ttl_seconds =
+    get_float ~default:120.0 "FIGMA_MCP_PLUGIN_RESULT_TTL"
+
+  (** Cleanup interval (seconds) *)
+  let cleanup_interval_seconds =
+    get_float ~default:30.0 "FIGMA_MCP_PLUGIN_CLEANUP_INTERVAL"
 end
 
 (** {1 Visual Verification Configuration} *)
@@ -86,6 +131,30 @@ module Response = struct
   (** Response file TTL (seconds) *)
   let ttl_seconds =
     get_int ~default:3600 "FIGMA_MCP_RESPONSE_TTL"
+end
+
+(** {1 CORS Configuration} *)
+
+module Cors = struct
+  (** permissive | restrict *)
+  let mode =
+    get_string ~default:"permissive" "FIGMA_MCP_CORS_MODE"
+
+  (** Allowed origins, supports prefix wildcards (e.g., http://localhost* ) *)
+  let allowed_origins =
+    get_string_list
+      ~default:["http://localhost*"; "http://127.0.0.1*"; "null"]
+      "FIGMA_MCP_CORS_ALLOWED_ORIGINS"
+
+  (** Allow private network access from browser preflight *)
+  let allow_private_network =
+    get_bool ~default:true "FIGMA_MCP_CORS_ALLOW_PRIVATE_NETWORK"
+
+  (** Allow headers list for preflight *)
+  let allow_headers =
+    get_string
+      ~default:"Content-Type, Accept, Mcp-Session-Id, Mcp-Protocol-Version, Authorization, Access-Control-Request-Private-Network"
+      "FIGMA_MCP_CORS_ALLOW_HEADERS"
 end
 
 (** {1 Asset Configuration} *)
@@ -129,7 +198,7 @@ end
 let print_summary () =
   Printf.eprintf "[figma_config] Cache: dir=%s ttl=%.1fh l1_max=%d l2_max=%dMB\n%!"
     Cache.dir Cache.ttl_hours Cache.l1_max Cache.l2_max_mb;
-  Printf.eprintf "[figma_config] Plugin: ttl=%.0fs poll_max=%dms\n%!"
-    Plugin.ttl_seconds Plugin.poll_max_ms;
+  Printf.eprintf "[figma_config] Plugin: ttl=%.0fs poll_max=%dms max_cmd=%d max_res=%d max_waiters=%d\n%!"
+    Plugin.ttl_seconds Plugin.poll_max_ms Plugin.max_commands Plugin.max_results Plugin.max_waiters;
   Printf.eprintf "[figma_config] Response: max_inline=%d dir=%s ttl=%ds\n%!"
     Response.max_inline Response.large_dir Response.ttl_seconds
