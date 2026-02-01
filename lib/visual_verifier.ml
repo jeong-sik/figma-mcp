@@ -997,7 +997,11 @@ let log_verification ~node_id ~ssim ?(notes="") () =
   let line = Printf.sprintf "%s|%s|%.4f|%s\n" iso_time node_id ssim notes in
   let oc = open_out_gen [Open_append; Open_creat; Open_text] 0o644 ssim_log_path in
   Fun.protect
-    ~finally:(fun () -> close_out_noerr oc)
+    ~finally:(fun () ->
+      try close_out oc with
+      | ex ->
+          Log.warn "visual_verifier" "close_out failed in finalizer: %s"
+            (Printexc.to_string ex))
     (fun () -> output_string oc line)
 
 (** SSIM 개선 기록 (before/after 비교)

@@ -36,14 +36,22 @@ let append_json (json : Yojson.Safe.t) =
   ensure_parent_dir telemetry_file;
   Mutex.lock write_mutex;
   Fun.protect
-    ~finally:(fun () -> try Mutex.unlock write_mutex with _ -> ())
+    ~finally:(fun () ->
+      try Mutex.unlock write_mutex with
+      | ex ->
+          Log.warn "telemetry_jsonl" "Mutex.unlock failed in finalizer: %s"
+            (Printexc.to_string ex))
     (fun () ->
       try
         let oc =
           open_out_gen [ Open_append; Open_creat; Open_text ] 0o644 telemetry_file
         in
         Fun.protect
-          ~finally:(fun () -> close_out_noerr oc)
+          ~finally:(fun () ->
+            try close_out oc with
+            | ex ->
+                Log.warn "telemetry_jsonl" "close_out failed in finalizer: %s"
+                  (Printexc.to_string ex))
           (fun () ->
             output_string oc (Yojson.Safe.to_string json);
             output_char oc '\n';

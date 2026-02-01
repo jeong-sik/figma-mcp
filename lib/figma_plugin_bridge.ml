@@ -37,7 +37,13 @@ let now () = Unix.gettimeofday ()
 
 let with_lock f =
   Mutex.lock lock;
-  Fun.protect ~finally:(fun () -> try Mutex.unlock lock with _ -> ()) f
+  Fun.protect
+    ~finally:(fun () ->
+      try Mutex.unlock lock with
+      | ex ->
+          Log.warn "figma_plugin_bridge" "Mutex.unlock failed in finalizer: %s"
+            (Printexc.to_string ex))
+    f
 
 let new_id prefix =
   Printf.sprintf "%s-%d-%d" prefix (int_of_float (now () *. 1000.0)) (Random.bits ())
