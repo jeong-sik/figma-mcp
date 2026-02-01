@@ -266,7 +266,7 @@ type client = {
   tls_config : Tls.Config.client;
   cohttp_client : Cohttp_eio.Client.t;  (** LLM provider 등 호환용 *)
   raw_pool : (string, raw_conn) Hashtbl.t;
-  raw_pool_lock : Mutex.t;
+  raw_pool_lock : Eio.Mutex.t;
 }
 
 (** TLS 설정 생성 *)
@@ -299,7 +299,7 @@ let make_client (net : _ Eio.Net.t) : client =
     tls_config;
     cohttp_client;
     raw_pool = Hashtbl.create 4;
-    raw_pool_lock = Mutex.create ();
+    raw_pool_lock = Eio.Mutex.create ();
   }
 
 (** Cohttp 클라이언트 추출 (LLM provider 등 호환용) *)
@@ -368,8 +368,7 @@ let parse_http_response response =
     (status, body)
 
 let with_raw_pool (client : client) f =
-  Mutex.lock client.raw_pool_lock;
-  Fun.protect ~finally:(fun () -> Mutex.unlock client.raw_pool_lock) f
+  Eio.Mutex.use_rw ~protect:true client.raw_pool_lock f
 
 let close_raw_conn conn =
   try Eio.Flow.close conn.flow with _ -> ()

@@ -995,10 +995,10 @@ let log_verification ~node_id ~ssim ?(notes="") () =
       tm.Unix.tm_hour tm.Unix.tm_min tm.Unix.tm_sec
   in
   let line = Printf.sprintf "%s|%s|%.4f|%s\n" iso_time node_id ssim notes in
-  let oc = open_out_gen [Open_append; Open_creat; Open_text] 0o644 ssim_log_path in
-  Fun.protect
-    ~finally:(fun () -> close_out_noerr oc)
-    (fun () -> output_string oc line)
+  (try
+     Out_channel.with_open_gen [Open_append; Open_creat; Open_text] 0o644 ssim_log_path (fun oc ->
+       output_string oc line)
+   with _ -> ())
 
 (** SSIM 개선 기록 (before/after 비교)
 

@@ -1177,7 +1177,7 @@ let ( >>| ) result f = match result with
   | Ok v -> Ok (f v)
   | Error e -> Error e
 
-(** 안전한 임시 파일 사용 (Fun.protect 패턴) *)
+(** 안전한 임시 파일 사용 (try/finally 패턴) *)
 let with_temp_file ~prefix ~suffix f =
   let path = Printf.sprintf "/tmp/figma-visual/%s_%d_%d%s"
     prefix
@@ -1185,9 +1185,13 @@ let with_temp_file ~prefix ~suffix f =
     (Random.int 100000)
     suffix
   in
-  Fun.protect
-    ~finally:(fun () -> try Unix.unlink path with _ -> ())
-    (fun () -> f path)
+  match f path with
+  | result ->
+      (try Unix.unlink path with _ -> ());
+      result
+  | exception exn ->
+      (try Unix.unlink path with _ -> ());
+      raise exn
 
 (** 디버그 정보가 포함된 에러 JSON 생성 *)
 let make_error_json ~operation ~error ?(debug_info=[]) () =
