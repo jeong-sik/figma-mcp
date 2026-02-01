@@ -41,7 +41,8 @@ let with_lock f =
     ~finally:(fun () ->
       try Mutex.unlock lock with
       | ex ->
-          Log.warn "figma_plugin_bridge" "Mutex.unlock failed in finalizer: %s"
+          Printf.eprintf
+            "[figma_plugin_bridge] WARN Mutex.unlock failed in finalizer: %s\n%!"
             (Printexc.to_string ex))
     f
 

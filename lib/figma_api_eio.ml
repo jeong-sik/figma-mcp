@@ -373,7 +373,8 @@ let with_raw_pool (client : client) f =
     ~finally:(fun () ->
       try Mutex.unlock client.raw_pool_lock with
       | ex ->
-          Log.warn "figma_api_eio" "Mutex.unlock failed in finalizer: %s"
+          Printf.eprintf
+            "[figma_api_eio] WARN Mutex.unlock failed in finalizer: %s\n%!"
             (Printexc.to_string ex))
     f
 

@@ -1000,7 +1000,8 @@ let log_verification ~node_id ~ssim ?(notes="") () =
     ~finally:(fun () ->
       try close_out oc with
       | ex ->
-          Log.warn "visual_verifier" "close_out failed in finalizer: %s"
+          Printf.eprintf
+            "[visual_verifier] WARN close_out failed in finalizer: %s\n%!"
             (Printexc.to_string ex))
     (fun () -> output_string oc line)
 

@@ -39,7 +39,8 @@ let append_json (json : Yojson.Safe.t) =
     ~finally:(fun () ->
       try Mutex.unlock write_mutex with
       | ex ->
-          Log.warn "telemetry_jsonl" "Mutex.unlock failed in finalizer: %s"
+          Printf.eprintf
+            "[telemetry_jsonl] WARN Mutex.unlock failed in finalizer: %s\n%!"
             (Printexc.to_string ex))
     (fun () ->
       try
@@ -50,7 +51,8 @@ let append_json (json : Yojson.Safe.t) =
           ~finally:(fun () ->
             try close_out oc with
             | ex ->
-                Log.warn "telemetry_jsonl" "close_out failed in finalizer: %s"
+                Printf.eprintf
+                  "[telemetry_jsonl] WARN close_out failed in finalizer: %s\n%!"
                   (Printexc.to_string ex))
           (fun () ->
             output_string oc (Yojson.Safe.to_string json);
