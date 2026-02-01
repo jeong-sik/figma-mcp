@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.3] - 2026-02-01
+
+### Added
+- Agent queue hardening: claim/heartbeat TTL, priority, drift detection, max attempts
+- Queue stats + server metrics endpoints (`/stats`, `/metrics`)
+- SSE/HTTP response metrics aggregation
+- `scripts/mcp-smoke.sh`
+
 ## [0.5.2] - 2026-01-30
 
 ### Changed
