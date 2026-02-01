@@ -135,6 +135,13 @@ security add-generic-password -s "figma-mcp" -a "FIGMA_TOKEN" -w "YOUR_TOKEN"
 - `FIGMA_MCP_MAX_BODY_BYTES` 또는 `MCP_MAX_BODY_BYTES`로 조정하세요.
 - `Content-Length`가 없으면 스트리밍 누적 바이트로 제한하며, 초과 시 413을 반환합니다.
 
+## CORS 설정 (HTTP)
+
+- `FIGMA_MCP_CORS_MODE`: `permissive`(기본) 또는 `restrict`
+- `FIGMA_MCP_CORS_ALLOWED_ORIGINS`: 허용 Origin 목록 (쉼표 구분, 예: `https://app.example.com,https://*.example.com`)
+- `FIGMA_MCP_CORS_ALLOW_PRIVATE_NETWORK`: `true`일 때 `access-control-allow-private-network` 헤더 추가
+- `FIGMA_MCP_CORS_ALLOW_HEADERS`: 허용 헤더 목록 (기본: `Content-Type, Authorization, Mcp-Session-Id, Mcp-Protocol-Version, X-Requested-With`)
+
 ## Troubleshooting: TLS (macOS/Linux)
 
 `ca-certs: empty trust anchors` 에러가 나는 경우가 있습니다.  
@@ -283,7 +290,15 @@ HTTP 엔드포인트:
 - `POST /plugin/result`
 - `GET  /plugin/status`
 `/plugin/poll`은 `wait_ms`(또는 `timeout_ms`)를 지원합니다. (long-poll, ms 단위)
-최대 대기 시간은 `FIGMA_PLUGIN_POLL_MAX_MS`로 제한됩니다. (기본 30000ms)
+최대 대기 시간은 `FIGMA_MCP_PLUGIN_POLL_MAX_MS`로 제한됩니다. (기본 30000ms)
+
+플러그인 브릿지 제한/청소:
+- `FIGMA_MCP_PLUGIN_MAX_COMMANDS`: 채널별 대기 커맨드 상한 (기본 200)
+- `FIGMA_MCP_PLUGIN_MAX_RESULTS`: 채널별 결과 보관 상한 (기본 200)
+- `FIGMA_MCP_PLUGIN_MAX_PAYLOAD_BYTES`: 커맨드/결과 payload 크기 제한 (기본 5MB, 0=무제한)
+- `FIGMA_MCP_PLUGIN_MAX_WAITERS`: 채널별 long-poll 대기 상한 (기본 64)
+- `FIGMA_MCP_PLUGIN_RESULT_TTL_SECONDS`: 결과 TTL (기본 120s)
+- `FIGMA_MCP_PLUGIN_CLEANUP_INTERVAL_SECONDS`: 청소 주기 (기본 15s)
 
 ## gRPC Streaming (대용량 응답)
 
