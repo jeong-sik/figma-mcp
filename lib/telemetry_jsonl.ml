@@ -34,13 +34,25 @@ let write_mutex = Mutex.create ()
 
 let append_json (json : Yojson.Safe.t) =
   ensure_parent_dir telemetry_file;
-  Mutex.protect write_mutex (fun () ->
-    try
-      Out_channel.with_open_gen [ Open_append; Open_creat; Open_text ] 0o644 telemetry_file (fun oc ->
-        output_string oc (Yojson.Safe.to_string json);
-        output_char oc '\n';
-        flush oc)
-    with _ -> ())
+  Mutex.lock write_mutex;
+  Common.protect
+    ~module_name:"telemetry_jsonl"
+    ~finally_label:"Mutex.unlock"
+    ~finally:(fun () -> Mutex.unlock write_mutex)
+    (fun () ->
+      try
+        let oc =
+          open_out_gen [ Open_append; Open_creat; Open_text ] 0o644 telemetry_file
+        in
+        Common.protect
+          ~module_name:"telemetry_jsonl"
+          ~finally_label:"close_out"
+          ~finally:(fun () -> close_out oc)
+          (fun () ->
+            output_string oc (Yojson.Safe.to_string json);
+            output_char oc '\n';
+            flush oc)
+      with _ -> ())
 
 let log_tool_called ~tool_name ~duration_ms ~success ~error =
   let error_json = match error with Some e -> `String e | None -> `Null in

@@ -4,6 +4,11 @@
  (deps
   (glob_files fixtures/*.json)))
 
+; Common finalizer guard tests
+(test
+ (name test_common)
+ (libraries figma_mcp alcotest))
+
 ; MCP Protocol Coverage Tests (JSON-RPC, MCP types, Eio patterns)
 (test
  (name test_mcp_protocol_coverage)
