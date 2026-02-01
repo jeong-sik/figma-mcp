@@ -7160,27 +7160,25 @@ let handle_read_large_result args : (Yojson.Safe.t, string) result =
       else
         let safe_offset = max 0 offset in
         let safe_limit = if limit <= 0 then 20000 else limit in
-        let ic = open_in_bin path in
-        let total = in_channel_length ic in
-        if safe_offset >= total then begin
-          close_in ic;
-          Error "offset is beyond EOF"
-        end else begin
-          seek_in ic safe_offset;
-          let to_read = min safe_limit (total - safe_offset) in
-          let chunk = really_input_string ic to_read in
-          close_in ic;
-          let result = `Assoc [
-            ("file_path", `String path);
-            ("offset", `Int safe_offset);
-            ("limit", `Int safe_limit);
-            ("read_bytes", `Int to_read);
-            ("total_bytes", `Int total);
-            ("eof", `Bool (safe_offset + to_read >= total));
-            ("chunk", `String chunk);
-          ] in
-          Ok (make_text_content (Yojson.Safe.pretty_to_string result))
-        end
+        In_channel.with_open_bin path (fun ic ->
+          let total = in_channel_length ic in
+          if safe_offset >= total then
+            Error "offset is beyond EOF"
+          else begin
+            seek_in ic safe_offset;
+            let to_read = min safe_limit (total - safe_offset) in
+            let chunk = really_input_string ic to_read in
+            let result = `Assoc [
+              ("file_path", `String path);
+              ("offset", `Int safe_offset);
+              ("limit", `Int safe_limit);
+              ("read_bytes", `Int to_read);
+              ("total_bytes", `Int total);
+              ("eof", `Bool (safe_offset + to_read >= total));
+              ("chunk", `String chunk);
+            ] in
+            Ok (make_text_content (Yojson.Safe.pretty_to_string result))
+          end)
 
 (** 캐시 통계 핸들러 *)
 let handle_cache_stats _args : (Yojson.Safe.t, string) result =

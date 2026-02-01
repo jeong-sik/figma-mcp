@@ -46,9 +46,9 @@ let save_to_file ~prefix content =
   ensure_dir storage_dir;
   let filename = generate_filename ~prefix in
   let filepath = Filename.concat storage_dir filename in
-  let oc = open_out filepath in
-  output_string oc content;
-  close_out oc;
+  Out_channel.with_open_bin filepath (fun oc ->
+    output_string oc content
+  );
   filepath
 
 (** 오래된 파일 정리 *)

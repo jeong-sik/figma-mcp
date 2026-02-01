@@ -832,9 +832,9 @@ let download_url ~sw ~net ~clock ~client ~url ~path : (unit, api_error) result =
       if not (Sys.file_exists dir) then
         Sys.mkdir dir 0o755;
       (* 파일 쓰기 *)
-      let oc = open_out_bin path in
-      output_string oc body;
-      close_out oc;
+      Out_channel.with_open_bin path (fun oc ->
+        output_string oc body
+      );
       Ok ()
     end else begin
       log_error "download_url" (sprintf "HTTP %d (url: %s, path: %s)" status url path);

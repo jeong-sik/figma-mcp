@@ -62,11 +62,10 @@ let convert_to_ppm ~input ~output =
            Error "PPM conversion requires ImageMagick (magick or convert). sips does not support PPM format.")
 
 let read_file path =
-  let ic = open_in_bin path in
-  let len = in_channel_length ic in
-  let buf = really_input_string ic len in
-  close_in ic;
-  buf
+  In_channel.with_open_bin path (fun ic ->
+    let len = in_channel_length ic in
+    really_input_string ic len
+  )
 
 let is_space = function
   | ' ' | '\t' | '\n' | '\r' -> true

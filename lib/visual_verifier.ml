@@ -96,9 +96,9 @@ let render_html_to_png ?(width=375) ?(height=812) html =
     if Sys.file_exists html then html
     else begin
       let path = temp_file ~prefix:"html" ~ext:"html" in
-      let oc = open_out path in
-      output_string oc html;
-      close_out oc;
+      Out_channel.with_open_bin path (fun oc ->
+        output_string oc html
+      );
       path
     end
   in
@@ -628,9 +628,9 @@ let create_evolution_dir () =
 (** HTML을 파일로 저장 *)
 let save_html ~dir ~step html =
   let path = sprintf "%s/html/step%d.html" dir step in
-  let oc = open_out path in
-  output_string oc html;
-  close_out oc;
+  Out_channel.with_open_bin path (fun oc ->
+    output_string oc html
+  );
   path
 
 (** PNG를 evolution 디렉토리로 복사 *)
@@ -872,10 +872,7 @@ let generate_diff_images ~figma_png ~html_png =
           let diff_pixels_str =
             if String.trim diff_pixels_str = "" || String.length diff_pixels_str < 2 then
               try
-                let ic = open_in metric_tmp in
-                let content = input_line ic in
-                close_in ic;
-                content
+                In_channel.with_open_bin metric_tmp (fun ic -> input_line ic)
               with _ -> diff_pixels_str
             else diff_pixels_str
           in
@@ -1040,11 +1037,14 @@ let log_hint_application ~node_id ~before_ssim ~after_ssim ~hints =
 *)
 let get_recent_logs ?(count=20) () =
   if Sys.file_exists ssim_log_path then begin
-    let ic = open_in ssim_log_path in
-    let lines = ref [] in
-    (try while true do lines := input_line ic :: !lines done
-     with End_of_file -> close_in ic);
-    let recent = List.filteri (fun i _ -> i < count) !lines in
+    let lines =
+      In_channel.with_open_bin ssim_log_path (fun ic ->
+        let acc = ref [] in
+        (try while true do acc := input_line ic :: !acc done
+         with End_of_file -> ());
+        !acc)
+    in
+    let recent = List.filteri (fun i _ -> i < count) lines in
     List.filter_map (fun line ->
       match String.split_on_char '|' line with
       | [ts; node_id; ssim_str; notes] ->

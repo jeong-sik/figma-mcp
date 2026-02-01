@@ -2598,9 +2598,9 @@ body { font-family: 'Inter', -apple-system, sans-serif; }
           in
 
           (* Write HTML file *)
-          let oc = open_out html_path in
-          output_string oc html_content;
-          close_out oc;
+          Out_channel.with_open_bin html_path (fun oc ->
+            output_string oc html_content
+          );
 
           (* Run render script *)
           let scripts_dir = Sys.getcwd () ^ "/scripts" in
