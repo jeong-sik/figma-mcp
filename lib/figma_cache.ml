@@ -41,18 +41,19 @@ module FS = struct
 
   let read_file path =
     if Sys.file_exists path then
-      let ic = open_in path in
-      let n = in_channel_length ic in
-      let s = really_input_string ic n in
-      close_in ic;
+      let s =
+        In_channel.with_open_bin path (fun ic ->
+          let n = in_channel_length ic in
+          really_input_string ic n)
+      in
       Some s
     else None
 
   let write_file path content =
     ensure_dir Config.cache_dir;
-    let oc = open_out path in
-    output_string oc content;
-    close_out oc
+    Out_channel.with_open_bin path (fun oc ->
+      output_string oc content
+    )
 
   let touch_file path =
     if Sys.file_exists path then

@@ -38,48 +38,41 @@ type agent_request = {
 }
 
 let agent_queue : (string, agent_request) Hashtbl.t = Hashtbl.create 16
-let agent_queue_mutex = Mutex.create ()
+let agent_queue_mutex = Eio.Mutex.create ()
 
 let agent_add_request node platform prompt =
   let id = Printf.sprintf "req-%d-%d" (int_of_float (Unix.gettimeofday () *. 1000.0)) (Random.int 10000) in
   let req = { id; node; platform; prompt; created_at = Unix.gettimeofday (); result = None; completed = false } in
-  Mutex.lock agent_queue_mutex;
-  Hashtbl.add agent_queue id req;
-  Mutex.unlock agent_queue_mutex;
-  id
+  Eio.Mutex.use_rw ~protect:true agent_queue_mutex (fun () ->
+    Hashtbl.add agent_queue id req;
+    id)
 
 let agent_get_pending () =
-  Mutex.lock agent_queue_mutex;
-  let pending = Hashtbl.fold (fun _ req acc ->
-    if not req.completed then req :: acc else acc
-  ) agent_queue [] in
-  Mutex.unlock agent_queue_mutex;
-  List.sort (fun a b -> compare a.created_at b.created_at) pending
+  Eio.Mutex.use_rw ~protect:true agent_queue_mutex (fun () ->
+    let pending = Hashtbl.fold (fun _ req acc ->
+      if not req.completed then req :: acc else acc
+    ) agent_queue [] in
+    List.sort (fun a b -> compare a.created_at b.created_at) pending)
 
 let agent_submit_result id code =
-  Mutex.lock agent_queue_mutex;
-  (match Hashtbl.find_opt agent_queue id with
-   | Some req -> req.result <- Some code; req.completed <- true
-   | None -> ());
-  Mutex.unlock agent_queue_mutex
+  Eio.Mutex.use_rw ~protect:true agent_queue_mutex (fun () ->
+    match Hashtbl.find_opt agent_queue id with
+    | Some req -> req.result <- Some code; req.completed <- true
+    | None -> ())
 
 let agent_get_result id =
-  Mutex.lock agent_queue_mutex;
-  let result = match Hashtbl.find_opt agent_queue id with
+  Eio.Mutex.use_rw ~protect:true agent_queue_mutex (fun () ->
+    match Hashtbl.find_opt agent_queue id with
     | Some req when req.completed -> req.result
-    | _ -> None
-  in
-  Mutex.unlock agent_queue_mutex;
-  result
+    | _ -> None)
 
 let agent_cleanup_old () =
   let now = Unix.gettimeofday () in
-  Mutex.lock agent_queue_mutex;
-  let old_ids = Hashtbl.fold (fun id req acc ->
-    if now -. req.created_at > 300.0 then id :: acc else acc  (* 5분 후 삭제 *)
-  ) agent_queue [] in
-  List.iter (Hashtbl.remove agent_queue) old_ids;
-  Mutex.unlock agent_queue_mutex
+  Eio.Mutex.use_rw ~protect:true agent_queue_mutex (fun () ->
+    let old_ids = Hashtbl.fold (fun id req acc ->
+      if now -. req.created_at > 300.0 then id :: acc else acc  (* 5분 후 삭제 *)
+    ) agent_queue [] in
+    List.iter (Hashtbl.remove agent_queue) old_ids)
 
 (** ============== Request/Response Helpers ============== *)
 
@@ -2605,9 +2598,9 @@ body { font-family: 'Inter', -apple-system, sans-serif; }
           in
 
           (* Write HTML file *)
-          let oc = open_out html_path in
-          output_string oc html_content;
-          close_out oc;
+          Out_channel.with_open_bin html_path (fun oc ->
+            output_string oc html_content
+          );
 
           (* Run render script *)
           let scripts_dir = Sys.getcwd () ^ "/scripts" in

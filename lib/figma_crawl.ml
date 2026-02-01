@@ -552,9 +552,9 @@ let rec export_node_to_fs ~base_path ~depth ~max_depth node =
 
     (* 현재 노드 저장 *)
     let node_json = Yojson.Safe.pretty_to_string node in
-    let oc = open_out filepath in
-    output_string oc node_json;
-    close_out oc;
+    Out_channel.with_open_bin filepath (fun oc ->
+      output_string oc node_json
+    );
 
     let count = 1 in
 
@@ -609,9 +609,9 @@ let export_team_to_fs ~token ~team_id ~output_dir
     ("exported_at", `String (Unix.gettimeofday () |> string_of_float));
   ] in
   let team_meta_path = Filename.concat output_dir "_meta.json" in
-  let oc = open_out team_meta_path in
-  output_string oc (Yojson.Safe.pretty_to_string team_meta);
-  close_out oc;
+  Out_channel.with_open_bin team_meta_path (fun oc ->
+    output_string oc (Yojson.Safe.pretty_to_string team_meta)
+  );
   progress.teams <- 1;
 
   match fetch_projects ~token ~team_id with
@@ -629,9 +629,9 @@ let export_team_to_fs ~token ~team_id ~output_dir
           ("name", `String project_name);
         ] in
         let project_meta_path = Filename.concat project_dir "_meta.json" in
-        let oc = open_out project_meta_path in
-        output_string oc (Yojson.Safe.pretty_to_string project_meta);
-        close_out oc;
+        Out_channel.with_open_bin project_meta_path (fun oc ->
+          output_string oc (Yojson.Safe.pretty_to_string project_meta)
+        );
         progress.projects <- progress.projects + 1;
 
         on_progress (sprintf "  📁 %s/" safe_project);
@@ -650,9 +650,9 @@ let export_team_to_fs ~token ~team_id ~output_dir
                 ("last_modified", `String last_modified);
               ] in
               let file_meta_path = Filename.concat file_dir "_meta.json" in
-              let oc = open_out file_meta_path in
-              output_string oc (Yojson.Safe.pretty_to_string file_meta);
-              close_out oc;
+              Out_channel.with_open_bin file_meta_path (fun oc ->
+                output_string oc (Yojson.Safe.pretty_to_string file_meta)
+              );
               progress.files <- progress.files + 1;
 
               on_progress (sprintf "    📄 %s/" safe_file);

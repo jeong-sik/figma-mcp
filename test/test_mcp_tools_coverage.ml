@@ -845,15 +845,20 @@ let test_create_figma_server () =
   check bool "has resources" true (List.length server.Mcp_protocol.resources > 0);
   check bool "has prompts" true (List.length server.Mcp_protocol.prompts > 0)
 
-let test_server_tools_match_all_tools () =
+let tool_names tools =
+  tools
+  |> List.map (fun (t : Mcp_protocol.tool_def) -> t.name)
+  |> List.sort String.compare
+
+let test_server_tools_match_public_tools () =
   let server = Mcp_tools.create_figma_server () in
-  check int "tools count matches"
-    (List.length Mcp_tools.all_tools)
-    (List.length server.Mcp_protocol.tools)
+  check (list string) "tool names match public_tools"
+    (tool_names Mcp_tools.public_tools)
+    (tool_names server.Mcp_protocol.tools)
 
 let server_tests = [
   "create_figma_server", `Quick, test_create_figma_server;
-  "server tools match all_tools", `Quick, test_server_tools_match_all_tools;
+  "server tools match public_tools", `Quick, test_server_tools_match_public_tools;
 ]
 
 (** ============== Main ============== *)
