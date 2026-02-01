@@ -36,7 +36,12 @@ let () = Random.self_init ()
 let now () = Unix.gettimeofday ()
 
 let with_lock f =
-  Mutex.protect lock f
+  Mutex.lock lock;
+  Common.protect
+    ~module_name:"figma_plugin_bridge"
+    ~finally_label:"Mutex.unlock"
+    ~finally:(fun () -> Mutex.unlock lock)
+    f
 
 let new_id prefix =
   Printf.sprintf "%s-%d-%d" prefix (int_of_float (now () *. 1000.0)) (Random.bits ())

@@ -986,16 +986,18 @@ let ssim_log_path = ".figma-ssim.log"
 let log_verification ~node_id ~ssim ?(notes="") () =
   let timestamp = Unix.gettimeofday () in
   let iso_time =
-    let tm = Unix.localtime timestamp in
+  let tm = Unix.localtime timestamp in
     Printf.sprintf "%04d-%02d-%02d %02d:%02d:%02d"
       (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1) tm.Unix.tm_mday
       tm.Unix.tm_hour tm.Unix.tm_min tm.Unix.tm_sec
   in
   let line = Printf.sprintf "%s|%s|%.4f|%s\n" iso_time node_id ssim notes in
-  (try
-     Out_channel.with_open_gen [Open_append; Open_creat; Open_text] 0o644 ssim_log_path (fun oc ->
-       output_string oc line)
-   with _ -> ())
+  let oc = open_out_gen [Open_append; Open_creat; Open_text] 0o644 ssim_log_path in
+  Common.protect
+    ~module_name:"visual_verifier"
+    ~finally_label:"close_out"
+    ~finally:(fun () -> close_out oc)
+    (fun () -> output_string oc line)
 
 (** SSIM 개선 기록 (before/after 비교)
 
