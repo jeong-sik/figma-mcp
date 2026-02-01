@@ -86,6 +86,10 @@ let handle_response ~prefix ~format content : Yojson.Safe.t =
   else begin
     (* 큰 응답: 파일로 저장하고 메타데이터 반환 *)
     let filepath = save_to_file ~prefix content in
+    (* Include first 2KB as preview for immediate context *)
+    let preview_size = min 2048 size in
+    let preview = String.sub content 0 preview_size in
+    let preview_truncated = if size > preview_size then preview ^ "\n... [truncated]" else preview in
     `Assoc [
       ("status", `String "large_result");
       ("file_path", `String filepath);
@@ -93,7 +97,16 @@ let handle_response ~prefix ~format content : Yojson.Safe.t =
       ("size_human", `String (human_size size));
       ("format", `String format);
       ("ttl_seconds", `Int response_ttl);
+      ("preview", `String preview_truncated);
       ("hint", `String "Use figma_read_large_result with offset/limit, or figma_get_node_summary for lightweight structure");
+      ("next_chunk", `Assoc [
+        ("tool", `String "figma_read_large_result");
+        ("args", `Assoc [
+          ("file_path", `String filepath);
+          ("offset", `Int preview_size);
+          ("limit", `Int 10000);
+        ]);
+      ]);
       ("examples", `Assoc [
         ("read_first_1000_chars", `String (sprintf "head -c 1000 %s" filepath));
         ("read_with_jq", `String (sprintf "jq '.children[:5]' %s" filepath));
@@ -115,9 +128,13 @@ let wrap_string_result ~prefix ~format (content : string) : Yojson.Safe.t =
     text_content content
   else begin
     let filepath = save_to_file ~prefix content in
+    (* Include first 2KB as preview *)
+    let preview_size = min 2048 size in
+    let preview = String.sub content 0 preview_size in
+    let preview_truncated = if size > preview_size then preview ^ "\n... [truncated]" else preview in
     let message = sprintf
-      "Large result saved to %s (%s). Use figma_read_large_result or chunked loading."
-      filepath (human_size size)
+      "Large result saved to %s (%s). Preview below, use figma_read_large_result for more.\n\n%s"
+      filepath (human_size size) preview_truncated
     in
     add_meta (text_content message) [
       ("status", `String "large_result");
@@ -125,6 +142,15 @@ let wrap_string_result ~prefix ~format (content : string) : Yojson.Safe.t =
       ("size_bytes", `Int size);
       ("size_human", `String (human_size size));
       ("format", `String format);
+      ("preview_bytes", `Int preview_size);
+      ("next_chunk", `Assoc [
+        ("tool", `String "figma_read_large_result");
+        ("args", `Assoc [
+          ("file_path", `String filepath);
+          ("offset", `Int preview_size);
+          ("limit", `Int 10000);
+        ]);
+      ]);
       ("hint", `String "Content saved to file. Use figma_read_large_result or figma_get_node_chunk for progressive loading.");
     ]
   end
