@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.4] - 2026-02-01
+
+### Fixed
+- Avoid polymorphic compare on `Httpun.Reqd.t` in server metrics tracking (prevents `/metrics` 500)
+
 ## [0.5.3] - 2026-02-01
 
 ### Added

@@ -39,7 +39,15 @@ type snapshot = {
 let ring_size = 256
 
 let state_mutex = Eio.Mutex.create ()
-let requests : (Httpun.Reqd.t, request_info) Hashtbl.t = Hashtbl.create 1024
+
+(* Use physical equality to avoid polymorphic compare on Httpun.Reqd.t (contains functions). *)
+module ReqdTbl = Hashtbl.Make(struct
+  type t = Httpun.Reqd.t
+  let equal = (==)
+  let hash = Hashtbl.hash
+end)
+
+let requests : request_info ReqdTbl.t = ReqdTbl.create 1024
 
 let latency_ring = Array.make ring_size 0.0
 let latency_index = ref 0
@@ -108,8 +116,8 @@ let latency_snapshot () =
 let register_reqd reqd _request =
   let t = now () in
   with_lock (fun () ->
-    if not (Hashtbl.mem requests reqd) then begin
-      Hashtbl.add requests reqd { started_at = t };
+    if not (ReqdTbl.mem requests reqd) then begin
+      ReqdTbl.add requests reqd { started_at = t };
       inflight := !inflight + 1
     end
   )
@@ -118,9 +126,9 @@ let finish_reqd ?bytes reqd status =
   let t = now () in
   let code = Httpun.Status.to_code status in
   with_lock (fun () ->
-    let started = match Hashtbl.find_opt requests reqd with
+    let started = match ReqdTbl.find_opt requests reqd with
       | Some info ->
-          Hashtbl.remove requests reqd;
+          ReqdTbl.remove requests reqd;
           if !inflight > 0 then inflight := !inflight - 1;
           Some info.started_at
       | None -> None
