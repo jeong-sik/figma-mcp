@@ -848,12 +848,12 @@ let test_create_figma_server () =
 let test_server_tools_match_all_tools () =
   let server = Mcp_tools.create_figma_server () in
   check int "tools count matches"
-    (List.length Mcp_tools.all_tools)
+    (List.length Mcp_tools.public_tools)
     (List.length server.Mcp_protocol.tools)
 
 let server_tests = [
   "create_figma_server", `Quick, test_create_figma_server;
-  "server tools match all_tools", `Quick, test_server_tools_match_all_tools;
+  "server tools match public_tools", `Quick, test_server_tools_match_all_tools;
 ]
 
 (** ============== Main ============== *)
