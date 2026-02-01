@@ -2248,14 +2248,18 @@ let handle_get_node_bundle args : (Yojson.Safe.t, string) result =
                  (match find_node_entry nodes_map ~node_id with
                   | Some (node_key, node_entry) ->
                       (match member "document" node_entry with
-                       | Some doc -> Some (node_key, doc)
-                       | None -> None)
-                  | None -> None)
-             | _ -> None
+                       | Some doc -> Ok (node_key, doc)
+                       | None -> Error (sprintf "Node %s found but document is null" node_id))
+                  | None -> 
+                      let keys = List.map fst nodes_map in
+                      let keys_str = if keys = [] then "none" else String.concat ", " keys in
+                      Error (sprintf "Node %s not found. Available: [%s]" node_id keys_str))
+             | Some _ -> Error "API returned nodes in unexpected format"
+             | None -> Error "API response missing 'nodes' field"
            in
            (match node_lookup with
-            | None -> Error (sprintf "Node not found: %s" node_id)
-            | Some (node_key, node) ->
+            | Error msg -> Error msg
+            | Ok (node_key, node) ->
                 let node_str = Yojson.Safe.to_string node in
                 let dsl_str = match process_json_string ~format node_str with
                   | Ok s -> s
@@ -2515,7 +2519,13 @@ let handle_get_node_summary args : (Yojson.Safe.t, string) result =
              | None -> None
            in
            (match node_data with
-            | None -> Error (Printf.sprintf "Node %s not found in file %s" node_id file_key)
+            | None ->
+                (* Better error message with available keys *)
+                let available_keys = List.map fst nodes_map in
+                let keys_str = if available_keys = [] then "none" 
+                  else String.concat ", " available_keys in
+                Error (Printf.sprintf "Node %s not found in file %s. Available keys: [%s]" 
+                  node_id file_key keys_str)
             | Some node_data ->
                 let children =
                   match U.member "children" node_data with
