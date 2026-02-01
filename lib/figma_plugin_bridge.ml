@@ -37,7 +37,7 @@ let now () = Unix.gettimeofday ()
 
 let with_lock f =
   Mutex.lock lock;
-  Fun.protect ~finally:(fun () -> Mutex.unlock lock) f
+  Fun.protect ~finally:(fun () -> try Mutex.unlock lock with _ -> ()) f
 
 let new_id prefix =
   Printf.sprintf "%s-%d-%d" prefix (int_of_float (now () *. 1000.0)) (Random.bits ())

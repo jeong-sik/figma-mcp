@@ -369,7 +369,7 @@ let parse_http_response response =
 
 let with_raw_pool (client : client) f =
   Mutex.lock client.raw_pool_lock;
-  Fun.protect ~finally:(fun () -> Mutex.unlock client.raw_pool_lock) f
+  Fun.protect ~finally:(fun () -> try Mutex.unlock client.raw_pool_lock with _ -> ()) f
 
 let close_raw_conn conn =
   try Eio.Flow.close conn.flow with _ -> ()

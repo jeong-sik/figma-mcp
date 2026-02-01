@@ -36,14 +36,14 @@ let append_json (json : Yojson.Safe.t) =
   ensure_parent_dir telemetry_file;
   Mutex.lock write_mutex;
   Fun.protect
-    ~finally:(fun () -> Mutex.unlock write_mutex)
+    ~finally:(fun () -> try Mutex.unlock write_mutex with _ -> ())
     (fun () ->
       try
         let oc =
           open_out_gen [ Open_append; Open_creat; Open_text ] 0o644 telemetry_file
         in
         Fun.protect
-          ~finally:(fun () -> close_out oc)
+          ~finally:(fun () -> close_out_noerr oc)
           (fun () ->
             output_string oc (Yojson.Safe.to_string json);
             output_char oc '\n';
@@ -70,4 +70,3 @@ let log_tool_called ~tool_name ~duration_ms ~success ~error =
       ]
   in
   append_json record
-
