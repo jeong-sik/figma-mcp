@@ -83,37 +83,102 @@ let agent_cleanup_old () =
 
 (** ============== Request/Response Helpers ============== *)
 
+module Cors = struct
+  let mode = String.lowercase_ascii Figma_config.Cors.mode
+  let allowed_origins = Figma_config.Cors.allowed_origins
+  let allow_private_network = Figma_config.Cors.allow_private_network
+  let allow_headers = Figma_config.Cors.allow_headers
+
+  let origin_of reqd =
+    let request = Httpun.Reqd.request reqd in
+    Httpun.Headers.get request.headers "origin"
+
+  let has_prefix ~prefix s =
+    let lp = String.length prefix in
+    String.length s >= lp && String.sub s 0 lp = prefix
+
+  let has_suffix ~suffix s =
+    let ls = String.length suffix in
+    let len = String.length s in
+    len >= ls && String.sub s (len - ls) ls = suffix
+
+  let matches_pattern origin pattern =
+    let pattern = String.trim pattern in
+    if pattern = "*" then true
+    else if String.length pattern > 0 && pattern.[String.length pattern - 1] = '*'
+    then
+      let prefix = String.sub pattern 0 (String.length pattern - 1) in
+      has_prefix ~prefix origin
+    else if String.length pattern > 0 && pattern.[0] = '*'
+    then
+      let suffix = String.sub pattern 1 (String.length pattern - 1) in
+      has_suffix ~suffix origin
+    else origin = pattern
+
+  let origin_allowed origin =
+    List.exists (matches_pattern origin) allowed_origins
+
+  let is_allowed reqd =
+    match mode with
+    | "restrict" -> (
+        match origin_of reqd with
+        | None -> true
+        | Some origin -> origin_allowed origin)
+    | _ -> true
+
+  let allow_origin_value reqd =
+    match mode with
+    | "permissive" -> Some "*"
+    | "restrict" -> (
+        match origin_of reqd with
+        | Some origin when origin_allowed origin -> Some origin
+        | _ -> None)
+    | _ -> Some "*"
+
+  let headers reqd ~include_methods ~include_headers =
+    let base =
+      match allow_origin_value reqd with
+      | Some origin ->
+          let vary = if origin = "*" then [] else [("vary", "Origin")] in
+          ("access-control-allow-origin", origin) :: vary
+      | None -> []
+    in
+    let headers =
+      if include_methods then
+        ("access-control-allow-methods", "GET, POST, OPTIONS") :: base
+      else base
+    in
+    let headers =
+      if include_headers then
+        ("access-control-allow-headers", allow_headers) :: headers
+      else headers
+    in
+    if allow_private_network then
+      ("access-control-allow-private-network", "true") :: headers
+    else headers
+end
+
 module Response = struct
   let text ?(status = `OK) body reqd =
-    let headers = Httpun.Headers.of_list [
+    let headers = Httpun.Headers.of_list ([
       ("content-type", "text/plain; charset=utf-8");
       ("content-length", string_of_int (String.length body));
-      ("access-control-allow-origin", "*");
-      ("access-control-allow-private-network", "true");
-    ] in
+    ] @ Cors.headers reqd ~include_methods:false ~include_headers:false) in
     let response = Httpun.Response.create ~headers status in
     Httpun.Reqd.respond_with_string reqd response body
 
   let json ?(status = `OK) body reqd =
-    let headers = Httpun.Headers.of_list [
+    let headers = Httpun.Headers.of_list ([
       ("content-type", "application/json; charset=utf-8");
       ("content-length", string_of_int (String.length body));
-      ("access-control-allow-origin", "*");
-      ("access-control-allow-methods", "GET, POST, OPTIONS");
-      ("access-control-allow-headers", "Content-Type, Accept, Access-Control-Request-Private-Network");
-      ("access-control-allow-private-network", "true");
-    ] in
+    ] @ Cors.headers reqd ~include_methods:true ~include_headers:true) in
     let response = Httpun.Response.create ~headers status in
     Httpun.Reqd.respond_with_string reqd response body
 
   let accepted reqd =
-    let headers = Httpun.Headers.of_list [
+    let headers = Httpun.Headers.of_list ([
       ("content-length", "0");
-      ("access-control-allow-origin", "*");
-      ("access-control-allow-methods", "GET, POST, OPTIONS");
-      ("access-control-allow-headers", "Content-Type, Accept, Access-Control-Request-Private-Network");
-      ("access-control-allow-private-network", "true");
-    ] in
+    ] @ Cors.headers reqd ~include_methods:true ~include_headers:true) in
     let response = Httpun.Response.create ~headers `Accepted in
     Httpun.Reqd.respond_with_string reqd response ""
 
@@ -121,25 +186,19 @@ module Response = struct
     text ~status:`Not_found "404 Not Found" reqd
 
   let cors_preflight reqd =
-    let headers = Httpun.Headers.of_list [
-      ("access-control-allow-origin", "*");
-      ("access-control-allow-methods", "GET, POST, OPTIONS");
-      ("access-control-allow-headers", "Content-Type, Accept, Access-Control-Request-Private-Network");
-      ("access-control-allow-private-network", "true");
+    let headers = Httpun.Headers.of_list ([
       ("content-length", "0");
-    ] in
+    ] @ Cors.headers reqd ~include_methods:true ~include_headers:true) in
     let response = Httpun.Response.create ~headers `No_content in
     Httpun.Reqd.respond_with_string reqd response ""
 
   (** SSE streaming response for MCP streamable-http protocol *)
   let sse_stream reqd ~on_write =
-    let headers = Httpun.Headers.of_list [
+    let headers = Httpun.Headers.of_list ([
       ("content-type", "text/event-stream");
       ("cache-control", "no-cache");
       ("connection", "keep-alive");
-      ("access-control-allow-origin", "*");
-      ("access-control-allow-private-network", "true");
-    ] in
+    ] @ Cors.headers reqd ~include_methods:false ~include_headers:false) in
     let response = Httpun.Response.create ~headers `OK in
     let body = Httpun.Reqd.respond_with_streaming reqd response in
     on_write body
@@ -155,11 +214,8 @@ module Response = struct
       ("content-type", "text/event-stream");
       ("content-length", string_of_int (String.length body));
       ("cache-control", "no-cache");
-      ("access-control-allow-origin", "*");
-      ("access-control-allow-methods", "GET, POST, OPTIONS");
-      ("access-control-allow-headers", "Content-Type, Accept, Access-Control-Request-Private-Network");
-      ("access-control-allow-private-network", "true");
-    ] @ session_headers) in
+    ] @ Cors.headers reqd ~include_methods:true ~include_headers:true
+      @ session_headers) in
     let response = Httpun.Response.create ~headers `OK in
     Httpun.Reqd.respond_with_string reqd response body
 end
@@ -189,15 +245,11 @@ module Request = struct
          | None -> default_max_body_bytes)
 
   let respond_error reqd status body =
-    let headers = Httpun.Headers.of_list [
+    let headers = Httpun.Headers.of_list ([
       ("content-type", "text/plain; charset=utf-8");
       ("content-length", string_of_int (String.length body));
-      ("access-control-allow-origin", "*");
-      ("access-control-allow-methods", "GET, POST, OPTIONS");
-      ("access-control-allow-headers", "Content-Type, Accept, Access-Control-Request-Private-Network");
-      ("access-control-allow-private-network", "true");
       ("connection", "close");
-    ] in
+    ] @ Cors.headers reqd ~include_methods:true ~include_headers:true) in
     let response = Httpun.Response.create ~headers status in
     Httpun.Reqd.respond_with_string reqd response body
 
@@ -704,9 +756,30 @@ let plugin_result_handler _request reqd =
 let plugin_status_handler _request reqd =
   plugin_cleanup ();
   let channels = Figma_plugin_bridge.list_channels () in
+  let stats = Figma_plugin_bridge.list_channel_stats () in
   let default_channel = Figma_plugin_bridge.get_default_channel () in
+  let stats_json =
+    `List (List.map (fun (s : Figma_plugin_bridge.channel_stats) ->
+      `Assoc [
+        ("id", `String s.id);
+        ("last_seen", `Float s.last_seen);
+        ("commands", `Int s.commands);
+        ("results", `Int s.results);
+        ("waiters", `Int s.waiters);
+      ]) stats)
+  in
+  let limits = `Assoc [
+    ("max_commands", `Int Figma_config.Plugin.max_commands);
+    ("max_results", `Int Figma_config.Plugin.max_results);
+    ("max_waiters", `Int Figma_config.Plugin.max_waiters);
+    ("result_ttl_seconds", `Float Figma_config.Plugin.result_ttl_seconds);
+    ("cleanup_interval_seconds", `Float Figma_config.Plugin.cleanup_interval_seconds);
+    ("poll_max_ms", `Int Figma_config.Plugin.poll_max_ms);
+  ] in
   let body = `Assoc [
     ("channels", `List (List.map (fun id -> `String id) channels));
+    ("stats", stats_json);
+    ("limits", limits);
     ("default_channel", match default_channel with Some id -> `String id | None -> `Null);
   ] in
   Response.json (Yojson.Safe.to_string body) reqd
@@ -2652,7 +2725,10 @@ let route_request ~clock ~domain_mgr ~sw ~eio_ctx server request reqd =
   let path = Request.path request in
   let meth = Request.method_ request in
 
-  match (meth, path) with
+  if not (Cors.is_allowed reqd) then
+    Response.text ~status:`Forbidden "Forbidden" reqd
+  else
+    match (meth, path) with
   | `OPTIONS, _ ->
       Response.cors_preflight reqd
 
