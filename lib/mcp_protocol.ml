@@ -204,6 +204,21 @@ let mcp_instructions = {|
 3. **Trust but Verify**: 생성한 코드는 `figma_verify_visual`로 항상 검증
 4. **Fail Fast**: 에러 메시지의 suggestion을 즉시 따르기
 
+### 🔑 Token 자동 주입 (중요!)
+
+**`token` 파라미터는 생략하세요** - 환경변수에서 자동 주입됩니다:
+- 모든 도구는 `FIGMA_TOKEN` 환경변수를 자동으로 사용
+- `token` 파라미터는 **optional** (명시하지 않아도 됨)
+- 명시적 token이 필요한 경우만 파라미터로 전달
+
+```
+# ✅ 올바른 호출 (token 생략)
+figma_get_node(file_key="ABC123", node_id="1:234")
+
+# ❌ 불필요한 호출 (token 명시)
+figma_get_node(file_key="ABC123", node_id="1:234", token="...")
+```
+
 ### 🎯 목표: 95%+ Fidelity UI 구현
 
 ### 📐 두 가지 구현 패턴
