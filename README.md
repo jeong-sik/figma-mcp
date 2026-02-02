@@ -70,6 +70,7 @@ echo '{"jsonrpc":"2.0","id":5,"method":"prompts/get","params":{"name":"figma_fid
 ## Recipes
 
 - `docs/RECIPES.md` - end-to-end usage patterns (quickstart, high fidelity, large nodes)
+- `docs/OBSERVABILITY.md` - /metrics, /stats, alert thresholds
 - `docs/SETUP.md` - 설치/실행/연동 요약
 - `docs/MCP-TEMPLATE.md` - ~/.mcp.json 템플릿
 - `docs/INSTALL-CHECKLIST.md` - 설치 후 확인
