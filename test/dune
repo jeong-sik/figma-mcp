@@ -102,3 +102,8 @@
 (test
  (name test_plugin_features)
  (libraries figma_mcp alcotest yojson str))
+
+; MCP HTTP API key auth tests
+(test
+ (name test_mcp_http_auth)
+ (libraries figma_mcp alcotest httpun unix))

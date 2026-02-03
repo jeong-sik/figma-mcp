@@ -1,6 +1,6 @@
 #!/bin/bash
 # Figma MCP Server (HTTP) - Start Script
-# Usage: ./start-figma-mcp-http.sh [--port PORT] [--grpc-port PORT]
+# Usage: ./start-figma-mcp-http.sh [--port PORT] [--grpc-port PORT] [--host HOST] [--public] [--allow-no-auth]
 
 set -e
 
@@ -47,6 +47,9 @@ cd "$SCRIPT_DIR"
 
 PORT="${FIGMA_MCP_PORT:-8940}"
 GRPC_PORT="${FIGMA_MCP_GRPC_PORT:-}"
+HOST="${FIGMA_MCP_HOST:-127.0.0.1}"
+PUBLIC="${FIGMA_MCP_PUBLIC:-}"
+ALLOW_NO_AUTH="${FIGMA_MCP_ALLOW_NO_AUTH:-}"
 
 EXPECTED_VERSION=""
 if [ -f "$SCRIPT_DIR/dune-project" ]; then
@@ -61,11 +64,26 @@ get_binary_version() {
 }
 
 # Parse arguments
+is_truthy() {
+  case "$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')" in
+    1|true|yes|y|on) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 while [[ $# -gt 0 ]]; do
   case $1 in
     --port)
       PORT="$2"
       shift 2
+      ;;
+    --host)
+      HOST="$2"
+      shift 2
+      ;;
+    --host=*)
+      HOST="${1#*=}"
+      shift 1
       ;;
     --grpc-port)
       GRPC_PORT="$2"
@@ -75,10 +93,21 @@ while [[ $# -gt 0 ]]; do
       GRPC_PORT="${1#*=}"
       shift 1
       ;;
+    --public)
+      PUBLIC="1"
+      shift 1
+      ;;
+    --allow-no-auth)
+      ALLOW_NO_AUTH="1"
+      shift 1
+      ;;
     -h|--help)
-      echo "Usage: $0 [--port PORT] [--grpc-port PORT]"
+      echo "Usage: $0 [--port PORT] [--grpc-port PORT] [--host HOST] [--public] [--allow-no-auth]"
       echo "  --port PORT  Server port (default: 8940)"
       echo "  --grpc-port PORT  gRPC port (optional, enables streaming)"
+      echo "  --host HOST  Host to bind (default: 127.0.0.1)"
+      echo "  --public  Allow non-loopback host (sets FIGMA_MCP_PUBLIC=1)"
+      echo "  --allow-no-auth  Allow running without API key (not recommended)"
       exit 0
       ;;
     *)
@@ -87,6 +116,13 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+
+if ! is_truthy "$ALLOW_NO_AUTH"; then
+  if [ -z "${FIGMA_MCP_API_KEY:-}" ] && [ -z "${MCP_API_KEY:-}" ]; then
+    echo "Error: FIGMA_MCP_API_KEY (or MCP_API_KEY) is required. Set --allow-no-auth or FIGMA_MCP_ALLOW_NO_AUTH=1 to bypass." >&2
+    exit 2
+  fi
+fi
 
 # Resolve executable path (prefer workspace build dir)
 WORKSPACE_EXE="$SCRIPT_DIR/../_build/default/figma-mcp/bin/main.exe"
@@ -137,10 +173,16 @@ if [ -z "$FIGMA_EXE" ]; then
   fi
 fi
 
+ARGS=(--port "$PORT" --host "$HOST")
 if [ -n "$GRPC_PORT" ]; then
-  echo "Using figma-mcp binary: $FIGMA_EXE" >&2
-  exec "$FIGMA_EXE" --port "$PORT" --grpc-port "$GRPC_PORT"
-else
-  echo "Using figma-mcp binary: $FIGMA_EXE" >&2
-  exec "$FIGMA_EXE" --port "$PORT"
+  ARGS+=(--grpc-port "$GRPC_PORT")
 fi
+if is_truthy "$PUBLIC"; then
+  ARGS+=(--public)
+fi
+if is_truthy "$ALLOW_NO_AUTH"; then
+  ARGS+=(--allow-no-auth)
+fi
+
+echo "Using figma-mcp binary: $FIGMA_EXE" >&2
+exec "$FIGMA_EXE" "${ARGS[@]}"
