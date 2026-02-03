@@ -136,14 +136,14 @@ end
 (** {1 CORS Configuration} *)
 
 module Cors = struct
-  (** permissive | restrict *)
+  (** restrict | permissive *)
   let mode =
-    get_string ~default:"permissive" "FIGMA_MCP_CORS_MODE"
+    get_string ~default:"restrict" "FIGMA_MCP_CORS_MODE"
 
-  (** Allowed origins, supports prefix wildcards (e.g., http://localhost* ) *)
+  (** Allowed origins, supports :* port wildcard (e.g., http://localhost:* ) *)
   let allowed_origins =
     get_string_list
-      ~default:["http://localhost*"; "http://127.0.0.1*"; "null"]
+      ~default:["http://localhost:*"; "http://127.0.0.1:*"; "https://www.figma.com"; "null"]
       "FIGMA_MCP_CORS_ALLOWED_ORIGINS"
 
   (** Allow private network access from browser preflight *)
@@ -153,7 +153,7 @@ module Cors = struct
   (** Allow headers list for preflight *)
   let allow_headers =
     get_string
-      ~default:"Content-Type, Accept, Mcp-Session-Id, Mcp-Protocol-Version, Authorization, Access-Control-Request-Private-Network"
+      ~default:"Content-Type, Accept, Mcp-Session-Id, Mcp-Protocol-Version, Authorization, X-API-Key, X-MCP-API-Key, Access-Control-Request-Private-Network"
       "FIGMA_MCP_CORS_ALLOW_HEADERS"
 end
 
