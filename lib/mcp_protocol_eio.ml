@@ -25,6 +25,12 @@ let default_config = {
   max_connections = 64;
 }
 
+let allow_no_auth =
+  ref (Mcp_http_auth.env_truthy "FIGMA_MCP_ALLOW_NO_AUTH"
+       || Mcp_http_auth.env_truthy "MCP_ALLOW_NO_AUTH")
+
+let set_allow_no_auth v = allow_no_auth := v
+
 (** ============== Agent Queue for MCP-style async codegen ============== *)
 
 type agent_status =
@@ -308,32 +314,102 @@ module Cors = struct
 
   let origin_of reqd =
     let request = Httpun.Reqd.request reqd in
-    Httpun.Headers.get request.headers "origin"
+    Httpun.Headers.get request.Httpun.Request.headers "origin"
 
-  let has_prefix ~prefix s =
-    let lp = String.length prefix in
-    String.length s >= lp && String.sub s 0 lp = prefix
+  let normalize_lower s = String.lowercase_ascii s
 
-  let has_suffix ~suffix s =
-    let ls = String.length suffix in
-    let len = String.length s in
-    len >= ls && String.sub s (len - ls) ls = suffix
+  let default_port_for_scheme = function
+    | "http" -> 80
+    | "https" -> 443
+    | _ -> 0
+
+  let parse_origin_components value =
+    try
+      let uri = Uri.of_string value in
+      match (Uri.scheme uri, Uri.host uri) with
+      | (Some scheme, Some host) ->
+          let scheme = normalize_lower scheme in
+          let host = normalize_lower host in
+          let path = Uri.path uri in
+          let query = Uri.query uri in
+          let fragment = Uri.fragment uri in
+          if (path <> "" && path <> "/") || query <> [] || fragment <> None then None
+          else if scheme <> "http" && scheme <> "https" then None
+          else Some (scheme, host, Uri.port uri)
+      | _ -> None
+    with _ -> None
+
+  type origin_value =
+    | Origin_null
+    | Origin of { scheme : string; host : string; port : int option }
+
+  let parse_origin_value value =
+    let value = String.trim value in
+    if value = "null" then Some Origin_null
+    else
+      match parse_origin_components value with
+      | Some (scheme, host, port) -> Some (Origin { scheme; host; port })
+      | None -> None
+
+  type origin_pattern =
+    | Any
+    | Null
+    | Exact of { scheme : string; host : string; port : int option }
+    | Any_port of { scheme : string; host : string }
+
+  let parse_pattern pattern =
+    let pattern = String.trim pattern in
+    if pattern = "*" then Some Any
+    else if pattern = "null" then Some Null
+    else
+      let len = String.length pattern in
+      let ends_with suffix =
+        let ls = String.length suffix in
+        len >= ls && String.sub pattern (len - ls) ls = suffix
+      in
+      if ends_with ":*" then
+        let base = String.sub pattern 0 (len - 2) in
+        match parse_origin_components base with
+        | Some (scheme, host, _) -> Some (Any_port { scheme; host })
+        | None -> None
+      else if ends_with "*" then
+        let base = String.sub pattern 0 (len - 1) in
+        match parse_origin_components base with
+        | Some (scheme, host, _) -> Some (Any_port { scheme; host })
+        | None -> None
+      else
+        match parse_origin_components pattern with
+        | Some (scheme, host, port) -> Some (Exact { scheme; host; port })
+        | None -> None
+
+  let normalized_port scheme port_opt =
+    match port_opt with
+    | Some p -> p
+    | None -> default_port_for_scheme scheme
 
   let matches_pattern origin pattern =
-    let pattern = String.trim pattern in
-    if pattern = "*" then true
-    else if String.length pattern > 0 && pattern.[String.length pattern - 1] = '*'
-    then
-      let prefix = String.sub pattern 0 (String.length pattern - 1) in
-      has_prefix ~prefix origin
-    else if String.length pattern > 0 && pattern.[0] = '*'
-    then
-      let suffix = String.sub pattern 1 (String.length pattern - 1) in
-      has_suffix ~suffix origin
-    else origin = pattern
+    match (origin, pattern) with
+    | (_, Any) -> true
+    | (Origin_null, Null) -> true
+    | (Origin_null, _) -> false
+    | (Origin o, Exact p) ->
+        o.scheme = p.scheme
+        && o.host = p.host
+        && normalized_port o.scheme o.port = normalized_port p.scheme p.port
+    | (Origin o, Any_port p) ->
+        o.scheme = p.scheme && o.host = p.host
+    | _ -> false
 
   let origin_allowed origin =
-    List.exists (matches_pattern origin) allowed_origins
+    match parse_origin_value origin with
+    | None -> false
+    | Some origin_value ->
+        List.exists
+          (fun pattern ->
+            match parse_pattern pattern with
+            | Some parsed -> matches_pattern origin_value parsed
+            | None -> false)
+          allowed_origins
 
   let is_allowed reqd =
     match mode with
@@ -393,6 +469,19 @@ module Response = struct
     let response = Httpun.Response.create ~headers status in
     Httpun.Reqd.respond_with_string reqd response body;
     Server_metrics.finish_reqd ~bytes:(String.length body) reqd status
+
+  let api_key_error message reqd =
+    let body = Yojson.Safe.to_string (`Assoc [
+      ("error", `String message);
+    ]) in
+    let headers = Httpun.Headers.of_list ([
+      ("content-type", "application/json; charset=utf-8");
+      ("content-length", string_of_int (String.length body));
+      ("www-authenticate", "API-Key");
+    ] @ Cors.headers reqd ~include_methods:true ~include_headers:true) in
+    let response = Httpun.Response.create ~headers `Unauthorized in
+    Httpun.Reqd.respond_with_string reqd response body;
+    Server_metrics.finish_reqd ~bytes:(String.length body) reqd `Unauthorized
 
   let accepted reqd =
     let headers = Httpun.Headers.of_list ([
@@ -492,7 +581,7 @@ module Request = struct
   let read_body_async reqd callback =
     let request = Httpun.Reqd.request reqd in
     let content_length =
-      match Httpun.Headers.get request.headers "content-length" with
+      match Httpun.Headers.get request.Httpun.Request.headers "content-length" with
       | Some v -> parse_positive_int v
       | None -> None
     in
@@ -546,7 +635,7 @@ module Request = struct
 
   (** Check if client accepts SSE (MCP Streamable HTTP) *)
   let accepts_sse (request : Httpun.Request.t) =
-    match Httpun.Headers.get request.headers "accept" with
+    match Httpun.Headers.get request.Httpun.Request.headers "accept" with
     | Some accept ->
         let accept_lower = String.lowercase_ascii accept in
         (try
@@ -3080,121 +3169,161 @@ body { font-family: 'Inter', -apple-system, sans-serif; }
 
 (** ============== Router ============== *)
 
+let is_public_path meth path =
+  match (meth, path) with
+  | (`OPTIONS, _) -> true
+  | (`GET, "/health") -> true
+  | _ -> false
+
+let normalize_env value =
+  match value with
+  | None -> None
+  | Some v ->
+      let trimmed = String.trim v in
+      if trimmed = "" then None else Some trimmed
+
+let api_key_env_name () =
+  match normalize_env (Sys.getenv_opt "FIGMA_MCP_API_KEY") with
+  | Some _ -> "FIGMA_MCP_API_KEY"
+  | None ->
+      (match normalize_env (Sys.getenv_opt "MCP_API_KEY") with
+       | Some _ -> "MCP_API_KEY"
+       | None -> "FIGMA_MCP_API_KEY")
+
+let check_api_key request =
+  let env_name = api_key_env_name () in
+  match Mcp_http_auth.check_api_key
+          ~env_name
+          ~allow_no_auth:!allow_no_auth
+          request.Httpun.Request.headers with
+  | Ok () -> Ok ()
+  | Error Mcp_http_auth.Missing -> Error "API key required"
+  | Error Mcp_http_auth.Invalid -> Error "Invalid API key"
+
 let route_request ~clock ~domain_mgr ~sw ~eio_ctx server request reqd =
   let path = Request.path request in
   let meth = Request.method_ request in
+  let public_path = is_public_path meth path in
 
   if not (Cors.is_allowed reqd) then
     Response.text ~status:`Forbidden "Forbidden" reqd
   else
-    match (meth, path) with
-  | `OPTIONS, _ ->
-      Response.cors_preflight reqd
+    let route () =
+      match (meth, path) with
+      | `OPTIONS, _ ->
+          Response.cors_preflight reqd
 
-  | `GET, "/health" ->
-      health_handler request reqd
+      | `GET, "/health" ->
+          health_handler request reqd
 
-  | `GET, "/metrics" ->
-      Response.text (Server_metrics.to_prometheus_text ()) reqd
+      | `GET, "/metrics" ->
+          Response.text (Server_metrics.to_prometheus_text ()) reqd
 
-  | `GET, "/stats" ->
-      let result = `Assoc [
-        ("server_metrics", Server_metrics.to_json ());
-        ("agent_queue", agent_queue_stats_json ());
-      ] in
-      Response.json (Yojson.Safe.to_string result) reqd
+      | `GET, "/stats" ->
+          let result = `Assoc [
+            ("server_metrics", Server_metrics.to_json ());
+            ("agent_queue", agent_queue_stats_json ());
+          ] in
+          Response.json (Yojson.Safe.to_string result) reqd
 
-  | `GET, "/" ->
-      Response.text (sprintf "🎨 %s MCP Server (Eio)" Mcp_protocol.server_name) reqd
+      | `GET, "/" ->
+          Response.text (sprintf "🎨 %s MCP Server (Eio)" Mcp_protocol.server_name) reqd
 
-  | `GET, "/mcp" ->
-      (* SSE stream for MCP streamable-http protocol *)
-      mcp_sse_handler ~clock request reqd
+      | `GET, "/mcp" ->
+          (* SSE stream for MCP streamable-http protocol *)
+          mcp_sse_handler ~clock request reqd
 
-  | `GET, "/plugin/status" ->
-      plugin_status_handler request reqd
+      | `GET, "/plugin/status" ->
+          plugin_status_handler request reqd
 
-  | `POST, "/" | `POST, "/mcp" ->
-      mcp_post_handler ~sw ~domain_mgr ~eio_ctx server request reqd
+      | `POST, "/" | `POST, "/mcp" ->
+          mcp_post_handler ~sw ~domain_mgr ~eio_ctx server request reqd
 
-  | `POST, "/plugin/connect" ->
-      plugin_connect_handler request reqd
+      | `POST, "/plugin/connect" ->
+          plugin_connect_handler request reqd
 
-  | `POST, "/plugin/poll" ->
-      plugin_poll_handler ~clock request reqd
+      | `POST, "/plugin/poll" ->
+          plugin_poll_handler ~clock request reqd
 
-  | `POST, "/plugin/result" ->
-      plugin_result_handler request reqd
+      | `POST, "/plugin/result" ->
+          plugin_result_handler request reqd
 
-  | `POST, "/plugin/codegen" ->
-      plugin_codegen_handler ~sw ~eio_ctx request reqd
+      | `POST, "/plugin/codegen" ->
+          plugin_codegen_handler ~sw ~eio_ctx request reqd
 
-  | `POST, "/plugin/template" ->
-      template_handler ~sw ~eio_ctx request reqd
+      | `POST, "/plugin/template" ->
+          template_handler ~sw ~eio_ctx request reqd
 
-  | `POST, "/plugin/code-to-figma" ->
-      code_to_figma_handler ~sw ~eio_ctx request reqd
+      | `POST, "/plugin/code-to-figma" ->
+          code_to_figma_handler ~sw ~eio_ctx request reqd
 
-  | `POST, "/plugin/vision-compare" ->
-      vision_compare_handler ~sw ~eio_ctx request reqd
+      | `POST, "/plugin/vision-compare" ->
+          vision_compare_handler ~sw ~eio_ctx request reqd
 
-  | `POST, "/plugin/analyze" ->
-      plugin_analyze_handler ~sw ~eio_ctx request reqd
+      | `POST, "/plugin/analyze" ->
+          plugin_analyze_handler ~sw ~eio_ctx request reqd
 
-  | `POST, "/plugin/extract-tokens" ->
-      extract_tokens_handler ~sw ~eio_ctx request reqd
+      | `POST, "/plugin/extract-tokens" ->
+          extract_tokens_handler ~sw ~eio_ctx request reqd
 
-  | `POST, "/plugin/generate-story" ->
-      generate_story_handler ~sw ~eio_ctx request reqd
+      | `POST, "/plugin/generate-story" ->
+          generate_story_handler ~sw ~eio_ctx request reqd
 
-  | `POST, "/plugin/codegen-multi" ->
-      codegen_multi_handler ~sw ~eio_ctx request reqd
+      | `POST, "/plugin/codegen-multi" ->
+          codegen_multi_handler ~sw ~eio_ctx request reqd
 
-  | `POST, "/plugin/extract-variants" ->
-      extract_variants_handler ~sw ~eio_ctx request reqd
+      | `POST, "/plugin/extract-variants" ->
+          extract_variants_handler ~sw ~eio_ctx request reqd
 
-  | `POST, "/plugin/responsive-breakpoints" ->
-      responsive_handler ~sw ~eio_ctx request reqd
+      | `POST, "/plugin/responsive-breakpoints" ->
+          responsive_handler ~sw ~eio_ctx request reqd
 
-  | `POST, "/plugin/accessibility" ->
-      accessibility_handler ~sw ~eio_ctx request reqd
+      | `POST, "/plugin/accessibility" ->
+          accessibility_handler ~sw ~eio_ctx request reqd
 
-  | `POST, "/plugin/export-assets" ->
-      export_assets_handler ~sw ~eio_ctx request reqd
+      | `POST, "/plugin/export-assets" ->
+          export_assets_handler ~sw ~eio_ctx request reqd
 
-  | `POST, "/plugin/extract-animations" ->
-      extract_animations_handler ~sw ~eio_ctx request reqd
+      | `POST, "/plugin/extract-animations" ->
+          extract_animations_handler ~sw ~eio_ctx request reqd
 
-  | `POST, "/webhook/figma" ->
-      webhook_handler ~sw ~eio_ctx request reqd
+      | `POST, "/webhook/figma" ->
+          webhook_handler ~sw ~eio_ctx request reqd
 
-  (* Agent Queue endpoints *)
-  | `POST, "/agent/request" ->
-      agent_request_handler request reqd
+      (* Agent Queue endpoints *)
+      | `POST, "/agent/request" ->
+          agent_request_handler request reqd
 
-  | `POST, "/agent/claim" ->
-      agent_claim_handler request reqd
+      | `POST, "/agent/claim" ->
+          agent_claim_handler request reqd
 
-  | `POST, "/agent/heartbeat" ->
-      agent_heartbeat_handler request reqd
+      | `POST, "/agent/heartbeat" ->
+          agent_heartbeat_handler request reqd
 
-  | `POST, "/agent/abandon" ->
-      agent_abandon_handler request reqd
+      | `POST, "/agent/abandon" ->
+          agent_abandon_handler request reqd
 
-  | `GET, "/agent/pending" ->
-      agent_pending_handler request reqd
+      | `GET, "/agent/pending" ->
+          agent_pending_handler request reqd
 
-  | `POST, "/agent/result" ->
-      agent_result_handler request reqd
+      | `POST, "/agent/result" ->
+          agent_result_handler request reqd
 
-  | `GET, path when String.length path > 14 && String.sub path 0 14 = "/agent/status/" ->
-      agent_status_handler request reqd
+      | `GET, path when String.length path > 14 && String.sub path 0 14 = "/agent/status/" ->
+          agent_status_handler request reqd
 
-  | `GET, "/agent/queue" ->
-      agent_queue_handler request reqd
+      | `GET, "/agent/queue" ->
+          agent_queue_handler request reqd
 
-  | _ ->
-      Response.not_found reqd
+      | _ ->
+          Response.not_found reqd
+    in
+    if public_path then
+      route ()
+    else
+      match check_api_key request with
+      | Ok () -> route ()
+      | Error msg -> Response.api_key_error msg reqd
 
 (** ============== httpun-eio Server ============== *)
 
