@@ -6,6 +6,7 @@ module Codegen = Figma_codegen
 module Api = Figma_api
 module Protocol = Mcp_protocol
 module Protocol_eio = Mcp_protocol_eio
+module Mcp_http_auth = Mcp_http_auth
 module Tools = Mcp_tools
 module Effects = Figma_effects
 module Grpc_server = Figma_grpc_server

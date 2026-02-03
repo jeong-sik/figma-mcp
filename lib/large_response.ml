@@ -36,7 +36,20 @@ let add_meta base meta =
   | _ -> base
 
 (** 고유 파일명 생성 *)
+let sanitize_prefix prefix =
+  let is_safe_char = function
+    | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '_' | '-' | '.' -> true
+    | _ -> false
+  in
+  let mapped =
+    String.map (fun c -> if is_safe_char c then c else '_') prefix
+  in
+  let mapped = if mapped = "" then "response" else mapped in
+  let max_len = 64 in
+  if String.length mapped > max_len then String.sub mapped 0 max_len else mapped
+
 let generate_filename ~prefix =
+  let prefix = sanitize_prefix prefix in
   let timestamp = Unix.gettimeofday () in
   let random = Random.int 10000 in
   sprintf "%s_%d_%04d.json" prefix (int_of_float timestamp) random

@@ -466,6 +466,13 @@
         </div>
       </div>
 
+      <div style="margin-top: 6px;">
+        <label>API Key</label>
+        <div class="input-row">
+          <input id="apiKey" type="password" placeholder="X-MCP-API-Key" />
+        </div>
+      </div>
+
       <div>
         <label>Channel ID</label>
         <div class="input-row">
@@ -742,7 +749,7 @@
     <script>
       // DOM refs
       var $ = function(id) { return document.getElementById(id); };
-      var serverInput = $("server"), channelInput = $("channel"), copyChannelBtn = $("copyChannel");
+      var serverInput = $("server"), channelInput = $("channel"), apiKeyInput = $("apiKey"), copyChannelBtn = $("copyChannel");
       var connectBtn = $("connect"), connectText = $("connectText"), connectSpinner = $("connectSpinner");
       var disconnectBtn = $("disconnect"), selfTestBtn = $("selfTest");
       var statusDot = $("statusDot"), statusText = $("statusText"), pingDisplay = $("pingDisplay");
@@ -763,7 +770,7 @@
 
       // State
       var STORAGE_KEY = "figmaMcpBridgeState";
-      var serverUrl = "", channelId = "", polling = false;
+      var serverUrl = "", channelId = "", apiKey = "", polling = false;
       var stats = { cmd: 0, ok: 0, err: 0 };
       var logs = [], cmdHistory = [], tokens = [];
       var MAX_LOGS = 100, MAX_HISTORY = 20;
@@ -788,6 +795,16 @@
       }
       function loadState() { try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) || {}; } catch(e) { return {}; } }
       function saveState(s) { try { localStorage.setItem(STORAGE_KEY, JSON.stringify(s)); } catch(e) {} }
+      function currentApiKey() {
+        if (!apiKeyInput) return "";
+        return apiKeyInput.value.trim();
+      }
+      function buildHeaders(base) {
+        var headers = base ? Object.assign({}, base) : {};
+        var key = currentApiKey();
+        if (key) headers["X-MCP-API-Key"] = key;
+        return headers;
+      }
       function escapeHtml(s) { return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
       function truncate(s, n) { return s.length > n ? s.substring(0, n-3) + "..." : s; }
       function timeStr() {
@@ -944,7 +961,7 @@
         // Call LLM via server endpoint
         fetch(serverUrl + "/plugin/analyze", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: buildHeaders({ "Content-Type": "application/json" }),
           body: JSON.stringify({ channel_id: channelId, node: node, prompt: analysisPrompt })
         }).then(function(r) {
           if (!r.ok) throw new Error("HTTP " + r.status);
@@ -1069,7 +1086,7 @@
         codegenStatus.textContent = "Calling Ollama via figma-mcp...";
         fetch(serverUrl + "/plugin/codegen", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: buildHeaders({ "Content-Type": "application/json" }),
           body: JSON.stringify({ node: node, platform: platform, prompt: prompt })
         }).then(function(r) {
           if (!r.ok) throw new Error("HTTP " + r.status);
@@ -1255,6 +1272,7 @@
         copyChannelBtn.disabled = !connected;
         serverInput.disabled = connected;
         channelInput.disabled = connected;
+        if (apiKeyInput) apiKeyInput.disabled = connected;
         quickSection.style.display = connected ? "block" : "none";
         historySection.style.display = connected ? "block" : "none";
         tokensSection.style.display = connected ? "block" : "none";
@@ -1289,6 +1307,7 @@
       function connect() {
         serverUrl = normalizeUrl(serverInput.value);
         channelId = channelInput.value.trim();
+        apiKey = currentApiKey();
         if (!serverUrl) { addLog("connect", "URL required", false); setStatus("error", "URL Required"); return Promise.reject(); }
         serverInput.value = serverUrl;
         setStatus("connecting", "Connecting...");
@@ -1297,7 +1316,7 @@
         var payload = channelId ? { channel_id: channelId } : {};
         return fetch(serverUrl + "/plugin/connect", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: buildHeaders({ "Content-Type": "application/json" }),
           body: JSON.stringify(payload)
         }).then(function(r) {
           updatePing(Date.now() - startTime);
@@ -1306,7 +1325,7 @@
         }).then(function(d) {
           channelId = d.channel_id || channelId;
           channelInput.value = channelId;
-          saveState({ serverUrl: serverUrl, channelId: channelId });
+          saveState({ serverUrl: serverUrl, channelId: channelId, apiKey: apiKey });
           setStatus("connected", "Connected");
           setConnected(true);
           setConnecting(false);
@@ -1334,7 +1353,7 @@
         var startTime = Date.now();
         fetch(serverUrl + "/plugin/poll", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: buildHeaders({ "Content-Type": "application/json" }),
           body: JSON.stringify({ channel_id: channelId, max_commands: 5, wait_ms: 15000 })
         }).then(function(r) {
           updatePing(Date.now() - startTime);
@@ -1384,7 +1403,7 @@
           addLog(msg.action || "result", msg.ok ? "OK" : (payload && payload.error ? payload.error : "Error"), msg.ok);
           fetch(serverUrl + "/plugin/result", {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: buildHeaders({ "Content-Type": "application/json" }),
             body: JSON.stringify({ channel_id: channelId, command_id: msg.command_id, ok: msg.ok, payload: payload })
           });
         }
@@ -1402,6 +1421,12 @@
       connectBtn.onclick = function() { connect(); };
       disconnectBtn.onclick = disconnect;
       serverInput.onkeydown = function(e) { if (e.key === "Enter" && !connectBtn.disabled) connect(); };
+      if (apiKeyInput) {
+        apiKeyInput.oninput = function() {
+          apiKey = currentApiKey();
+          saveState({ serverUrl: normalizeUrl(serverInput.value), channelId: channelInput.value.trim(), apiKey: apiKey });
+        };
+      }
       copyChannelBtn.onclick = function() {
         if (channelId) navigator.clipboard.writeText(channelId).then(function() { addLog("copy", "Copied", true); });
       };
@@ -1446,7 +1471,7 @@
 
         fetch(serverUrl + "/plugin/code-to-figma", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: buildHeaders({ "Content-Type": "application/json" }),
           body: JSON.stringify({ code: generatedCode, name: nodeName })
         }).then(function(r) {
           if (!r.ok) throw new Error("HTTP " + r.status);
@@ -1642,7 +1667,7 @@
 
         fetch(serverUrl + "/plugin/codegen-multi", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: buildHeaders({ "Content-Type": "application/json" }),
           body: JSON.stringify({ node: lastSelection.nodes[0], platforms: platforms })
         }).then(function(r) {
           if (!r.ok) throw new Error("HTTP " + r.status);
@@ -1695,7 +1720,7 @@
 
         fetch(serverUrl + "/plugin/vision-compare", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: buildHeaders({ "Content-Type": "application/json" }),
           body: JSON.stringify({
             reference: refPath,
             code: generatedCode,
@@ -1742,7 +1767,7 @@
 
         fetch(serverUrl + "/plugin/generate-story", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: buildHeaders({ "Content-Type": "application/json" }),
           body: JSON.stringify({
             node: lastSelection.nodes[0],
             code: generatedCode || "",
@@ -1801,6 +1826,10 @@
       var state = loadState();
       if (state.serverUrl) serverInput.value = state.serverUrl;
       if (state.channelId) channelInput.value = state.channelId;
+      if (state.apiKey && apiKeyInput) {
+        apiKeyInput.value = state.apiKey;
+        apiKey = state.apiKey;
+      }
 
       // Auto-connect if we have a saved server URL
       if (state.serverUrl) {
