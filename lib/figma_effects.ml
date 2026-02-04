@@ -644,7 +644,7 @@ let run_with_pure_eio_api ~sw ~net ~clock ~client computation =
 
         | Figma_download_url { url; path } ->
             Some (fun (k : (a, _) Effect.Deep.continuation) ->
-              let result = Figma_api_eio.download_url ~sw ~net ~clock ~client ~url ~path in
+              let result = Figma_api_eio.download_url_with_retry ~sw ~net ~clock ~client ~url ~path () in
               (* download_url returns (unit, api_error), but effect expects (string, string) *)
               let result' = Result.map (fun () -> path) result in
               let result'' = Result.map_error Figma_api_eio.api_error_to_friendly_string result' in
