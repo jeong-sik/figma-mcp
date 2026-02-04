@@ -136,12 +136,25 @@ security add-generic-password -s "figma-mcp" -a "FIGMA_TOKEN" -w "YOUR_TOKEN"
 - `FIGMA_MCP_MAX_BODY_BYTES` 또는 `MCP_MAX_BODY_BYTES`로 조정하세요.
 - `Content-Length`가 없으면 스트리밍 누적 바이트로 제한하며, 초과 시 413을 반환합니다.
 
+## Figma API HTTP 설정
+
+- `FIGMA_MCP_FIGMA_API_TIMEOUT_SECONDS`: Figma API 요청 타임아웃 (기본 30초)
+- `FIGMA_MCP_FIGMA_API_MAX_BODY_BYTES`: Figma API 응답 바디 최대 크기 (기본 100MB)
+- `FIGMA_MCP_LOG_API_BODY`: `true`일 때 HTTP 에러 로그에 응답 바디 미리보기 포함 (기본 false)
+
+## Large Response 설정
+
+- `FIGMA_MCP_MAX_INLINE_RESPONSE`: 인라인 응답 최대 크기 (bytes, 기본 50,000)
+- `FIGMA_MCP_LARGE_RESPONSE_DIR`: 대용량 응답 파일 저장 경로 (기본 `/tmp/figma_responses`)
+- `FIGMA_MCP_RESPONSE_TTL`: 파일 TTL (seconds, 기본 3600)
+- `FIGMA_MCP_RESPONSE_MAX_DIR_MB`: 디렉토리 최대 용량 (MB, 기본 1024, 0이면 비활성화)
+
 ## CORS 설정 (HTTP)
 
-- `FIGMA_MCP_CORS_MODE`: `permissive`(기본) 또는 `restrict`
+- `FIGMA_MCP_CORS_MODE`: `restrict`(기본) 또는 `permissive`
 - `FIGMA_MCP_CORS_ALLOWED_ORIGINS`: 허용 Origin 목록 (쉼표 구분, 예: `https://app.example.com,https://*.example.com`)
 - `FIGMA_MCP_CORS_ALLOW_PRIVATE_NETWORK`: `true`일 때 `access-control-allow-private-network` 헤더 추가
-- `FIGMA_MCP_CORS_ALLOW_HEADERS`: 허용 헤더 목록 (기본: `Content-Type, Authorization, Mcp-Session-Id, Mcp-Protocol-Version, X-Requested-With`)
+- `FIGMA_MCP_CORS_ALLOW_HEADERS`: 허용 헤더 목록 (기본: `Content-Type, Accept, Mcp-Session-Id, Mcp-Protocol-Version, Authorization, X-API-Key, X-MCP-API-Key, Access-Control-Request-Private-Network`)
 
 ## Troubleshooting: TLS (macOS/Linux)
 

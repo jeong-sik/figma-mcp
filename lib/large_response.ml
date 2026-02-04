@@ -1,7 +1,8 @@
 (** Large Response Handler
 
-    큰 MCP 응답(>500KB)을 파일로 저장하고 경로만 반환하는 모듈.
-    Claude Code가 7MB JSON을 컨텍스트에 넣으려다 멈추는 문제 해결.
+    큰 MCP 응답(기본 50KB 이상, FIGMA_MCP_MAX_INLINE_RESPONSE 설정 가능)을
+    파일로 저장하고 경로만 반환하는 모듈.
+    Claude Code가 대용량 JSON을 컨텍스트에 넣으려다 멈추는 문제 해결.
 *)
 
 open Printf
@@ -10,6 +11,8 @@ open Printf
 let max_inline_size = Figma_config.Response.max_inline
 let storage_dir = Figma_config.Response.large_dir
 let response_ttl = Figma_config.Response.ttl_seconds
+let max_dir_mb = Figma_config.Response.max_dir_mb
+let max_dir_bytes = if max_dir_mb <= 0 then 0 else max_dir_mb * 1024 * 1024
 
 (** 디렉토리 생성 *)
 let ensure_dir path =
@@ -79,6 +82,37 @@ let cleanup_old_files () =
     ) files
   end
 
+(** 디렉토리 최대 크기 초과 시 오래된 파일부터 제거 *)
+let cleanup_oversized_dir () =
+  if max_dir_bytes > 0 && Sys.file_exists storage_dir then begin
+    let entries =
+      Sys.readdir storage_dir
+      |> Array.to_list
+      |> List.filter_map (fun filename ->
+        let filepath = Filename.concat storage_dir filename in
+        try
+          let stats = Unix.stat filepath in
+          Some (filepath, stats.Unix.st_mtime, stats.Unix.st_size)
+        with Unix.Unix_error _ -> None
+      )
+    in
+    let total =
+      List.fold_left (fun acc (_, _, size) -> acc + size) 0 entries
+    in
+    if total > max_dir_bytes then begin
+      let sorted = List.sort (fun (_, a, _) (_, b, _) -> compare a b) entries in
+      let rec remove_until total_bytes files =
+        if total_bytes <= max_dir_bytes then ()
+        else match files with
+        | [] -> ()
+        | (path, _, size) :: rest ->
+            (try Unix.unlink path with Unix.Unix_error _ -> ());
+            remove_until (total_bytes - size) rest
+      in
+      remove_until total sorted
+    end
+  end
+
 (** 응답 크기에 따라 분기 처리
 
     @param prefix 파일명 접두사 (예: "node_2089_10737")
@@ -99,6 +133,7 @@ let handle_response ~prefix ~format content : Yojson.Safe.t =
   else begin
     (* 큰 응답: 파일로 저장하고 메타데이터 반환 *)
     let filepath = save_to_file ~prefix content in
+    cleanup_oversized_dir ();
     (* Include first 2KB as preview for immediate context *)
     let preview_size = min 2048 size in
     let preview = String.sub content 0 preview_size in

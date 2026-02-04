@@ -117,6 +117,22 @@ module Visual = struct
     Sys.getenv_opt "FIGMA_MCP_RENDER_SCRIPT"
 end
 
+(** {1 HTTP Configuration} *)
+
+module Http = struct
+  (** Figma API request timeout (seconds) *)
+  let timeout_seconds =
+    get_float ~default:30.0 "FIGMA_MCP_FIGMA_API_TIMEOUT_SECONDS"
+
+  (** Figma API max response body size (bytes) *)
+  let max_body_bytes =
+    get_int ~default:(100 * 1024 * 1024) "FIGMA_MCP_FIGMA_API_MAX_BODY_BYTES"
+
+  (** Log HTTP response body preview on errors *)
+  let log_response_body =
+    get_bool ~default:false "FIGMA_MCP_LOG_API_BODY"
+end
+
 (** {1 Response Handling Configuration} *)
 
 module Response = struct
@@ -131,6 +147,10 @@ module Response = struct
   (** Response file TTL (seconds) *)
   let ttl_seconds =
     get_int ~default:3600 "FIGMA_MCP_RESPONSE_TTL"
+
+  (** Maximum response directory size (MB), 0 disables size cleanup *)
+  let max_dir_mb =
+    get_int ~default:1024 "FIGMA_MCP_RESPONSE_MAX_DIR_MB"
 end
 
 (** {1 CORS Configuration} *)
