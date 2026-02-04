@@ -167,12 +167,9 @@ let api_error_to_friendly_string = function
       sprintf "%s: %s" recovery.message recovery.suggestion
   | Timeout_error -> "Request timed out. The file might be too large or the network is slow"
 
-(** 에러를 기술적 문자열로 변환 (디버깅용) *)
-let api_error_to_string = function
-  | Http_error (code, msg, _) -> sprintf "HTTP %d: %s" code msg
-  | Json_error msg -> sprintf "JSON error: %s" msg
-  | Network_error msg -> sprintf "Network error: %s" msg
-  | Timeout_error -> "Request timeout"
+let truncate_body body =
+  if String.length body > 200 then String.sub body 0 200 ^ "..."
+  else body
 
 (** 에러가 재시도 가능한지 확인 *)
 let is_retryable_error = function
@@ -218,10 +215,6 @@ let retry_after_of_headers headers =
 let log_error context msg =
   Printf.eprintf "[figma_api_eio] %s: %s\n%!" context msg
 
-let truncate_body body =
-  if String.length body > 200 then String.sub body 0 200 ^ "..."
-  else body
-
 let log_http_error ~label ~status ~body ~url =
   if log_response_body then
     log_error label (sprintf "HTTP %d: %s (url: %s)" status (truncate_body body) url)
@@ -230,6 +223,17 @@ let log_http_error ~label ~status ~body ~url =
 
 let log_warning context msg =
   Printf.eprintf "[figma_api_eio] WARN %s: %s\n%!" context msg
+
+(** 에러를 기술적 문자열로 변환 (디버깅용) *)
+let api_error_to_string = function
+  | Http_error (code, msg, _) ->
+      if log_response_body then
+        sprintf "HTTP %d: %s" code (truncate_body msg)
+      else
+        sprintf "HTTP %d (body_bytes: %d)" code (String.length msg)
+  | Json_error msg -> sprintf "JSON error: %s" msg
+  | Network_error msg -> sprintf "Network error: %s" msg
+  | Timeout_error -> "Request timeout"
 
 (** ============== URL Utilities ============== *)
 
