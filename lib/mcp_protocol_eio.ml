@@ -766,10 +766,15 @@ let find_sse_client client_id =
 
 (** Generic SSE broadcast - sends data to all connected clients *)
 let broadcast_sse_data data =
-  Hashtbl.iter (fun _ client ->
+  (* Collect failed clients to remove after iteration *)
+  let failed = ref [] in
+  Hashtbl.iter (fun client_id client ->
     if client.connected then
-      try send_sse_event client ~event:"notification" ~data with _ -> ()
-  ) sse_clients
+      try send_sse_event client ~event:"notification" ~data
+      with _ -> failed := client_id :: !failed
+  ) sse_clients;
+  (* Remove failed clients to prevent zombie accumulation *)
+  List.iter unregister_sse_client !failed
 
 (** Initialize Mcp_progress with broadcast function *)
 let () = Mcp_progress.set_broadcast_fn broadcast_sse_data
