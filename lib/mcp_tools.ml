@@ -909,11 +909,11 @@ let tool_figma_stats : tool_def = {
 
 let tool_figma_export_tokens : tool_def = {
   name = "figma_export_tokens";
-  description = "📦 TOKENS: 디자인 토큰 추출. CSS/Tailwind/JSON/Semantic DSL 지원.";
+  description = "📦 TOKENS: 디자인 토큰 추출. CSS/Tailwind/JSON/SwiftUI/Compose/Flutter/W3C-DTCG/semantic 지원.";
   input_schema = object_schema [
     ("file_key", string_prop "Figma 파일 키");
     ("token", string_prop "Figma Personal Access Token (optional if FIGMA_TOKEN env var is set)");
-    ("format", enum_prop ["css"; "tailwind"; "json"; "semantic"] "출력 포맷 (기본값: css). semantic=UIFormer 스타일 DSL");
+    ("format", enum_prop ["css"; "tailwind"; "json"; "dtcg"; "swiftui"; "compose"; "flutter"; "semantic"] "출력 포맷 (기본값: css). dtcg=W3C Design Tokens (DTCG). semantic=UIFormer 스타일 DSL");
     ("node_id", string_prop "추출 시작 노드 ID (생략시 전체 문서)");
   ] ["file_key"];
 }
@@ -7235,10 +7235,7 @@ let handle_export_tokens args : (Yojson.Safe.t, string) result =
                        | _ ->
                          (* Design token extraction (CSS/Tailwind/JSON) *)
                          let tokens = Figma_tokens.extract_all all_nodes in
-                         match format with
-                         | "tailwind" -> Figma_tokens.to_tailwind tokens
-                         | "json" -> Figma_tokens.to_json tokens
-                         | _ -> Figma_tokens.to_css tokens
+                         Figma_tokens.export_tokens tokens (Figma_tokens.format_of_string format)
                      in
                      Ok (make_text_content result)
                  | None -> Error "Failed to parse document"))
