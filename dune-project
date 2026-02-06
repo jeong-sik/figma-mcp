@@ -36,4 +36,5 @@
   (bigstringaf (>= 0.9))
   (mirage-crypto-rng (>= 1.0))
   (ipaddr (>= 5.0))
+  (alcotest (and :with-test (>= 1.8.0)))
   (bisect_ppx (and :with-test (>= 2.8)))))
