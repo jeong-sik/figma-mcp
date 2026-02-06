@@ -118,14 +118,17 @@ module Tokens_tests = struct
     let node = make_node ~gap:16.0 () in
     let result = extract_spacing [node] in
     check bool "has spacing" true (List.length result > 0);
-    check bool "16 extracted" true (List.exists (fun s -> s.value = 16.0) result)
+    check bool "16 extracted" true
+      (List.exists (fun (s: spacing_token) -> s.value = 16.0) result)
 
   (** Test extract_spacing: padding extraction *)
   let test_extract_spacing_padding () =
     let node = make_node ~padding:(10., 20., 10., 20.) () in
     let result = extract_spacing [node] in
-    check bool "has 10" true (List.exists (fun s -> s.value = 10.0) result);
-    check bool "has 20" true (List.exists (fun s -> s.value = 20.0) result)
+    check bool "has 10" true
+      (List.exists (fun (s: spacing_token) -> s.value = 10.0) result);
+    check bool "has 20" true
+      (List.exists (fun (s: spacing_token) -> s.value = 20.0) result)
 
   (** Test extract_spacing: zero values filtered *)
   let test_extract_spacing_zero () =
@@ -138,14 +141,17 @@ module Tokens_tests = struct
     let node = make_node ~border_radii:(Some (8., 8., 8., 8.)) () in
     let result = extract_radii [node] in
     check bool "has radius" true (List.length result > 0);
-    check bool "8 extracted" true (List.exists (fun r -> r.value = 8.0) result)
+    check bool "8 extracted" true
+      (List.exists (fun (r: radius_token) -> r.value = 8.0) result)
 
   (** Test extract_radii: mixed values *)
   let test_extract_radii_mixed () =
     let node = make_node ~border_radii:(Some (8., 16., 8., 16.)) () in
     let result = extract_radii [node] in
-    check bool "has 8" true (List.exists (fun r -> r.value = 8.0) result);
-    check bool "has 16" true (List.exists (fun r -> r.value = 16.0) result)
+    check bool "has 8" true
+      (List.exists (fun (r: radius_token) -> r.value = 8.0) result);
+    check bool "has 16" true
+      (List.exists (fun (r: radius_token) -> r.value = 16.0) result)
 
   (** Test extract_radii: none *)
   let test_extract_radii_none () =
