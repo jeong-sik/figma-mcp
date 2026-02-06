@@ -154,3 +154,13 @@
  (libraries figma_mcp alcotest yojson)
  (deps
   (glob_files fixtures/code_connect/*.json)))
+
+; Webhook passcode validation (no HTTP reqd, pure logic)
+(test
+ (name test_webhook_security)
+ (libraries figma_mcp alcotest))
+
+; Compare regions output_dir / region name safety checks
+(test
+ (name test_compare_regions_security)
+ (libraries figma_mcp alcotest yojson))

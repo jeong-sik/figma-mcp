@@ -577,10 +577,8 @@ module Request = struct
     respond_error reqd `Payload_too_large body
 
   let respond_internal_error reqd exn =
-    let body = Printf.sprintf
-      "500 Internal Server Error: %s" (Printexc.to_string exn)
-    in
-    respond_error reqd `Internal_server_error body
+    eprintf "[http] internal error: %s\n%!" (Printexc.to_string exn);
+    respond_error reqd `Internal_server_error "500 Internal Server Error"
 
   let read_body_async reqd callback =
     let request = Httpun.Reqd.request reqd in
@@ -1678,7 +1676,7 @@ let agent_pending_handler _request reqd =
   agent_cleanup_old ();
   let pending = agent_get_pending () in
   let requests = List.map (fun req ->
-    agent_request_json ~include_node:true ~include_prompt:true req
+    agent_request_json ~include_node:false ~include_prompt:false req
   ) pending in
   let result = `Assoc [("pending", `List requests); ("count", `Int (List.length pending))] in
   Response.json (Yojson.Safe.to_string result) reqd
@@ -3010,6 +3008,44 @@ let extract_animations_handler ~sw:_ ~eio_ctx:_ _request reqd =
   )
 
 (** POST /webhook/figma - Figma webhook handler for design changes *)
+let constant_time_equal a b =
+  let a = String.trim a in
+  let b = String.trim b in
+  let la = String.length a in
+  let lb = String.length b in
+  if la <> lb then false
+  else
+    let diff = ref 0 in
+    for i = 0 to la - 1 do
+      diff := !diff lor (Char.code a.[i] lxor Char.code b.[i])
+    done;
+    !diff = 0
+
+let webhook_passcode_secret_opt () =
+  let nonempty name =
+    match Sys.getenv_opt name with
+    | Some v ->
+        let v = String.trim v in
+        if v = "" then None else Some v
+    | None -> None
+  in
+  match nonempty "FIGMA_MCP_WEBHOOK_PASSCODE" with
+  | Some _ as v -> v
+  | None -> nonempty "FIGMA_WEBHOOK_PASSCODE"
+
+let validate_webhook_passcode ~allow_no_auth ~secret_opt ~passcode =
+  match secret_opt with
+  | None ->
+      if allow_no_auth then
+        Error "Webhook passcode required when no-auth mode is enabled (set FIGMA_MCP_WEBHOOK_PASSCODE)"
+      else
+        Ok ()
+  | Some secret ->
+      let passcode = String.trim passcode in
+      if passcode = "" then Error "Missing webhook passcode"
+      else if constant_time_equal secret passcode then Ok ()
+      else Error "Invalid webhook passcode"
+
 let webhook_handler ~sw:_ ~eio_ctx:_ _request reqd =
   Request.read_body_async reqd (fun body_str ->
     match parse_json body_str with
@@ -3024,11 +3060,15 @@ let webhook_handler ~sw:_ ~eio_ctx:_ _request reqd =
         let timestamp = member "timestamp" json |> to_string_option |> Option.value ~default:"" in
         let passcode = member "passcode" json |> to_string_option |> Option.value ~default:"" in
 
-        (* Verify webhook (in production, check passcode against stored secret) *)
-        let _ = passcode in
+        let secret_opt = webhook_passcode_secret_opt () in
+        (match validate_webhook_passcode ~allow_no_auth:!allow_no_auth ~secret_opt ~passcode with
+         | Error err ->
+             let body = `Assoc [("error", `String err)] in
+             Response.json ~status:`Forbidden (Yojson.Safe.to_string body) reqd
+         | Ok () ->
 
-        (* Log the webhook event *)
-        printf "[Webhook] %s: file=%s (%s) at %s\n%!" event_type file_key file_name timestamp;
+             (* Log the webhook event *)
+             printf "[Webhook] %s: file=%s (%s) at %s\n%!" event_type file_key file_name timestamp;
 
         (* Determine action based on event type *)
         let action = match event_type with
@@ -3053,7 +3093,7 @@ let webhook_handler ~sw:_ ~eio_ctx:_ _request reqd =
             ("variants", `String "/plugin/extract-variants");
           ]);
         ] in
-        Response.json (Yojson.Safe.to_string result) reqd
+             Response.json (Yojson.Safe.to_string result) reqd)
   )
 
 (** POST /plugin/code-to-figma - Convert code to Figma DSL *)
@@ -3410,8 +3450,8 @@ let make_request_handler ~clock ~domain_mgr ~sw ~eio_ctx server =
     try
       route_request ~clock ~domain_mgr ~sw ~eio_ctx server request reqd
     with exn ->
-      let msg = Printf.sprintf "Internal Server Error: %s" (Printexc.to_string exn) in
-      Response.text ~status:`Internal_server_error msg reqd
+      eprintf "[http] request handler exception: %s\n%!" (Printexc.to_string exn);
+      Response.text ~status:`Internal_server_error "Internal Server Error" reqd
 
 let error_handler _client_addr ?request:_ error start_response =
   let response_body = start_response Httpun.Headers.empty in
