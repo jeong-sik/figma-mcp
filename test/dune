@@ -169,3 +169,8 @@
 (test
  (name test_vision_compare_security)
  (libraries figma_mcp alcotest unix))
+
+; Agent queue security (claim token enforcement)
+(test
+ (name test_agent_queue_security)
+ (libraries figma_mcp alcotest eio_main yojson))

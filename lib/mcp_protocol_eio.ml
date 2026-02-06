@@ -47,6 +47,7 @@ let agent_status_to_string = function
 
 type agent_request = {
   id: string;
+  request_secret: string;
   node: Yojson.Safe.t;
   platform: string;
   prompt: string;
@@ -55,6 +56,7 @@ type agent_request = {
   created_at: float;
   mutable status: agent_status;
   mutable claimed_by: string option;
+  mutable claim_token: string option;
   mutable claimed_at: float option;
   mutable last_heartbeat: float option;
   mutable attempts: int;
@@ -84,10 +86,45 @@ let agent_heartbeat_ttl_sec = env_int ~name:"FIGMA_MCP_AGENT_HEARTBEAT_TTL_SEC" 
 let agent_max_age_sec = env_int ~name:"FIGMA_MCP_AGENT_MAX_AGE_SEC" ~default:900
 let agent_max_attempts = env_int ~name:"FIGMA_MCP_AGENT_MAX_ATTEMPTS" ~default:3
 
+let hex_of_bytes (b : bytes) =
+  let hex = "0123456789abcdef" in
+  let len = Bytes.length b in
+  let out = Bytes.create (len * 2) in
+  for i = 0 to (len - 1) do
+    let v = Char.code (Bytes.get b i) in
+    Bytes.set out (i * 2) hex.[v lsr 4];
+    Bytes.set out (i * 2 + 1) hex.[v land 0x0f];
+  done;
+  Bytes.unsafe_to_string out
+
+let random_bytes len =
+  let fd = Unix.openfile "/dev/urandom" [Unix.O_RDONLY] 0 in
+  Fun.protect
+    ~finally:(fun () -> try Unix.close fd with _ -> ())
+    (fun () ->
+      let buf = Bytes.create len in
+      let rec loop off =
+        if off >= len then ()
+        else
+          let n = Unix.read fd buf off (len - off) in
+          if n = 0 then failwith "Unexpected EOF reading /dev/urandom"
+          else loop (off + n)
+      in
+      loop 0;
+      buf)
+
+let random_hex len = hex_of_bytes (random_bytes len)
+
+let new_request_id () = "req_" ^ random_hex 16
+let new_request_secret () = random_hex 16
+let new_claim_token () = random_hex 16
+
 let agent_add_request ~priority ~context_digest node platform prompt =
-  let id = Printf.sprintf "req-%d-%d" (int_of_float (now () *. 1000.0)) (Random.int 10000) in
+  let id = new_request_id () in
+  let request_secret = new_request_secret () in
   let req = {
     id;
+    request_secret;
     node;
     platform;
     prompt;
@@ -96,6 +133,7 @@ let agent_add_request ~priority ~context_digest node platform prompt =
     created_at = now ();
     status = Pending;
     claimed_by = None;
+    claim_token = None;
     claimed_at = None;
     last_heartbeat = None;
     attempts = 0;
@@ -105,7 +143,7 @@ let agent_add_request ~priority ~context_digest node platform prompt =
   } in
   Eio.Mutex.use_rw ~protect:true agent_queue_mutex (fun () ->
     Hashtbl.add agent_queue id req;
-    id)
+    (id, request_secret))
 
 let agent_get_pending () =
   Eio.Mutex.use_rw ~protect:true agent_queue_mutex (fun () ->
@@ -136,6 +174,7 @@ let agent_claim ~worker_id =
           end else begin
             req.status <- Claimed;
             req.claimed_by <- Some worker_id;
+            req.claim_token <- Some (new_claim_token ());
             req.claimed_at <- Some (now ());
             req.last_heartbeat <- Some (now ());
             req.attempts <- req.attempts + 1;
@@ -144,49 +183,68 @@ let agent_claim ~worker_id =
     in
     pick sorted)
 
-let agent_heartbeat ~worker_id req_id =
+let agent_heartbeat ~worker_id ~claim_token req_id =
   Eio.Mutex.use_rw ~protect:true agent_queue_mutex (fun () ->
     match Hashtbl.find_opt agent_queue req_id with
-    | Some req when req.status = Claimed && req.claimed_by = Some worker_id ->
+    | Some req when req.status = Claimed && req.claimed_by = Some worker_id -> (
+        match req.claim_token with
+        | Some t when t = claim_token ->
         req.last_heartbeat <- Some (now ());
         Ok ()
+        | _ -> Error "invalid_claim_token")
     | Some _ -> Error "not_claimed_by_worker"
     | None -> Error "not_found")
 
-let agent_abandon ~worker_id ~reason req_id =
+let agent_abandon ~worker_id ~claim_token ~reason req_id =
   Eio.Mutex.use_rw ~protect:true agent_queue_mutex (fun () ->
     match Hashtbl.find_opt agent_queue req_id with
-    | Some req when req.status = Claimed && req.claimed_by = Some worker_id ->
+    | Some req when req.status = Claimed && req.claimed_by = Some worker_id -> (
+        match req.claim_token with
+        | Some t when t = claim_token ->
         req.status <- Pending;
         req.claimed_by <- None;
+        req.claim_token <- None;
         req.claimed_at <- None;
         req.last_heartbeat <- None;
         req.error <- Some reason;
         Ok ()
+        | _ -> Error "invalid_claim_token")
     | Some _ -> Error "not_claimed_by_worker"
     | None -> Error "not_found")
 
-let agent_submit_result ?worker_id ?context_digest req_id code =
+let agent_submit_result ?worker_id ?context_digest ~claim_token req_id code =
   Eio.Mutex.use_rw ~protect:true agent_queue_mutex (fun () ->
     match Hashtbl.find_opt agent_queue req_id with
     | None -> Error "not_found"
     | Some req ->
         let drifted = ref req.drifted in
         let error = ref None in
-        (match req.status, worker_id, req.claimed_by with
-         | Claimed, Some w, Some c when w <> c ->
+        (match req.status with
+         | Claimed -> (
+             match req.claim_token with
+             | Some t when t = claim_token -> ()
+             | _ ->
+                 drifted := true;
+                 error := Some "invalid_claim_token")
+         | _ ->
              drifted := true;
-             error := Some "worker_mismatch"
-         | Claimed, None, Some _ ->
-             drifted := true
-         | Pending, _, _ ->
-             drifted := true
-         | _ -> ());
-        (match context_digest with
-         | Some d when d <> "" && d <> req.context_digest ->
-             drifted := true;
-             error := Some "context_drift"
-         | _ -> ());
+             if !error = None then error := Some "not_claimed");
+        if !error = None then
+          (match req.status, worker_id, req.claimed_by with
+           | Claimed, Some w, Some c when w <> c ->
+               drifted := true;
+               error := Some "worker_mismatch"
+           | Claimed, None, Some _ ->
+               drifted := true
+           | Pending, _, _ ->
+               drifted := true
+           | _ -> ());
+        if !error = None then
+          (match context_digest with
+           | Some d when d <> "" && d <> req.context_digest ->
+               drifted := true;
+               error := Some "context_drift"
+           | _ -> ());
         req.drifted <- !drifted;
         (match !error with
          | Some msg ->
@@ -195,6 +253,7 @@ let agent_submit_result ?worker_id ?context_digest req_id code =
          | None ->
              req.result <- Some code;
              req.status <- Completed;
+             req.claim_token <- None;
              Ok ()))
 
 let agent_get_result req_id =
@@ -215,6 +274,7 @@ let agent_cleanup_old () =
            if (t -. last) > heartbeat_ttl || (t -. Option.value ~default:req.created_at req.claimed_at) > claim_ttl then begin
              req.status <- Pending;
              req.claimed_by <- None;
+             req.claim_token <- None;
              req.claimed_at <- None;
              req.last_heartbeat <- None;
              req.error <- Some "claim_timeout";
@@ -1622,7 +1682,7 @@ let plugin_analyze_handler ~sw:_ ~eio_ctx:_ _request reqd =
 
 (** ============== Agent Queue Handlers ============== *)
 
-let agent_request_json ~include_node ~include_prompt req =
+let agent_request_json ?(include_claim_token=false) ~include_node ~include_prompt req =
   let base = [
     ("id", `String req.id);
     ("platform", `String req.platform);
@@ -1631,6 +1691,7 @@ let agent_request_json ~include_node ~include_prompt req =
     ("status", `String (agent_status_to_string req.status));
     ("attempts", `Int req.attempts);
     ("claimed_by", (match req.claimed_by with Some v -> `String v | None -> `Null));
+    ("claim_token", (match include_claim_token, req.claim_token with true, Some v -> `String v | _ -> `Null));
     ("claimed_at", (match req.claimed_at with Some v -> `Float v | None -> `Null));
     ("last_heartbeat", (match req.last_heartbeat with Some v -> `Float v | None -> `Null));
     ("drifted", `Bool req.drifted);
@@ -1661,9 +1722,12 @@ let agent_request_handler _request reqd =
           if ctx_digest <> "" then ctx_digest
           else Digest.to_hex (Digest.string (full_prompt ^ "\n" ^ node_info))
         in
-        let req_id = agent_add_request ~priority ~context_digest node platform full_prompt in
+        let (req_id, request_secret) =
+          agent_add_request ~priority ~context_digest node platform full_prompt
+        in
         let result = `Assoc [
           ("request_id", `String req_id);
+          ("request_secret", `String request_secret);
           ("status", `String "queued");
           ("priority", `Int priority);
           ("context_digest", `String context_digest);
@@ -1699,7 +1763,7 @@ let agent_claim_handler _request reqd =
           | Some req ->
               let result = `Assoc [
                 ("status", `String "claimed");
-                ("request", agent_request_json ~include_node:true ~include_prompt:true req);
+                ("request", agent_request_json ~include_claim_token:true ~include_node:true ~include_prompt:true req);
               ] in
               Response.json (Yojson.Safe.to_string result) reqd
         end
@@ -1714,10 +1778,11 @@ let agent_heartbeat_handler _request reqd =
         let open Yojson.Safe.Util in
         let worker_id = member "worker_id" json |> to_string_option |> Option.value ~default:"" in
         let req_id = member "request_id" json |> to_string_option |> Option.value ~default:"" in
-        if worker_id = "" || req_id = "" then
-          json_error "worker_id and request_id required" reqd
+        let claim_token = member "claim_token" json |> to_string_option |> Option.value ~default:"" in
+        if worker_id = "" || req_id = "" || claim_token = "" then
+          json_error "worker_id, request_id and claim_token required" reqd
         else
-          match agent_heartbeat ~worker_id req_id with
+          match agent_heartbeat ~worker_id ~claim_token req_id with
           | Ok () ->
               let result = `Assoc [("status", `String "ok"); ("request_id", `String req_id)] in
               Response.json (Yojson.Safe.to_string result) reqd
@@ -1734,10 +1799,11 @@ let agent_abandon_handler _request reqd =
         let worker_id = member "worker_id" json |> to_string_option |> Option.value ~default:"" in
         let req_id = member "request_id" json |> to_string_option |> Option.value ~default:"" in
         let reason = member "reason" json |> to_string_option |> Option.value ~default:"abandoned" in
-        if worker_id = "" || req_id = "" then
-          json_error "worker_id and request_id required" reqd
+        let claim_token = member "claim_token" json |> to_string_option |> Option.value ~default:"" in
+        if worker_id = "" || req_id = "" || claim_token = "" then
+          json_error "worker_id, request_id and claim_token required" reqd
         else
-          match agent_abandon ~worker_id ~reason req_id with
+          match agent_abandon ~worker_id ~claim_token ~reason req_id with
           | Ok () ->
               let result = `Assoc [("status", `String "ok"); ("request_id", `String req_id)] in
               Response.json (Yojson.Safe.to_string result) reqd
@@ -1753,11 +1819,13 @@ let agent_result_handler _request reqd =
         let open Yojson.Safe.Util in
         let req_id = member "request_id" json |> to_string_option |> Option.value ~default:"" in
         let code = member "code" json |> to_string_option |> Option.value ~default:"" in
+        let claim_token = member "claim_token" json |> to_string_option |> Option.value ~default:"" in
         let worker_id = member "worker_id" json |> to_string_option in
         let context_digest = member "context_digest" json |> to_string_option in
-        if req_id = "" || code = "" then json_error "request_id and code required" reqd
+        if req_id = "" || code = "" || claim_token = "" then
+          json_error "request_id, code and claim_token required" reqd
         else
-          match agent_submit_result ?worker_id ?context_digest req_id code with
+          match agent_submit_result ?worker_id ?context_digest ~claim_token req_id code with
           | Ok () ->
               let result = `Assoc [("status", `String "submitted"); ("request_id", `String req_id)] in
               Response.json (Yojson.Safe.to_string result) reqd
@@ -1768,8 +1836,20 @@ let agent_result_handler _request reqd =
 let agent_status_handler request reqd =
   let path = Request.path request in
   let req_id = String.sub path 14 (String.length path - 14) in (* /agent/status/ = 14 chars *)
+  let request_secret =
+    match Httpun.Headers.get request.Httpun.Request.headers "x-mcp-request-secret" with
+    | Some v ->
+        let v = String.trim v in
+        if v = "" then None else Some v
+    | None -> None
+  in
   match agent_get_result req_id with
   | Some req ->
+      let authorized =
+        match request_secret with
+        | Some s -> s = req.request_secret
+        | None -> false
+      in
       let base = [
         ("status", `String (agent_status_to_string req.status));
         ("request_id", `String req.id);
@@ -1782,10 +1862,12 @@ let agent_status_handler request reqd =
         ("drifted", `Bool req.drifted);
         ("error", (match req.error with Some v -> `String v | None -> `Null));
         ("age_sec", `Float (Unix.gettimeofday () -. req.created_at));
+        ("code_available", `Bool (req.status = Completed && req.result <> None));
+        ("authorized", `Bool authorized);
       ] in
       let result =
         match req.status, req.result with
-        | Completed, Some code -> `Assoc (("code", `String code) :: base)
+        | Completed, Some code when authorized -> `Assoc (("code", `String code) :: base)
         | _ -> `Assoc base
       in
       Response.json (Yojson.Safe.to_string result) reqd
