@@ -636,6 +636,17 @@ module Eio_tests = struct
     check string "default host" "localhost" config.host;
     check int "default max_connections" 64 config.max_connections
 
+  let test_clamp_max_commands_min () =
+    check int "clamp_max_commands(0)=1" 1 (Mcp_protocol_eio.clamp_max_commands 0)
+
+  let test_clamp_max_commands_passthrough () =
+    check int "clamp_max_commands(10)=10" 10 (Mcp_protocol_eio.clamp_max_commands 10)
+
+  let test_clamp_max_commands_max () =
+    let maxc = Figma_config.Plugin.max_commands in
+    check int "clamp_max_commands(max+1)=max"
+      maxc (Mcp_protocol_eio.clamp_max_commands (maxc + 1))
+
   (** --- MCP Request Processing --- *)
 
   let make_test_server () =
@@ -850,6 +861,9 @@ let eio_tests = [
 
   (* Config *)
   "default_config", `Quick, Eio_tests.test_default_config;
+  "clamp_max_commands min", `Quick, Eio_tests.test_clamp_max_commands_min;
+  "clamp_max_commands passthrough", `Quick, Eio_tests.test_clamp_max_commands_passthrough;
+  "clamp_max_commands max", `Quick, Eio_tests.test_clamp_max_commands_max;
 
   (* MCP Request Processing *)
   "process_mcp_request valid", `Quick, Eio_tests.test_process_mcp_request_valid;
