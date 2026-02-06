@@ -30,5 +30,6 @@ jobs:
       - name: OCaml tests
         run: opam exec -- dune test
 
-      - name: Python tests
-        run: python3 -m unittest scripts/test_figma_ssim_heartbeat.py scripts/test_plugin_security.py
+      - name: Python tests (optional)
+        if: ${{ hashFiles('scripts/test_*.py') != '' }}
+        run: python3 -m unittest discover -s scripts -p 'test_*.py'
