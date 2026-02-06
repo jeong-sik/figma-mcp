@@ -473,6 +473,11 @@
         </div>
       </div>
 
+      <div class="toggle-row">
+        <span>Remember API key</span>
+        <div class="toggle" id="rememberApiKey"></div>
+      </div>
+
       <div>
         <label>Channel ID</label>
         <div class="input-row">
@@ -746,10 +751,10 @@
       </div>
     </div>
 
-    <script>
+      <script>
       // DOM refs
       var $ = function(id) { return document.getElementById(id); };
-      var serverInput = $("server"), channelInput = $("channel"), apiKeyInput = $("apiKey"), copyChannelBtn = $("copyChannel");
+      var serverInput = $("server"), channelInput = $("channel"), apiKeyInput = $("apiKey"), rememberApiKeyToggle = $("rememberApiKey"), copyChannelBtn = $("copyChannel");
       var connectBtn = $("connect"), connectText = $("connectText"), connectSpinner = $("connectSpinner");
       var disconnectBtn = $("disconnect"), selfTestBtn = $("selfTest");
       var statusDot = $("statusDot"), statusText = $("statusText"), pingDisplay = $("pingDisplay");
@@ -770,7 +775,8 @@
 
       // State
       var STORAGE_KEY = "figmaMcpBridgeState";
-      var serverUrl = "", channelId = "", apiKey = "", polling = false;
+      var SESSION_API_KEY_KEY = "figmaMcpBridgeApiKey";
+      var serverUrl = "", channelId = "", apiKey = "", rememberApiKey = false, polling = false;
       var stats = { cmd: 0, ok: 0, err: 0 };
       var logs = [], cmdHistory = [], tokens = [];
       var MAX_LOGS = 100, MAX_HISTORY = 20;
@@ -783,18 +789,65 @@
       var isGenerating = false;
       var currentEventSource = null;  // For SSE streaming
       var generatedCode = "";
+      var sessionNonce = "";
+
+      // Messaging hardening: restrict origin + nonce handshake with plugin.
+      var PARENT_ORIGIN = (function() {
+        try {
+          if (document.referrer) return new URL(document.referrer).origin;
+        } catch(e) {}
+        try {
+          var o = window.location.origin;
+          if (o && o !== "null") return o;
+        } catch(e) {}
+        return "*";
+      })();
+
+      function postToPlugin(pluginMessage) {
+        if (sessionNonce) pluginMessage.nonce = sessionNonce;
+        parent.postMessage({ pluginMessage: pluginMessage }, PARENT_ORIGIN);
+      }
+
+      // Request a nonce in case the plugin's initial init message was missed.
+      postToPlugin({ type: "hello" });
 
       // Utility
+      function isLocalHost(host) {
+        var h = String(host || "").toLowerCase();
+        return h === "localhost" || h === "127.0.0.1" || h === "::1";
+      }
       function normalizeUrl(raw) {
         if (!raw) return "";
         var v = raw.trim();
         if (!v) return "";
-        if (!/^https?:\/\//i.test(v)) v = "http://" + v;
+        if (!/^https?:\/\//i.test(v)) {
+          // Default to HTTPS for non-local hosts to avoid leaking API keys over cleartext.
+          var lower = v.toLowerCase();
+          var scheme =
+            (lower.startsWith("localhost") || lower.startsWith("127.0.0.1") || lower.startsWith("[::1]") || lower.startsWith("::1"))
+              ? "http://"
+              : "https://";
+          v = scheme + v;
+        }
         if (v.charAt(v.length - 1) === "/") v = v.slice(0, -1);
         return v;
       }
+      function validateServerUrlSecurity(urlStr, apiKeyValue) {
+        try {
+          var u = new URL(urlStr);
+          var hasKey = (apiKeyValue || "").trim() !== "";
+          if (hasKey && u.protocol === "http:" && !isLocalHost(u.hostname)) {
+            return "HTTPS required unless localhost (API key would be sent over HTTP)";
+          }
+        } catch (e) {
+          return "Invalid URL";
+        }
+        return "";
+      }
       function loadState() { try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) || {}; } catch(e) { return {}; } }
       function saveState(s) { try { localStorage.setItem(STORAGE_KEY, JSON.stringify(s)); } catch(e) {} }
+      function loadSessionApiKey() { try { return sessionStorage.getItem(SESSION_API_KEY_KEY) || ""; } catch(e) { return ""; } }
+      function saveSessionApiKey(k) { try { sessionStorage.setItem(SESSION_API_KEY_KEY, k || ""); } catch(e) {} }
       function currentApiKey() {
         if (!apiKeyInput) return "";
         return apiKeyInput.value.trim();
@@ -1300,7 +1353,7 @@
 
       // Request selection update from plugin
       function requestSelectionUpdate() {
-        parent.postMessage({ pluginMessage: { type: "request_selection" } }, "*");
+        postToPlugin({ type: "request_selection" });
       }
 
       // Connect
@@ -1309,6 +1362,12 @@
         channelId = channelInput.value.trim();
         apiKey = currentApiKey();
         if (!serverUrl) { addLog("connect", "URL required", false); setStatus("error", "URL Required"); return Promise.reject(); }
+        var secErr = validateServerUrlSecurity(serverUrl, apiKey);
+        if (secErr) {
+          addLog("connect", secErr, false);
+          setStatus("error", secErr);
+          return Promise.reject(new Error(secErr));
+        }
         serverInput.value = serverUrl;
         setStatus("connecting", "Connecting...");
         setConnecting(true);
@@ -1325,7 +1384,8 @@
         }).then(function(d) {
           channelId = d.channel_id || channelId;
           channelInput.value = channelId;
-          saveState({ serverUrl: serverUrl, channelId: channelId, apiKey: apiKey });
+          saveSessionApiKey(apiKey);
+          saveState({ serverUrl: serverUrl, channelId: channelId, rememberApiKey: rememberApiKey, apiKey: rememberApiKey ? apiKey : undefined });
           setStatus("connected", "Connected");
           setConnected(true);
           setConnecting(false);
@@ -1333,7 +1393,7 @@
           addLog("connect", "Channel: " + channelId.slice(0, 8) + "...", true);
           if (!polling) { polling = true; pollLoop(); }
         }).catch(function(e) {
-          setStatus("error", "Failed");
+          setStatus("error", "Failed: " + (e && e.message ? e.message : String(e)));
           setConnecting(false);
           addLog("connect", String(e), false);
         });
@@ -1365,10 +1425,14 @@
           var cmds = Array.isArray(d.commands) ? d.commands : [];
           for (var i = 0; i < cmds.length; i++) {
             var cmd = cmds[i];
+            if (!cmd || typeof cmd.id !== "string" || typeof cmd.name !== "string") {
+              addLog("poll", "Invalid command shape", false);
+              continue;
+            }
             stats.cmd++; updateStats();
             addLog(cmd.name || "unknown", "executing...", true);
             addHistory(cmd.name, cmd.payload);
-            parent.postMessage({ pluginMessage: { type: "command", command: cmd } }, "*");
+            postToPlugin({ type: "command", command: cmd });
           }
           if (polling) setTimeout(pollLoop, 50);
         }).catch(function(e) {
@@ -1389,8 +1453,17 @@
 
       // Message handler
       window.onmessage = function(ev) {
+        if (ev.source !== parent) return;
+        if (PARENT_ORIGIN !== "*" && ev.origin !== PARENT_ORIGIN) return;
         var msg = ev.data.pluginMessage;
         if (!msg) return;
+
+        if (msg.type === "init") {
+          if (typeof msg.nonce === "string") sessionNonce = msg.nonce;
+          return;
+        }
+
+        if (sessionNonce && msg.nonce !== sessionNonce) return;
 
         if (msg.type === "command_result") {
           if (!channelId) return;
@@ -1424,7 +1497,13 @@
       if (apiKeyInput) {
         apiKeyInput.oninput = function() {
           apiKey = currentApiKey();
-          saveState({ serverUrl: normalizeUrl(serverInput.value), channelId: channelInput.value.trim(), apiKey: apiKey });
+          saveSessionApiKey(apiKey);
+          saveState({
+            serverUrl: normalizeUrl(serverInput.value),
+            channelId: channelInput.value.trim(),
+            rememberApiKey: rememberApiKey,
+            apiKey: rememberApiKey ? apiKey : undefined
+          });
         };
       }
       copyChannelBtn.onclick = function() {
@@ -1435,6 +1514,25 @@
         autoReconnect = !autoReconnect;
         autoReconnectToggle.className = "toggle" + (autoReconnect ? " on" : "");
       };
+
+      function setRememberApiKeyOn(on) {
+        rememberApiKey = !!on;
+        if (rememberApiKeyToggle) rememberApiKeyToggle.className = "toggle" + (rememberApiKey ? " on" : "");
+      }
+
+      if (rememberApiKeyToggle) {
+        rememberApiKeyToggle.onclick = function() {
+          setRememberApiKeyOn(!rememberApiKey);
+          apiKey = currentApiKey();
+          saveSessionApiKey(apiKey);
+          saveState({
+            serverUrl: normalizeUrl(serverInput.value),
+            channelId: channelInput.value.trim(),
+            rememberApiKey: rememberApiKey,
+            apiKey: rememberApiKey ? apiKey : undefined
+          });
+        };
+      }
 
       // Analyze button
       analyzeBtn.onclick = function() { analyzeSelection(); };
@@ -1492,7 +1590,7 @@
             name: "execute_dsl",
             payload: { operations: operations }
           };
-          parent.postMessage({ pluginMessage: { type: "command", command: execCmd } }, "*");
+          postToPlugin({ type: "command", command: execCmd });
           addLog("apply", "Executing DSL in Figma", true);
           stats.cmd++; updateStats();
 
@@ -1524,7 +1622,7 @@
           var action = b.getAttribute("data-action");
           if (!channelId) return;
           var cmd = { id: "quick-" + Date.now(), name: action, payload: {} };
-          parent.postMessage({ pluginMessage: { type: "command", command: cmd } }, "*");
+          postToPlugin({ type: "command", command: cmd });
           addLog(action, "executing...", true);
           addHistory(action, {});
           stats.cmd++; updateStats();
@@ -1539,7 +1637,7 @@
         var h = cmdHistory[idx];
         if (h) {
           var cmd = { id: "replay-" + Date.now(), name: h.action, payload: h.payload };
-          parent.postMessage({ pluginMessage: { type: "command", command: cmd } }, "*");
+          postToPlugin({ type: "command", command: cmd });
           addLog(h.action, "replay...", true);
           stats.cmd++; updateStats();
         }
@@ -1631,7 +1729,7 @@
         testCount.textContent = "(" + (idx + 1) + "/" + SELF_TESTS.length + ")";
         testBar.style.width = ((idx + 1) / SELF_TESTS.length * 100) + "%";
         var cmd = { id: "test-" + Date.now() + "-" + idx, name: test.name, payload: test.payload };
-        parent.postMessage({ pluginMessage: { type: "command", command: cmd } }, "*");
+        postToPlugin({ type: "command", command: cmd });
         setTimeout(function() { runSelfTests(idx + 1); }, 300);
       }
 
@@ -1835,9 +1933,14 @@
       var state = loadState();
       if (state.serverUrl) serverInput.value = state.serverUrl;
       if (state.channelId) channelInput.value = state.channelId;
-      if (state.apiKey && apiKeyInput) {
-        apiKeyInput.value = state.apiKey;
-        apiKey = state.apiKey;
+      setRememberApiKeyOn(!!state.rememberApiKey);
+      var initialApiKey = "";
+      if (rememberApiKey && state.apiKey) initialApiKey = String(state.apiKey);
+      if (!initialApiKey) initialApiKey = loadSessionApiKey();
+      if (initialApiKey && apiKeyInput) {
+        apiKeyInput.value = initialApiKey;
+        apiKey = initialApiKey;
+        saveSessionApiKey(apiKey);
       }
 
       // Auto-connect if we have a saved server URL
