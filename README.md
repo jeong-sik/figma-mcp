@@ -74,6 +74,7 @@ echo '{"jsonrpc":"2.0","id":5,"method":"prompts/get","params":{"name":"figma_fid
 - `docs/SETUP.md` - 설치/실행/연동 요약
 - `docs/MCP-TEMPLATE.md` - ~/.mcp.json 템플릿
 - `docs/INSTALL-CHECKLIST.md` - 설치 후 확인
+- `docs/CODE-CONNECT.md` - Code Connect-style component mapping spec
 
 ## 도구 개요 (2026-01-27 기준)
 

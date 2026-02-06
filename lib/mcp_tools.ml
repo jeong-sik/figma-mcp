@@ -952,6 +952,24 @@ let tool_figma_cache_invalidate : tool_def = {
   ] [];
 }
 
+(** Code Connect-style component mapping (repo-local) *)
+let tool_figma_code_connect : tool_def = {
+  name = "figma_code_connect";
+  description = "🔗 CODE: Code Connect-style component mapping. mode=validate|index|match|list. 로컬 매핑 JSON을 파싱/검증하고, Figma 컴포넌트/노드를 코드 컴포넌트로 결정론적으로 매칭합니다.";
+  input_schema = object_schema [
+    ("mode", enum_prop ["validate"; "index"; "match"; "list"] "동작 모드");
+    ("path", string_prop "매핑 파일 경로 (옵션, 기본: ./figma-code-connect.json → ./.figma/code-connect.json 검색)");
+    ("json", string_prop "인라인 JSON (옵션, path보다 우선)");
+    ("index_id", string_prop "index 모드 결과 재사용 (옵션)");
+    ("cache_key", string_prop "index 캐시 키 (옵션, 기본: content hash)");
+    ("node_id", string_prop "Figma node id (match 모드)");
+    ("component_key", string_prop "Figma component key (match 모드)");
+    ("name", string_prop "Figma component name (match 모드)");
+    ("variant", object_prop "variant properties (match 모드, object: {key: value})");
+    ("limit", number_prop "match 결과 개수 (기본: 3)");
+  ] ["mode"];
+}
+
 (** ============== 카테고리 시스템 (Tool Dive) ============== *)
 
 (** 카테고리별 도구 그룹 *)
@@ -986,7 +1004,7 @@ let tool_categories = [
   { name = "components";
     description = "컴포넌트/스타일/변수";
     tools = ["get_file_components"; "get_file_component_sets"; "get_file_styles";
-             "get_component"; "get_component_set"; "get_style"; "get_variables"] };
+             "get_component"; "get_component_set"; "get_style"; "get_variables"; "code_connect"] };
 ]
 
 (** 카테고리에서 도구 찾기 *)
@@ -996,7 +1014,7 @@ let find_tool_in_category category_name tool_name =
   |> Option.value ~default:false
 
 (** 최상위 유지 도구 (자주 사용) *)
-let featured_tool_names = ["codegen"; "doctor"; "stats"; "cache_stats"; "cache_invalidate"; "read_large_result"; "error_troubleshoot"; "post_comment"; "get_file_comments"]
+let featured_tool_names = ["codegen"; "doctor"; "stats"; "cache_stats"; "cache_invalidate"; "read_large_result"; "code_connect"; "error_troubleshoot"; "post_comment"; "get_file_comments"]
 
 (** ============== 모든 도구 목록 (내부용) ============== *)
 
@@ -1051,6 +1069,8 @@ let all_detailed_tools = [
   tool_figma_export_tokens;
   tool_figma_doctor;
   tool_figma_read_large_result;
+  (* Code Connect-style component mapping *)
+  tool_figma_code_connect;
   (* 캐시 관리 *)
   tool_figma_cache_stats;
   tool_figma_cache_invalidate;
@@ -7272,6 +7292,251 @@ let handle_cache_invalidate args : (Yojson.Safe.t, string) result =
   in
   Ok (`Assoc [("status", `String "ok"); ("message", `String message)])
 
+(** Code Connect index cache (in-memory).
+    This is intentionally small and bounded to avoid unbounded memory growth. *)
+let code_connect_index_cache : (string, Figma_code_connect.mapping) Hashtbl.t =
+  Hashtbl.create 32
+
+let code_connect_cache_put key mapping =
+  if Hashtbl.length code_connect_index_cache > 64 then Hashtbl.reset code_connect_index_cache;
+  Hashtbl.replace code_connect_index_cache key mapping
+
+let handle_code_connect args : (Yojson.Safe.t, string) result =
+  let mode = get_string_or "mode" "" args |> String.lowercase_ascii |> String.trim in
+  if mode = "" then Error "Missing required parameter: mode"
+  else
+    let is_safe_relative_path path =
+      let path = String.trim path in
+      if path = "" then false
+      else if path.[0] = '/' || path.[0] = '~' then false
+      else
+        let segs = String.split_on_char '/' path in
+        not (List.exists (fun seg -> seg = "..") segs)
+    in
+    let read_file path =
+      try
+        In_channel.with_open_bin path (fun ic ->
+          let len = in_channel_length ic in
+          Ok (really_input_string ic len))
+      with Sys_error msg -> Error msg
+    in
+    let default_paths = [ "figma-code-connect.json"; ".figma/code-connect.json" ] in
+    let resolve_source () =
+      match get_string "json" args with
+      | Some s when String.trim s <> "" -> Ok (s, None)
+      | _ ->
+          let path_opt =
+            match get_string "path" args with
+            | Some p when String.trim p <> "" -> Some p
+            | _ -> List.find_opt Sys.file_exists default_paths
+          in
+          (match path_opt with
+           | None ->
+               Error
+                 "Mapping not found. Provide 'json' or 'path' (default search: ./figma-code-connect.json, ./.figma/code-connect.json)."
+           | Some path ->
+               if not (is_safe_relative_path path) then
+                 Error "Unsafe mapping path (must be relative, no '..', no '~', no absolute path)."
+               else if not (Sys.file_exists path) then
+                 Error (Printf.sprintf "Mapping file not found: %s" path)
+               else
+                 (match read_file path with
+                  | Ok content -> Ok (content, Some path)
+                  | Error msg -> Error (Printf.sprintf "Failed to read mapping file: %s" msg)))
+    in
+    let diag_to_json (d : Figma_code_connect.diagnostic) =
+      `Assoc [ ("message", `String d.message); ("path", `String d.path) ]
+    in
+    let json_of_kv kv =
+      `Assoc (List.map (fun (k, v) -> (k, `String v)) kv)
+    in
+    let json_of_figma (f : Figma_code_connect.figma) =
+      `Assoc
+        (List.filter_map
+           (fun (k, v) -> v |> Option.map (fun v -> (k, `String v)))
+           [ ("node_id", f.node_id); ("component_key", f.component_key) ]
+         @ [
+           ("name", `String f.name);
+           ("variant", json_of_kv f.variant);
+         ])
+    in
+    let json_of_code (c : Figma_code_connect.code) =
+      `Assoc
+        (List.filter_map
+           (fun (k, v) -> v |> Option.map (fun v -> (k, `String v)))
+           [ ("package", c.package); ("file", c.file) ]
+         @ [
+           ("export", `String c.export);
+           ("props", json_of_kv c.props);
+         ])
+    in
+    let json_of_component (c : Figma_code_connect.component) =
+      `Assoc
+        [
+          ("id", `String c.id);
+          ("figma", json_of_figma c.figma);
+          ("code", json_of_code c.code);
+          ("aliases", `List (List.map (fun s -> `String s) c.aliases));
+          ("tags", `List (List.map (fun s -> `String s) c.tags));
+        ]
+    in
+    let parse_mapping_content content =
+      try
+        let json = Yojson.Safe.from_string content in
+        let mapping, parse_errors = Figma_code_connect.parse_json json in
+        Ok (mapping, parse_errors)
+      with Yojson.Json_error msg ->
+        Error (Printf.sprintf "Failed to parse JSON: %s" msg)
+    in
+
+    let find_mapping_for_match () =
+      match get_string "index_id" args with
+      | Some index_id when String.trim index_id <> "" -> (
+          match Hashtbl.find_opt code_connect_index_cache index_id with
+          | Some mapping -> Ok (mapping, Some index_id, None)
+          | None -> Error (Printf.sprintf "Unknown index_id: %s (run mode=index first)" index_id))
+      | _ ->
+          (match resolve_source () with
+           | Ok (content, src_path) ->
+               (match parse_mapping_content content with
+                | Ok (mapping, parse_errors) ->
+                    let semantic_errors = Figma_code_connect.validate mapping in
+                    let errors = parse_errors @ semantic_errors in
+                    if errors <> [] then
+                      let result =
+                        `Assoc
+                          [
+                            ("ok", `Bool false);
+                            ("errors", `List (List.map diag_to_json errors));
+                            ("warnings", `List []);
+                          ]
+                      in
+                      Error (Yojson.Safe.pretty_to_string result)
+                    else Ok (mapping, None, src_path)
+                | Error msg -> Error msg)
+           | Error msg -> Error msg)
+    in
+
+    match mode with
+    | "validate" -> (
+        match resolve_source () with
+        | Ok (content, src_path) -> (
+            match parse_mapping_content content with
+            | Ok (mapping, parse_errors) ->
+                let errors = parse_errors @ Figma_code_connect.validate mapping in
+                let result =
+                  `Assoc
+                    [
+                      ("ok", `Bool (errors = []));
+                      ("errors", `List (List.map diag_to_json errors));
+                      ("warnings", `List []);
+                      ("source", (match src_path with Some p -> `String p | None -> `String "inline"));
+                    ]
+                in
+                Ok (make_text_content (Yojson.Safe.pretty_to_string result))
+            | Error msg -> Error msg)
+        | Error msg -> Error msg)
+    | "index" -> (
+        match resolve_source () with
+        | Ok (content, src_path) -> (
+            match parse_mapping_content content with
+            | Ok (mapping, parse_errors) ->
+                let errors = parse_errors @ Figma_code_connect.validate mapping in
+                if errors <> [] then
+                  let result =
+                    `Assoc
+                      [
+                        ("ok", `Bool false);
+                        ("errors", `List (List.map diag_to_json errors));
+                        ("warnings", `List []);
+                      ]
+                  in
+                  Ok (make_text_content (Yojson.Safe.pretty_to_string result))
+                else
+                  let index_id =
+                    match get_string "cache_key" args with
+                    | Some k when String.trim k <> "" -> k
+                    | _ -> Digest.(to_hex (string content))
+                  in
+                  code_connect_cache_put index_id mapping;
+                  let result =
+                    `Assoc
+                      [
+                        ("ok", `Bool true);
+                        ("index_id", `String index_id);
+                        ("component_count", `Int (List.length mapping.components));
+                        ("warnings", `List []);
+                        ("source", (match src_path with Some p -> `String p | None -> `String "inline"));
+                      ]
+                  in
+                  Ok (make_text_content (Yojson.Safe.pretty_to_string result))
+            | Error msg -> Error msg)
+        | Error msg -> Error msg)
+    | "list" -> (
+        match find_mapping_for_match () with
+        | Ok (mapping, index_id_opt, src_path) ->
+            let result =
+              `Assoc
+                [
+                  ("ok", `Bool true);
+                  ("index_id", (match index_id_opt with Some id -> `String id | None -> `Null));
+                  ("source", (match src_path with Some p -> `String p | None -> `Null));
+                  ("component_count", `Int (List.length mapping.components));
+                  ("components", `List (List.map json_of_component mapping.components));
+                ]
+            in
+            Ok (make_text_content (Yojson.Safe.pretty_to_string result))
+        | Error msg -> Error msg)
+    | "match" -> (
+        match find_mapping_for_match () with
+        | Ok (mapping, index_id_opt, src_path) ->
+            let query_node_id = get_string "node_id" args in
+            let query_component_key = get_string "component_key" args in
+            let query_name = get_string_or "name" "" args in
+            let query_variant =
+              match get_json "variant" args with
+              | Some (`Assoc kv) ->
+                  List.filter_map
+                    (fun (k, v) ->
+                      match v with
+                      | `String s -> Some (k, s)
+                      | `Int i -> Some (k, string_of_int i)
+                      | `Float f -> Some (k, string_of_float f)
+                      | _ -> None)
+                    kv
+              | _ -> []
+            in
+            let limit = get_int_positive ~min:0 "limit" 3 args in
+            let matches =
+              Figma_code_connect.choose ~limit ~query_name ~query_variant ~query_node_id
+                ~query_component_key mapping.components
+            in
+            let matches_json =
+              `List
+                (List.map
+                   (fun (score, reason, (c : Figma_code_connect.component)) ->
+                     `Assoc
+                       [
+                         ("mapping_id", `String c.id);
+                         ("score", `Float score);
+                         ("reason", `String reason);
+                         ("code", json_of_code c.code);
+                       ])
+                   matches)
+            in
+            let result =
+              `Assoc
+                [
+                  ("ok", `Bool true);
+                  ("index_id", (match index_id_opt with Some id -> `String id | None -> `Null));
+                  ("source", (match src_path with Some p -> `String p | None -> `Null));
+                  ("matches", matches_json);
+                ]
+            in
+            Ok (make_text_content (Yojson.Safe.pretty_to_string result))
+        | Error msg -> Error msg)
+    | _ -> Error (Printf.sprintf "Unknown mode: %s (use validate|index|match|list)" mode)
+
 (** ============== 핸들러 맵 (Pure Eio) ============== *)
 
 (** 동기 래퍼 - Pure Eio Effect 핸들러로 감싸서 실행 *)
@@ -7402,6 +7667,7 @@ let all_handlers_sync : (string * tool_handler_sync) list = [
   ("figma_export_tokens", wrap_sync_pure handle_export_tokens);
   ("figma_doctor", wrap_sync_pure handle_doctor);
   ("figma_read_large_result", wrap_sync_pure handle_read_large_result);
+  ("figma_code_connect", wrap_sync_pure handle_code_connect);
   (* 캐시 관리 *)
   ("figma_cache_stats", wrap_sync_pure handle_cache_stats);
   ("figma_cache_invalidate", wrap_sync_pure handle_cache_invalidate);

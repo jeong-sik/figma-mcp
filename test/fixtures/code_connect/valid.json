@@ -1,0 +1,49 @@
+{
+  "version": "1.0",
+  "project": {
+    "name": "demo",
+    "repo": "local",
+    "design_system": "demo-ui"
+  },
+  "components": [
+    {
+      "id": "button.primary",
+      "figma": {
+        "node_id": "123:456",
+        "component_key": "ck_123",
+        "name": "Button / Primary",
+        "variant": {"size": "md", "state": "default"}
+      },
+      "code": {
+        "package": "@demo/ui",
+        "file": "src/components/button.tsx",
+        "export": "Button",
+        "props": {"variant": "primary", "size": "md"}
+      },
+      "aliases": ["PrimaryButton"],
+      "tags": ["core"]
+    },
+    {
+      "id": "button.secondary",
+      "figma": {
+        "component_key": "ck_456",
+        "name": "Button / Secondary",
+        "variant": {"size": "md", "state": "default"}
+      },
+      "code": {
+        "file": "src/components/button.tsx",
+        "export": "Button",
+        "props": {"variant": "secondary", "size": "md"}
+      }
+    },
+    {
+      "id": "card.basic",
+      "figma": {
+        "name": "Card / Basic"
+      },
+      "code": {
+        "export": "Card"
+      }
+    }
+  ]
+}

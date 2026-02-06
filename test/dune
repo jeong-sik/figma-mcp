@@ -142,3 +142,10 @@
 (test
  (name test_utils_coverage)
  (libraries figma_mcp alcotest yojson str unix))
+
+; Code Connect spec tests (mapping + matching)
+(test
+ (name test_code_connect)
+ (libraries figma_mcp alcotest yojson)
+ (deps
+  (glob_files fixtures/code_connect/*.json)))
