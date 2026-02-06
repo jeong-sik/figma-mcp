@@ -587,6 +587,7 @@ type verification_result = {
   final_html: string option;
   evolution_history: evolution_step list;  (* 진화 과정 기록 *)
   evolution_dir: string;                    (* 진화 저장 디렉토리 *)
+  errors: string list;                      (* 실패/부분 실패 원인 (진단용) *)
 }
 
 (** evolution_step을 JSON으로 변환 *)
@@ -615,6 +616,7 @@ let result_to_json result =
     ("final_html", match result.final_html with Some h -> `String h | None -> `Null);
     ("evolution_history", `List (List.map step_to_json result.evolution_history));
     ("evolution_dir", `String result.evolution_dir);
+    ("errors", `List (List.map (fun e -> `String e) result.errors));
   ]
 
 (** 진화 디렉토리 생성 *)
@@ -687,19 +689,22 @@ let verify_visual
          figma_png; html_png = saved_png; corrections_applied = [];
          final_html = Some html;
          evolution_history = [step];
-         evolution_dir = evo_dir }
-     | Error _e ->
+         evolution_dir = evo_dir;
+         errors = [] }
+     | Error e ->
        { ssim = 0.0; delta_e = 0.0; human_ssim = 0.0; passed = false; iterations = 0;
          figma_png; html_png = external_png; corrections_applied = [];
          final_html = Some html;
          evolution_history = [];
-         evolution_dir = evo_dir })
+         evolution_dir = evo_dir;
+         errors = [sprintf "compare failed: %s" e] })
   | Some _missing_png ->
     { ssim = 0.0; delta_e = 0.0; human_ssim = 0.0; passed = false; iterations = 0;
       figma_png; html_png = ""; corrections_applied = [];
       final_html = Some html;
       evolution_history = [];
-      evolution_dir = evo_dir }
+      evolution_dir = evo_dir;
+      errors = ["html_png_provided path does not exist"] }
   | None ->
     (* 기본 모드: Playwright 렌더링 + 반복 개선 *)
     let rec loop iteration current_html corrections history =
@@ -721,37 +726,42 @@ let verify_visual
             figma_png; html_png = saved_png; corrections_applied = corrections;
             final_html = Some current_html;
             evolution_history = List.rev (step :: history);
-            evolution_dir = evo_dir }
-        | Error _ ->
+            evolution_dir = evo_dir;
+            errors = [] }
+        | Error e ->
           { ssim = 0.0; delta_e = 0.0; human_ssim = 0.0; passed = false; iterations = iteration - 1;
             figma_png; html_png = ""; corrections_applied = corrections;
             final_html = Some current_html;
             evolution_history = List.rev history;
-            evolution_dir = evo_dir })
-      | Error _ ->
+            evolution_dir = evo_dir;
+            errors = [sprintf "compare failed: %s" e] })
+      | Error e ->
         { ssim = 0.0; delta_e = 0.0; human_ssim = 0.0; passed = false; iterations = iteration - 1;
           figma_png; html_png = ""; corrections_applied = corrections;
           final_html = Some current_html;
           evolution_history = List.rev history;
-          evolution_dir = evo_dir }
+          evolution_dir = evo_dir;
+          errors = [sprintf "render failed: %s" e] }
     else
       match render_html_to_png ~width ~height current_html with
-      | Error _e ->
+      | Error e ->
         { ssim = 0.0; delta_e = 0.0; human_ssim = 0.0; passed = false; iterations = iteration;
           figma_png; html_png = ""; corrections_applied = corrections;
           final_html = None;
           evolution_history = List.rev history;
-          evolution_dir = evo_dir }
+          evolution_dir = evo_dir;
+          errors = [sprintf "render failed: %s" e] }
       | Ok html_png ->
         let saved_png = if save_evolution then save_png ~dir:evo_dir ~step:iteration ~src_png:html_png else html_png in
         let saved_html = if save_evolution then save_html ~dir:evo_dir ~step:iteration current_html else "" in
         match compare_renders_with_regions ~figma_png ~html_png with
-        | Error _ ->
+        | Error e ->
           { ssim = 0.0; delta_e = 0.0; human_ssim = 0.0; passed = false; iterations = iteration;
             figma_png; html_png = saved_png; corrections_applied = corrections;
             final_html = Some current_html;
             evolution_history = List.rev history;
-            evolution_dir = evo_dir }
+            evolution_dir = evo_dir;
+            errors = [sprintf "compare failed: %s" e] }
         | Ok result ->
           let hssim = calculate_human_ssim result.ssim result.delta_e in
           let step = { step_num = iteration; step_ssim = result.ssim;
@@ -765,7 +775,8 @@ let verify_visual
               figma_png; html_png = saved_png; corrections_applied = corrections;
               final_html = Some current_html;
               evolution_history = List.rev (step :: history);
-              evolution_dir = evo_dir }
+              evolution_dir = evo_dir;
+              errors = [] }
           else
             (* 조정 힌트 생성 및 적용 - 영역별 diff 분석 활용 *)
             let hints = suggest_corrections ~ssim:result.ssim ~diff_regions:result.regions in

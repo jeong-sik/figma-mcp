@@ -3112,11 +3112,12 @@ let vision_compare_handler ~sw:_ ~eio_ctx:_ _request reqd =
           json_error "reference path required" reqd
         end else if code = "" then begin
           json_error "code required" reqd
+        end else if not (Sys.file_exists reference_path) then begin
+          let result = `Assoc [
+            ("error", `String ("Reference image not found: " ^ reference_path));
+          ] in
+          Response.json ~status:`Bad_request (Yojson.Safe.to_string result) reqd
         end else begin
-          (* Generate temp HTML file from code *)
-          let html_path = sprintf "/tmp/figma-vision-%d.html" (int_of_float (Unix.gettimeofday () *. 1000.0)) in
-          let rendered_path = sprintf "/tmp/figma-vision-%d-rendered.png" (int_of_float (Unix.gettimeofday () *. 1000.0)) in
-
           (* Wrap code in HTML boilerplate *)
           let html_content = sprintf {|<!DOCTYPE html>
 <html><head>
@@ -3129,46 +3130,72 @@ body { font-family: 'Inter', -apple-system, sans-serif; }
 <div id="root">%s</div>
 </body></html>|} code
           in
-
-          (* Write HTML file *)
-          Out_channel.with_open_bin html_path (fun oc ->
-            output_string oc html_content
-          );
-
-          (* Run render script *)
-          let scripts_dir = Sys.getcwd () ^ "/scripts" in
-          let render_cmd = sprintf "cd %s && node render-html.js %s %s %d %d 2>&1" scripts_dir html_path rendered_path width height in
-          let render_result = Unix.open_process_in render_cmd in
-          let _ = try input_line render_result with End_of_file -> "" in
-          let _ = Unix.close_process_in render_result in
-
-          (* Run SSIM comparison - using shell script (no Python deps) *)
-          let ssim_cmd = sprintf "%s/ssim_compare.sh %s %s 2>&1" scripts_dir reference_path rendered_path in
-          let ssim_result = Unix.open_process_in ssim_cmd in
-          let ssim_output = try input_line ssim_result with End_of_file -> "{}" in
-          let _ = Unix.close_process_in ssim_result in
-
-          (* Parse SSIM result *)
-          (try
-            let ssim_json = Yojson.Safe.from_string ssim_output in
-            let ssim_score = member "ssim" ssim_json |> to_float_option |> Option.value ~default:0.0 in
-            let passed = ssim_score >= threshold in
-
-            (* Cleanup temp files *)
-            (try Sys.remove html_path with _ -> ());
-            if passed then (try Sys.remove rendered_path with _ -> ());
-
-            let result = `Assoc [
-              ("ssim", `Float ssim_score);
-              ("threshold", `Float threshold);
-              ("pass", `Bool passed);
-              ("reference", `String reference_path);
-              ("rendered", `String (if passed then "(cleaned up)" else rendered_path));
-            ] in
-            Response.json (Yojson.Safe.to_string result) reqd
-          with _ ->
-            let result = `Assoc [("error", `String "SSIM comparison failed"); ("raw", `String ssim_output)] in
-            Response.json (Yojson.Safe.to_string result) reqd)
+          (* Render HTML -> PNG (Playwright) *)
+          match Visual_verifier.render_html_to_png ~width ~height html_content with
+          | Error err ->
+              let result = `Assoc [
+                ("error", `String ("Render failed: " ^ err));
+                ("reference", `String reference_path);
+                ("hint", `String "Ensure Node + Playwright deps are installed under ./scripts (npm ci) and try again.");
+              ] in
+              Response.json ~status:`Internal_server_error (Yojson.Safe.to_string result) reqd
+          | Ok rendered_path ->
+              (* Compare with SSIM + region analysis (Node script fallback if needed) *)
+              (match Visual_verifier.compare_renders_with_regions ~figma_png:reference_path ~html_png:rendered_path with
+               | Error err ->
+                   let result = `Assoc [
+                     ("error", `String ("SSIM comparison failed: " ^ err));
+                     ("reference", `String reference_path);
+                     ("rendered", `String rendered_path);
+                   ] in
+                   Response.json ~status:`Internal_server_error (Yojson.Safe.to_string result) reqd
+               | Ok metrics ->
+                   let ssim_score = metrics.ssim in
+                   let delta_e = metrics.delta_e in
+                   let human_ssim = Visual_verifier.calculate_human_ssim ssim_score delta_e in
+                   let passed = ssim_score >= threshold in
+                   if passed then (try Sys.remove rendered_path with _ -> ());
+                   let advanced_json =
+                     match metrics.advanced with
+                     | None -> `Null
+                     | Some adv ->
+                         `Assoc [
+                           ("true_ssim", `Float adv.true_ssim);
+                           ("ms_ssim", `Float adv.ms_ssim);
+                           ("pixel_match", `Float adv.pixel_match);
+                           ("lpips", (match adv.lpips with Some v -> `Float v | None -> `Null));
+                         ]
+                   in
+                   let result = `Assoc [
+                     ("ssim", `Float ssim_score);
+                     ("delta_e", `Float delta_e);
+                     ("human_ssim", `Float human_ssim);
+                     ("threshold", `Float threshold);
+                     ("pass", `Bool passed);
+                     ("reference", `String reference_path);
+                     ("rendered", `String (if passed then "(cleaned up)" else rendered_path));
+                     ("regions", `Assoc [
+                       ("quadrants", `Assoc [
+                         ("top_left", `Float metrics.regions.quadrants.top_left);
+                         ("top_right", `Float metrics.regions.quadrants.top_right);
+                         ("bottom_left", `Float metrics.regions.quadrants.bottom_left);
+                         ("bottom_right", `Float metrics.regions.quadrants.bottom_right);
+                       ]);
+                       ("strips", `Assoc [
+                         ("top", `Float metrics.regions.strips.strip_top);
+                         ("middle", `Float metrics.regions.strips.strip_middle);
+                         ("bottom", `Float metrics.regions.strips.strip_bottom);
+                       ]);
+                       ("edges", `Assoc [
+                         ("top", `Float metrics.regions.edges.edge_top);
+                         ("bottom", `Float metrics.regions.edges.edge_bottom);
+                         ("left", `Float metrics.regions.edges.edge_left);
+                         ("right", `Float metrics.regions.edges.edge_right);
+                       ]);
+                     ]);
+                     ("advanced", advanced_json);
+                   ] in
+                   Response.json (Yojson.Safe.to_string result) reqd)
         end
   )
 
