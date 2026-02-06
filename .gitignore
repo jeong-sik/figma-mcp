@@ -8,6 +8,10 @@ _opam/
 # Node.js
 node_modules/
 
+# Python
+__pycache__/
+*.pyc
+
 # Editor
 .vscode/
 *.swp
