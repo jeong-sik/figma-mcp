@@ -836,6 +836,56 @@ let resource_tests = [
   "read nonexistent resource", `Quick, test_read_resource_not_found;
 ]
 
+(** ============== Security / Token Resolution ============== *)
+
+let with_env name value f =
+  let prev = Sys.getenv_opt name in
+  let restore () =
+    match prev with
+    | None -> Unix.putenv name ""
+    | Some v -> Unix.putenv name v
+  in
+  (match value with
+  | None -> Unix.putenv name ""
+  | Some v -> Unix.putenv name v);
+  match f () with
+  | result ->
+      restore ();
+      result
+  | exception exn ->
+      restore ();
+      raise exn
+
+let test_resolve_token_env_figma_token () =
+  with_env "FIGMA_TOKEN" (Some "abc") (fun () ->
+      let args = `Assoc [ ("token", `String "env:FIGMA_TOKEN") ] in
+      check (option string) "env:FIGMA_TOKEN resolves" (Some "abc")
+        (Mcp_tools.resolve_token args))
+
+let test_resolve_token_env_other_denied () =
+  with_env "AWS_SECRET_ACCESS_KEY" (Some "shh") (fun () ->
+      let args = `Assoc [ ("token", `String "env:AWS_SECRET_ACCESS_KEY") ] in
+      check (option string) "env:OTHER denied" None
+        (Mcp_tools.resolve_token args))
+
+let test_resolve_token_fallback_figma_token () =
+  with_env "FIGMA_TOKEN" (Some "abc") (fun () ->
+      let args = `Assoc [] in
+      check (option string) "fallback FIGMA_TOKEN env" (Some "abc")
+        (Mcp_tools.resolve_token args))
+
+let test_resolve_token_literal () =
+  let args = `Assoc [ ("token", `String "literal") ] in
+  check (option string) "literal token" (Some "literal")
+    (Mcp_tools.resolve_token args)
+
+let token_resolution_tests = [
+  "resolve env:FIGMA_TOKEN", `Quick, test_resolve_token_env_figma_token;
+  "deny env:OTHER", `Quick, test_resolve_token_env_other_denied;
+  "fallback FIGMA_TOKEN env", `Quick, test_resolve_token_fallback_figma_token;
+  "literal token", `Quick, test_resolve_token_literal;
+]
+
 (** ============== Server Creation ============== *)
 
 let test_create_figma_server () =
@@ -878,5 +928,6 @@ let () =
     "Monadic Operators", monadic_tests;
     "Tool Definitions", tool_definition_tests;
     "Resources", resource_tests;
+    "Token Resolution", token_resolution_tests;
     "Server", server_tests;
   ]

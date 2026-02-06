@@ -961,6 +961,13 @@ let clamp_poll_ms value =
   let value = max 0 value in
   if value > plugin_poll_max_ms then plugin_poll_max_ms else value
 
+let clamp_max_commands value =
+  let value = max 1 value in
+  if value > Figma_config.Plugin.max_commands then
+    Figma_config.Plugin.max_commands
+  else
+    value
+
 let wait_for_commands ~clock ~channel_id ~max ~timeout_ms =
   let commands = Figma_plugin_bridge.poll_commands ~channel_id ~max in
   if commands <> [] || timeout_ms <= 0 then
@@ -1016,7 +1023,11 @@ let plugin_poll_handler ~clock _request reqd =
         (match get_string_field "channel_id" json with
          | None -> json_error "Missing channel_id" reqd
          | Some channel_id ->
-             let max_commands = get_int_field "max_commands" json |> Option.value ~default:1 in
+             let max_commands =
+               get_int_field "max_commands" json
+               |> Option.value ~default:1
+               |> clamp_max_commands
+             in
              let wait_ms =
                match get_int_field "wait_ms" json with
                | Some value -> clamp_poll_ms value

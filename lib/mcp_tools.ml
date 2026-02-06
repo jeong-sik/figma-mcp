@@ -1340,8 +1340,13 @@ let resolve_token args =
   | Some t when String.length t > 0 ->
     (* Handle "env:VAR_NAME" syntax *)
     if String.length t > 4 && String.sub t 0 4 = "env:" then
-      let var_name = String.sub t 4 (String.length t - 4) in
-      Sys.getenv_opt var_name
+      let var_name = String.sub t 4 (String.length t - 4) |> String.trim in
+      (* Do NOT allow arbitrary env var reads from tool args.
+         Only support the documented "env:FIGMA_TOKEN". *)
+      if var_name = "FIGMA_TOKEN" then
+        Sys.getenv_opt "FIGMA_TOKEN"
+      else
+        None
     else
       Some t
   | _ -> Sys.getenv_opt "FIGMA_TOKEN"
