@@ -108,6 +108,11 @@
  (name test_mcp_http_auth)
  (libraries figma_mcp alcotest httpun unix))
 
+; CORS profile defaults (compat vs strict)
+(test
+ (name test_cors_profile)
+ (libraries figma_mcp alcotest))
+
 ; Coverage: figma_compare.ml (227 points, all branches)
 (test
  (name test_figma_compare)
