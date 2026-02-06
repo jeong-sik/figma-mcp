@@ -164,16 +164,17 @@ class TestLock(unittest.TestCase):
             self.assertEqual(int(j.get("pid")), os.getpid())
             M.release_lock(lock)
 
-    def test_recent_lock_blocks(self):
+    def test_recent_dead_pid_lock_replaced(self):
         with tempfile.TemporaryDirectory() as td:
             lock = os.path.join(td, "lock.json")
             with open(lock, "w", encoding="utf-8") as f:
                 json.dump({"pid": 999999, "started_at": time.time()}, f)
-            with self.assertRaises(RuntimeError) as ctx:
-                M.acquire_lock(lock, stale_after_s=60)
-            self.assertIn("locked", str(ctx.exception))
+            M.acquire_lock(lock, stale_after_s=60)
+            with open(lock, "r", encoding="utf-8") as f:
+                j = json.load(f)
+            self.assertEqual(int(j.get("pid")), os.getpid())
+            M.release_lock(lock)
 
 
 if __name__ == "__main__":
     unittest.main()
-

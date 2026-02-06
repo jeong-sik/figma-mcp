@@ -22,6 +22,7 @@ import argparse
 import json
 import os
 import random
+import signal
 import sys
 import time
 import urllib.request
@@ -37,6 +38,15 @@ DEFAULT_LOG = os.getenv(
     "FIGMA_SSIM_HEARTBEAT_LOG",
     os.path.join(os.path.expanduser("~"), "me", "logs", "figma-ssim-heartbeat.jsonl"),
 )
+DEFAULT_MAX_LOG_BYTES = int(os.getenv("FIGMA_SSIM_HEARTBEAT_MAX_LOG_BYTES", str(50 * 1024 * 1024)))
+
+
+_STOP_REQUESTED = False
+
+
+def _request_stop(_signum: int, _frame: Any) -> None:
+    global _STOP_REQUESTED
+    _STOP_REQUESTED = True
 
 
 def now_iso() -> str:
@@ -71,6 +81,25 @@ def _extract_error_message_from_body(body_text: str) -> str | None:
     return msg if isinstance(msg, str) else None
 
 
+class McpError(RuntimeError):
+    pass
+
+
+class McpHttpError(McpError):
+    def __init__(self, code: int, reason: str, message: str):
+        super().__init__(message)
+        self.code = code
+        self.reason = reason
+
+
+class McpNetworkError(McpError):
+    pass
+
+
+class McpNonJsonError(McpError):
+    pass
+
+
 def post_json(url: str, payload: dict, timeout_s: int = 60, headers_extra: dict | None = None) -> dict:
     data = json.dumps(payload).encode("utf-8")
     headers = {"Content-Type": "application/json"}
@@ -92,20 +121,20 @@ def post_json(url: str, payload: dict, timeout_s: int = 60, headers_extra: dict 
             body_text = ""
         msg = _extract_error_message_from_body(body_text)
         if msg:
-            raise RuntimeError(msg)
+            raise McpHttpError(e.code, str(e.reason), msg)
         truncated = body_text[:2000]
-        raise RuntimeError(f"HTTP {e.code} {e.reason}: {truncated}")
+        raise McpHttpError(e.code, str(e.reason), f"HTTP {e.code} {e.reason}: {truncated}")
     except urllib.error.URLError as e:
-        raise RuntimeError(f"failed to reach MCP server: {e.reason}")
+        raise McpNetworkError(f"failed to reach MCP server: {e.reason}")
 
     body_text = body_bytes.decode("utf-8", errors="replace")
     try:
         j = json.loads(body_text)
     except json.JSONDecodeError:
         truncated = body_text[:2000]
-        raise RuntimeError(f"MCP returned non-JSON response: {truncated}")
+        raise McpNonJsonError(f"MCP returned non-JSON response: {truncated}")
     if not isinstance(j, dict):
-        raise RuntimeError("MCP returned unexpected JSON type")
+        raise McpNonJsonError("MCP returned unexpected JSON type")
     return j
 
 
@@ -127,10 +156,48 @@ def mcp_call_tool(
     if isinstance(err, dict):
         msg = err.get("message")
         if isinstance(msg, str):
-            raise RuntimeError(msg)
-        raise RuntimeError("Unknown MCP error")
+            raise McpError(msg)
+        raise McpError("Unknown MCP error")
     result = response.get("result")
     return result if isinstance(result, dict) else {}
+
+
+def _is_transient_http(code: int) -> bool:
+    return code >= 500 or code in (408, 429)
+
+
+def mcp_call_tool_with_retry(
+    mcp_url: str,
+    name: str,
+    args: dict,
+    timeout_s: int,
+    mcp_api_key: str | None,
+    retries: int,
+    base_delay_s: float,
+    max_delay_s: float,
+) -> dict:
+    attempts = 1 + max(0, int(retries))
+    for attempt in range(attempts):
+        try:
+            return mcp_call_tool(mcp_url, name, args, timeout_s=timeout_s, mcp_api_key=mcp_api_key)
+        except McpNetworkError:
+            if attempt >= attempts - 1:
+                raise
+        except McpHttpError as e:
+            if (not _is_transient_http(e.code)) or attempt >= attempts - 1:
+                raise
+        except McpNonJsonError:
+            # Treat as transient once; if persistent, fail.
+            if attempt >= attempts - 1:
+                raise
+
+        # Backoff + jitter
+        delay = min(max_delay_s, base_delay_s * (2**attempt))
+        delay += random.random() * 0.25
+        time.sleep(delay)
+
+    # Should never reach here.
+    raise McpError("retry loop exhausted unexpectedly")
 
 
 def extract_text_content(result_obj: dict) -> str | None:
@@ -220,6 +287,44 @@ def jsonl_append(path: str, record: dict) -> None:
         f.write(line + "\n")
 
 
+def rotate_log(path: str, max_bytes: int, keep: int) -> None:
+    if max_bytes <= 0:
+        return
+    path = expand_path(path)
+    try:
+        if not os.path.exists(path):
+            return
+        if os.path.getsize(path) < max_bytes:
+            return
+    except OSError:
+        return
+
+    keep = max(0, int(keep))
+    if keep == 0:
+        try:
+            os.truncate(path, 0)
+        except OSError:
+            pass
+        return
+
+    # Rotate: file -> .1, .1 -> .2, ...
+    for i in range(keep, 0, -1):
+        src = f"{path}.{i}"
+        dst = f"{path}.{i+1}"
+        if os.path.exists(src):
+            try:
+                if i == keep:
+                    os.unlink(src)
+                else:
+                    os.replace(src, dst)
+            except OSError:
+                pass
+    try:
+        os.replace(path, f"{path}.1")
+    except OSError:
+        pass
+
+
 def is_pid_running(pid: int) -> bool:
     try:
         os.kill(pid, 0)
@@ -257,16 +362,20 @@ def acquire_lock(lock_path: str, stale_after_s: int) -> None:
     if pid > 0 and is_pid_running(pid):
         raise RuntimeError(f"heartbeat already running (pid={pid})")
 
-    if age is None or age > stale_after_s:
-        # Stale lock: best-effort replace.
+    # If the PID is not running, treat the lock as stale regardless of age.
+    # This avoids blocking service restarts after crashes/SIGTERM.
+    if pid <= 0 or not is_pid_running(pid):
         try:
             os.unlink(lock_path)
         except Exception:
-            raise RuntimeError(f"failed to remove stale lock: {lock_path}")
+            # If we can't remove it, fall back to age-based staleness.
+            if age is None or age > stale_after_s:
+                raise RuntimeError(f"failed to remove stale lock: {lock_path}")
+            raise RuntimeError(f"heartbeat locked (age={age:.0f}s) - try again later")
         acquire_lock(lock_path, stale_after_s=stale_after_s)
         return
 
-    raise RuntimeError(f"heartbeat locked (age={age:.0f}s) - try again later")
+    raise RuntimeError("unreachable")
 
 
 def release_lock(lock_path: str) -> None:
@@ -358,7 +467,17 @@ def run_job(mcp_url: str, job: dict, mcp_api_key: str | None) -> dict:
                 args[k] = job[k]
 
     timeout_s = int(job.get("timeout_s", 180))
-    raw_result = mcp_call_tool(mcp_url, tool_name, args, timeout_s=timeout_s, mcp_api_key=mcp_api_key)
+    retries = int(job.get("retries", 2))
+    raw_result = mcp_call_tool_with_retry(
+        mcp_url,
+        tool_name,
+        args,
+        timeout_s=timeout_s,
+        mcp_api_key=mcp_api_key,
+        retries=retries,
+        base_delay_s=0.5,
+        max_delay_s=10.0,
+    )
     text = extract_text_content(raw_result)
     parsed = parse_json_maybe(text)
     args_for_log = sanitize_for_log(args)
@@ -418,9 +537,14 @@ def main() -> int:
     ap.add_argument("--jitter-s", type=int, default=5, help="Random jitter added to each sleep")
     ap.add_argument("--lock", default=DEFAULT_LOCK)
     ap.add_argument("--log", default=DEFAULT_LOG)
+    ap.add_argument("--max-log-bytes", type=int, default=DEFAULT_MAX_LOG_BYTES, help="Rotate JSONL log when exceeding this size (0 disables)")
+    ap.add_argument("--log-rotate-count", type=int, default=3, help="Number of rotated log files to keep")
     ap.add_argument("--once", action="store_true")
     ap.add_argument("--stale-lock-after-s", type=int, default=3600)
     args = ap.parse_args()
+
+    signal.signal(signal.SIGTERM, _request_stop)
+    signal.signal(signal.SIGINT, _request_stop)
 
     cfg = load_config(args.config)
     jobs = validate_jobs(cfg)
@@ -428,9 +552,17 @@ def main() -> int:
     acquire_lock(args.lock, stale_after_s=max(60, args.stale_lock_after_s))
     try:
         while True:
+            if _STOP_REQUESTED:
+                return 0
+
+            rotate_log(args.log, max_bytes=max(0, args.max_log_bytes), keep=max(0, args.log_rotate_count))
+
             cycle_ok = True
             cycle_started = time.time()
             for job in jobs:
+                if _STOP_REQUESTED:
+                    cycle_ok = True
+                    break
                 try:
                     rec = run_job(args.mcp_url, job, mcp_api_key=args.mcp_api_key)
                     jsonl_append(args.log, {**rec, "ok": True})
