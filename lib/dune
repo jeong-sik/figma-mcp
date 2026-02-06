@@ -25,4 +25,5 @@
    ;; Version from dune-project (auto-sync)
    dune-build-info)
  (wrapped false)
- (ocamlopt_flags (:standard -w -50)))
+ (ocamlopt_flags (:standard -w -50))
+ (instrumentation (backend bisect_ppx)))
