@@ -1,0 +1,40 @@
+{
+  "jobs": [
+    {
+      "name": "verify-home-screen",
+      "type": "verify_visual",
+      "file_key": "YOUR_FILE_KEY",
+      "node_id": "123:456",
+      "target_ssim": 0.95,
+      "max_iterations": 1,
+      "timeout_s": 240
+    },
+    {
+      "name": "image-similarity-a-vs-b",
+      "type": "image_similarity",
+      "file_key": "YOUR_FILE_KEY",
+      "node_a_id": "123:456",
+      "node_b_id": "123:789",
+      "format": "png",
+      "start_scale": 1,
+      "max_scale": 2,
+      "scale_step": 1,
+      "target_ssim": 0.98,
+      "timeout_s": 240
+    },
+    {
+      "name": "fidelity-loop-critical-frame",
+      "type": "fidelity_loop",
+      "file_key": "YOUR_FILE_KEY",
+      "node_id": "123:456",
+      "target_score": 0.95,
+      "max_attempts": 2,
+      "include_variables": true,
+      "include_image_fills": true,
+      "include_plugin": false,
+      "timeout_s": 300,
+      "enabled": false
+    }
+  ]
+}
+
