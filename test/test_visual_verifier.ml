@@ -135,6 +135,7 @@ let test_result_to_json () =
     final_html = Some "<div>test</div>";
     evolution_history = [];
     evolution_dir = "/tmp/figma-evolution/test";
+    errors = [];
   } in
   let json = Visual_verifier.result_to_json result in
   let open Yojson.Safe.Util in
@@ -143,7 +144,8 @@ let test_result_to_json () =
   check (Alcotest.float 0.001) "human_ssim" 0.96 (json |> member "human_ssim" |> to_float);
   check bool "passed" true (json |> member "passed" |> to_bool);
   check int "iterations" 2 (json |> member "iterations" |> to_int);
-  check int "corrections count" 1 (json |> member "corrections_applied" |> to_list |> List.length)
+  check int "corrections count" 1 (json |> member "corrections_applied" |> to_list |> List.length);
+  check int "errors count" 0 (json |> member "errors" |> to_list |> List.length)
 
 (** ============== 통합 테스트 (Playwright 필요) ============== *)
 

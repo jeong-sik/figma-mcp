@@ -1727,8 +1727,17 @@
             threshold: parseFloat(ssimThreshold.value)
           })
         }).then(function(r) {
-          if (!r.ok) throw new Error("HTTP " + r.status);
-          return r.json();
+          return r.json().then(function(data) {
+            if (!r.ok) {
+              var msg = (data && (data.error || data.message)) ? (data.error || data.message) : ("HTTP " + r.status);
+              throw new Error(msg);
+            }
+            return data;
+          }).catch(function(e) {
+            // JSON parse failure or non-JSON response
+            if (!r.ok) throw new Error("HTTP " + r.status);
+            throw e;
+          });
         }).then(function(data) {
           var ssim = data.ssim || 0;
           var pass = data.pass;
