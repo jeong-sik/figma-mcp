@@ -215,7 +215,13 @@ let retry_after_of_headers headers =
 let log_error context msg =
   Printf.eprintf "[figma_api_eio] %s: %s\n%!" context msg
 
+let strip_query_for_log url =
+  match String.index_opt url '?' with
+  | Some i -> String.sub url 0 i
+  | None -> url
+
 let log_http_error ~label ~status ~body ~url =
+  let url = strip_query_for_log url in
   if log_response_body then
     log_error label (sprintf "HTTP %d: %s (url: %s)" status (truncate_body body) url)
   else
@@ -696,6 +702,7 @@ let is_einval_error exn =
 
 (** GET 요청 with timeout + 재시도 (macOS select 버그 우회) *)
 let http_get ~sw ~net ~clock ~client ~headers ?(timeout=default_timeout) ?(max_retries=3) url =
+  let url_log = strip_query_for_log url in
   let headers = Cohttp.Header.of_list headers in
   let headers_list = Cohttp.Header.to_list headers in
   let uri = Uri.of_string url in
@@ -708,10 +715,10 @@ let http_get ~sw ~net ~clock ~client ~headers ?(timeout=default_timeout) ?(max_r
       ) with
       | Ok result -> Ok result
       | Error `Timeout ->
-        log_error "http_get" (sprintf "Timeout after %.1fs: %s" timeout url);
+        log_error "http_get" (sprintf "Timeout after %.1fs: %s" timeout url_log);
         Error `Timeout
     with exn when is_einval_error exn && n < max_retries ->
-      log_warning "http_get" (sprintf "Unix.EINVAL retry %d/%d: %s" (n + 1) max_retries url);
+      log_warning "http_get" (sprintf "Unix.EINVAL retry %d/%d: %s" (n + 1) max_retries url_log);
       Eio.Time.sleep clock 0.1;  (* 100ms 대기 *)
       retry (n + 1)
     | exn -> Error (`Exn exn)
@@ -739,6 +746,7 @@ let http_get ~sw ~net ~clock ~client ~headers ?(timeout=default_timeout) ?(max_r
 
 (** POST 요청 with timeout + 재시도 (macOS select 버그 우회) *)
 let http_post ~sw ~net ~clock ~client ~headers ?(timeout=default_timeout) ?(max_retries=3) url body_str =
+  let url_log = strip_query_for_log url in
   let headers = Cohttp.Header.of_list headers in
   let headers_list = Cohttp.Header.to_list headers in
   let uri = Uri.of_string url in
@@ -752,10 +760,10 @@ let http_post ~sw ~net ~clock ~client ~headers ?(timeout=default_timeout) ?(max_
       ) with
       | Ok result -> Ok result
       | Error `Timeout ->
-        log_error "http_post" (sprintf "Timeout after %.1fs: %s" timeout url);
+        log_error "http_post" (sprintf "Timeout after %.1fs: %s" timeout url_log);
         Error `Timeout
     with exn when is_einval_error exn && n < max_retries ->
-      log_warning "http_post" (sprintf "Unix.EINVAL retry %d/%d: %s" (n + 1) max_retries url);
+      log_warning "http_post" (sprintf "Unix.EINVAL retry %d/%d: %s" (n + 1) max_retries url_log);
       Eio.Time.sleep clock 0.1;  (* 100ms 대기 *)
       retry (n + 1)
     | exn -> Error (`Exn exn)
@@ -775,6 +783,7 @@ let http_post ~sw ~net ~clock ~client ~headers ?(timeout=default_timeout) ?(max_
 
 (** Figma API GET 요청 - 에러 로깅 포함 *)
 let get_json ~sw ~net ~clock ~client ~token url : (Yojson.Safe.t, api_error) result =
+  let url_log = strip_query_for_log url in
   let headers = [
     ("X-Figma-Token", token);
     ("Accept", "application/json");
@@ -784,7 +793,7 @@ let get_json ~sw ~net ~clock ~client ~token url : (Yojson.Safe.t, api_error) res
     if status >= 200 && status < 300 then
       try Ok (Yojson.Safe.from_string body)
       with Yojson.Json_error msg ->
-        log_error "get_json" (sprintf "JSON parse error: %s (url: %s)" msg url);
+        log_error "get_json" (sprintf "JSON parse error: %s (url: %s)" msg url_log);
         Error (Json_error msg)
     else begin
       log_http_error ~label:"get_json" ~status ~body ~url;
@@ -793,15 +802,16 @@ let get_json ~sw ~net ~clock ~client ~token url : (Yojson.Safe.t, api_error) res
     end
   with
   | Request_timeout ->
-    log_error "get_json" (sprintf "Timeout (url: %s)" url);
+    log_error "get_json" (sprintf "Timeout (url: %s)" url_log);
     Error Timeout_error
   | exn ->
     let msg = Printexc.to_string exn in
-    log_error "get_json" (sprintf "Network error: %s (url: %s)" msg url);
+    log_error "get_json" (sprintf "Network error: %s (url: %s)" msg url_log);
     Error (Network_error msg)
 
 (** Figma API POST 요청 - 에러 로깅 포함 *)
 let post_json ~sw ~net ~clock ~client ~token url body_json : (Yojson.Safe.t, api_error) result =
+  let url_log = strip_query_for_log url in
   let headers = [
     ("X-Figma-Token", token);
     ("Content-Type", "application/json");
@@ -813,7 +823,7 @@ let post_json ~sw ~net ~clock ~client ~token url body_json : (Yojson.Safe.t, api
     if status >= 200 && status < 300 then
       try Ok (Yojson.Safe.from_string body)
       with Yojson.Json_error msg ->
-        log_error "post_json" (sprintf "JSON parse error: %s (url: %s)" msg url);
+        log_error "post_json" (sprintf "JSON parse error: %s (url: %s)" msg url_log);
         Error (Json_error msg)
     else begin
       log_http_error ~label:"post_json" ~status ~body ~url;
@@ -822,15 +832,16 @@ let post_json ~sw ~net ~clock ~client ~token url body_json : (Yojson.Safe.t, api
     end
   with
   | Request_timeout ->
-    log_error "post_json" (sprintf "Timeout (url: %s)" url);
+    log_error "post_json" (sprintf "Timeout (url: %s)" url_log);
     Error Timeout_error
   | exn ->
     let msg = Printexc.to_string exn in
-    log_error "post_json" (sprintf "Network error: %s (url: %s)" msg url);
+    log_error "post_json" (sprintf "Network error: %s (url: %s)" msg url_log);
     Error (Network_error msg)
 
 (** 파일 다운로드 - 에러 로깅 포함 *)
 let download_url ~sw ~net ~clock ~client ~url ~path : (unit, api_error) result =
+  let url_log = strip_query_for_log url in
   let headers = [] in
   try
     let status, resp_headers, body = http_get ~sw ~net ~clock ~client ~headers url in
@@ -845,17 +856,17 @@ let download_url ~sw ~net ~clock ~client ~url ~path : (unit, api_error) result =
       );
       Ok ()
     end else begin
-      log_error "download_url" (sprintf "HTTP %d (url: %s, path: %s)" status url path);
+      log_error "download_url" (sprintf "HTTP %d (url: %s, path: %s)" status url_log path);
       let retry_after = retry_after_of_headers resp_headers in
       Error (Http_error (status, body, retry_after))
     end
   with
   | Request_timeout ->
-    log_error "download_url" (sprintf "Timeout (url: %s)" url);
+    log_error "download_url" (sprintf "Timeout (url: %s)" url_log);
     Error Timeout_error
   | exn ->
     let msg = Printexc.to_string exn in
-    log_error "download_url" (sprintf "Failed: %s (url: %s, path: %s)" msg url path);
+    log_error "download_url" (sprintf "Failed: %s (url: %s, path: %s)" msg url_log path);
     Error (Network_error msg)
 
 (** ============== Smart Retry Wrapper ============== *)

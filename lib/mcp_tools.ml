@@ -1818,7 +1818,9 @@ let file_ext_from_url url =
   if ext = "" then ".img" else ext
 
 let is_http_url s =
-  String.length s >= 4 && String.sub s 0 4 = "http"
+  match Uri.scheme (Uri.of_string s) with
+  | Some ("http" | "https") -> true
+  | _ -> false
 
 let resolve_variables json =
   let member_opt key json =
