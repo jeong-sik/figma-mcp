@@ -305,12 +305,12 @@ let score_match ~query_name ~query_variant ~query_node_id ~query_component_key c
 
 let choose ~limit ~query_name ~query_variant ~query_node_id ~query_component_key comps =
   let scored =
-    List.map
+    List.filter_map
       (fun c ->
         let score, reason =
           score_match ~query_name ~query_variant ~query_node_id ~query_component_key c
         in
-        (score, reason, c))
+        if score <= 0.0 then None else Some (score, reason, c))
       comps
   in
   let tie_cmp a b =
@@ -334,4 +334,3 @@ let choose ~limit ~query_name ~query_variant ~query_node_id ~query_component_key
     | x :: xs -> take (n - 1) (x :: acc) xs
   in
   take limit [] sorted
-

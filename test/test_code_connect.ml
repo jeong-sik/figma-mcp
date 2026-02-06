@@ -29,6 +29,24 @@ let test_missing_export () =
   check bool "has missing export" true
     (List.exists (fun s -> String.equal s "missing code.export: no.export") errors)
 
+let test_insufficient_query_returns_empty () =
+  let mapping = load_mapping "fixtures/code_connect/valid.json" in
+  let scored =
+    CC.choose ~limit:3 ~query_name:"" ~query_variant:[] ~query_node_id:None ~query_component_key:None
+      mapping.components
+  in
+  check int "no candidates" 0 (List.length scored)
+
+let test_component_key_works_without_name () =
+  let mapping = load_mapping "fixtures/code_connect/valid.json" in
+  let score, _, comp =
+    List.hd
+      (CC.choose ~limit:1 ~query_name:"" ~query_variant:[] ~query_node_id:None
+         ~query_component_key:(Some "ck_456") mapping.components)
+  in
+  check (float 1e-6) "score" 0.95 score;
+  check string "id" "button.secondary" comp.CC.id
+
 let test_exact_node_id_match () =
   let mapping = load_mapping "fixtures/code_connect/valid.json" in
   let score, _, comp =
@@ -115,6 +133,8 @@ let () =
         ] );
       ( "matching",
         [
+          test_case "insufficient query" `Quick test_insufficient_query_returns_empty;
+          test_case "component key without name" `Quick test_component_key_works_without_name;
           test_case "exact node_id" `Quick test_exact_node_id_match;
           test_case "component key" `Quick test_component_key_match;
           test_case "name normalization" `Quick test_name_normalization;
@@ -123,4 +143,3 @@ let () =
           test_case "limit behavior" `Quick test_limit_behavior;
         ] );
     ]
-
