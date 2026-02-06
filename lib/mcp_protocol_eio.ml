@@ -3178,6 +3178,74 @@ Output ONLY valid JSON array, no explanation. Example:
         end
   )
 
+(** ============== Vision Compare Safety ============== *)
+
+let has_suffix ~suffix s =
+  let ls = String.length s in
+  let l = String.length suffix in
+  ls >= l && String.sub s (ls - l) l = suffix
+
+let trim s = String.trim s
+
+let split_csv s =
+  s
+  |> String.split_on_char ','
+  |> List.map trim
+  |> List.filter (fun x -> x <> "")
+
+let normalize_dir_prefix path =
+  let p = trim path in
+  if p = "" then None
+  else
+    let rp = try Unix.realpath p with _ -> p in
+    if rp = "/" then Some rp
+    else if has_suffix ~suffix:"/" rp then Some rp
+    else Some (rp ^ "/")
+
+let is_under_dir ~dir_prefix path =
+  if dir_prefix = "/" then true
+  else
+    let lp = String.length dir_prefix in
+    String.length path >= lp && String.sub path 0 lp = dir_prefix
+
+let validate_reference_image_path ~roots ~max_bytes path : (string, string) result =
+  if trim path = "" then
+    Error "reference path required"
+  else if not (Sys.file_exists path) then
+    Error "Reference image not found"
+  else
+    let lower = String.lowercase_ascii path in
+    if not (has_suffix ~suffix:".png" lower) then
+      Error "Reference must be a .png file"
+    else
+      let st =
+        try Ok (Unix.stat path)
+        with Unix.Unix_error (e, _, _) ->
+          Error (Printf.sprintf "Failed to stat reference image: %s" (Unix.error_message e))
+      in
+      match st with
+      | Error e -> Error e
+      | Ok st ->
+          if st.Unix.st_kind <> Unix.S_REG then
+            Error "Reference must be a regular file"
+          else if st.Unix.st_size > max_bytes then
+            Error "Reference image too large"
+          else
+            let rp =
+              try Ok (Unix.realpath path)
+              with _ -> Error "Failed to resolve reference image path"
+            in
+            match rp with
+            | Error e -> Error e
+            | Ok rp ->
+                let prefixes =
+                  roots
+                  |> List.filter_map normalize_dir_prefix
+                in
+                if prefixes = [] then Ok rp
+                else if List.exists (fun dir_prefix -> is_under_dir ~dir_prefix rp) prefixes then Ok rp
+                else Error "Reference path not allowed (set FIGMA_MCP_VISION_REFERENCE_ROOTS)"
+
 (** POST /plugin/vision-compare - Compare Figma export with rendered code *)
 let vision_compare_handler ~sw:_ ~eio_ctx:_ _request reqd =
   Request.read_body_async reqd (fun body_str ->
@@ -3195,12 +3263,23 @@ let vision_compare_handler ~sw:_ ~eio_ctx:_ _request reqd =
           json_error "reference path required" reqd
         end else if code = "" then begin
           json_error "code required" reqd
-        end else if not (Sys.file_exists reference_path) then begin
-          let result = `Assoc [
-            ("error", `String ("Reference image not found: " ^ reference_path));
-          ] in
-          Response.json ~status:`Bad_request (Yojson.Safe.to_string result) reqd
         end else begin
+          let roots =
+            match Sys.getenv_opt "FIGMA_MCP_VISION_REFERENCE_ROOTS" with
+            | None -> []
+            | Some v -> split_csv v
+          in
+          let max_bytes =
+            env_int ~name:"FIGMA_MCP_VISION_REFERENCE_MAX_BYTES" ~default:(50 * 1024 * 1024)
+          in
+          match validate_reference_image_path ~roots ~max_bytes reference_path with
+          | Error err ->
+              let result = `Assoc [
+                ("error", `String err);
+                ("hint", `String "Configure FIGMA_MCP_VISION_REFERENCE_ROOTS to restrict allowed reference paths.");
+              ] in
+              Response.json ~status:`Bad_request (Yojson.Safe.to_string result) reqd
+          | Ok reference_path ->
           (* Wrap code in HTML boilerplate *)
           let html_content = sprintf {|<!DOCTYPE html>
 <html><head>

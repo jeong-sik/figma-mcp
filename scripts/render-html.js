@@ -12,6 +12,19 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
+function allowNetworkRequests() {
+  const raw = (process.env.FIGMA_MCP_RENDER_HTML_ALLOW_NETWORK || '').trim().toLowerCase();
+  return raw === '1' || raw === 'true' || raw === 'yes';
+}
+
+function isSafeInlineUrl(url) {
+  return (
+    url === 'about:blank' ||
+    url.startsWith('data:') ||
+    url.startsWith('blob:')
+  );
+}
+
 function resolveExecutablePath() {
   const defaultPath = chromium.executablePath();
   const arch = process.arch;
@@ -74,16 +87,28 @@ async function renderHtmlToPng(htmlPath, outputPath, width = 375, height = 812) 
   const browser = await chromium.launch(launchOptions);
   const page = await browser.newPage();
 
+  // Security: block network + file requests by default to avoid SSRF/local file exfil.
+  // If you need external assets, set FIGMA_MCP_RENDER_HTML_ALLOW_NETWORK=1 explicitly.
+  if (!allowNetworkRequests()) {
+    await page.route('**/*', (route) => {
+      const url = route.request().url();
+      if (isSafeInlineUrl(url)) {
+        return route.continue();
+      }
+      return route.abort();
+    });
+  }
+
   // 뷰포트 설정 (Figma frame 크기와 일치)
   await page.setViewportSize({ width, height });
 
   // HTML 파일 또는 문자열 로드
   if (fs.existsSync(htmlPath)) {
     const htmlContent = fs.readFileSync(htmlPath, 'utf-8');
-    await page.setContent(htmlContent, { waitUntil: 'networkidle' });
+    await page.setContent(htmlContent, { waitUntil: 'domcontentloaded' });
   } else {
     // htmlPath가 실제 HTML 문자열인 경우
-    await page.setContent(htmlPath, { waitUntil: 'networkidle' });
+    await page.setContent(htmlPath, { waitUntil: 'domcontentloaded' });
   }
 
   // 폰트 로딩 대기 (최대 3초)

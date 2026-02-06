@@ -164,3 +164,8 @@
 (test
  (name test_compare_regions_security)
  (libraries figma_mcp alcotest yojson))
+
+; Vision compare input safety checks (reference path validation)
+(test
+ (name test_vision_compare_security)
+ (libraries figma_mcp alcotest unix))

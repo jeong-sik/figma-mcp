@@ -6,6 +6,7 @@ import unittest
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 UI = (ROOT / "plugin" / "ui.html").read_text(encoding="utf-8")
 CODE = (ROOT / "plugin" / "code.js").read_text(encoding="utf-8")
+RENDER = (ROOT / "scripts" / "render-html.js").read_text(encoding="utf-8")
 
 
 class TestPluginSecurityRegression(unittest.TestCase):
@@ -29,7 +30,12 @@ class TestPluginSecurityRegression(unittest.TestCase):
         self.assertIn('type: "init"', CODE)
         self.assertIn("msg.nonce", CODE)
 
+    def test_render_html_blocks_network_by_default(self):
+        # The render script should prevent SSRF / local file exfil by default.
+        self.assertRegex(RENDER, r"page\.route\(\s*['\"]\*\*/\*['\"]")
+        self.assertIn("route.abort()", RENDER)
+        self.assertIn("FIGMA_MCP_RENDER_HTML_ALLOW_NETWORK", RENDER)
+
 
 if __name__ == "__main__":
     unittest.main()
-
