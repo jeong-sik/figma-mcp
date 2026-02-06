@@ -35,4 +35,5 @@
   (ca-certs (>= 0.2))
   (bigstringaf (>= 0.9))
   (mirage-crypto-rng (>= 1.0))
-  (ipaddr (>= 5.0))))
+  (ipaddr (>= 5.0))
+  (bisect_ppx (and :with-test (>= 2.8)))))
