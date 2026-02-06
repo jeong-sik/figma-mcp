@@ -3850,144 +3850,224 @@ let handle_compare_regions args : (Yojson.Safe.t, string) result =
   | Error e -> Error e
   | Ok output_dir ->
     let generate_diff = get_bool_or "generate_diff" true args in
+    let trim = String.trim in
+    let split_csv s =
+      s
+      |> String.split_on_char ','
+      |> List.map trim
+      |> List.filter (fun x -> x <> "")
+    in
+    let normalize_dir_prefix path =
+      let p = trim path in
+      if p = "" then None
+      else
+        let rp = try Unix.realpath p with _ -> p in
+        if rp = "/" then Some rp
+        else if String.ends_with ~suffix:"/" rp then Some rp
+        else Some (rp ^ "/")
+    in
+    let is_under_dir ~dir_prefix path =
+      if dir_prefix = "/" then true
+      else
+        let lp = String.length dir_prefix in
+        String.length path >= lp && String.sub path 0 lp = dir_prefix
+    in
+    let roots =
+      match Sys.getenv_opt "FIGMA_MCP_COMPARE_IMAGE_ROOTS" with
+      | None -> []
+      | Some v -> split_csv v
+    in
+    let max_bytes_default = 50 * 1024 * 1024 in
+    let max_bytes =
+      match Sys.getenv_opt "FIGMA_MCP_COMPARE_IMAGE_MAX_BYTES" with
+      | None -> max_bytes_default
+      | Some v ->
+          (try int_of_string (trim v) with _ -> max_bytes_default)
+    in
+    let validate_png_path ~label path =
+      if trim path = "" then
+        Error (Printf.sprintf "%s path required" label)
+      else if not (Sys.file_exists path) then
+        Error (Printf.sprintf "%s image not found" label)
+      else
+        let lower = String.lowercase_ascii path in
+        if not (String.ends_with ~suffix:".png" lower) then
+          Error (Printf.sprintf "%s must be a .png file" label)
+        else
+          let st =
+            try Ok (Unix.stat path)
+            with Unix.Unix_error (e, _, _) ->
+              Error (Printf.sprintf "Failed to stat %s: %s" label (Unix.error_message e))
+          in
+          match st with
+          | Error e -> Error e
+          | Ok st ->
+              if st.Unix.st_kind <> Unix.S_REG then
+                Error (Printf.sprintf "%s must be a regular file" label)
+              else if st.Unix.st_size > max_bytes then
+                Error (Printf.sprintf "%s image too large" label)
+              else
+                let rp =
+                  try Ok (Unix.realpath path)
+                  with _ -> Error (Printf.sprintf "Failed to resolve %s path" label)
+                in
+                match rp with
+                | Error e -> Error e
+                | Ok rp ->
+                    let prefixes =
+                      roots
+                      |> List.filter_map normalize_dir_prefix
+                    in
+                    if prefixes = [] then Ok rp
+                    else if List.exists (fun dir_prefix -> is_under_dir ~dir_prefix rp) prefixes then Ok rp
+                    else
+                      Error (Printf.sprintf "%s path not allowed (set FIGMA_MCP_COMPARE_IMAGE_ROOTS)" label)
+    in
 
     match (get_string "image_a" args, get_string "image_b" args, get_string "regions" args) with
-    | (Some image_a, Some image_b, Some regions_json) ->
-      (* regions JSON 파싱 *)
-      let regions_result =
-        try
-          let json = Yojson.Safe.from_string regions_json in
-          match json with
-          | `List items ->
-              let open Yojson.Safe.Util in
-              let rec loop acc = function
-                | [] -> Ok (List.rev acc)
-                | item :: rest ->
-                    try
-                      let name = item |> member "name" |> to_string in
-                      let x = item |> member "x" |> to_int in
-                      let y = item |> member "y" |> to_int in
-                      let width = item |> member "width" |> to_int in
-                      let height = item |> member "height" |> to_int in
-                      if not (is_safe_region_name name) then
-                        Error (Printf.sprintf "Invalid region name: %s" name)
-                      else if x < 0 || y < 0 || width <= 0 || height <= 0 then
-                        Error (Printf.sprintf "Invalid region bounds for %s" name)
-                      else
-                        loop ((name, x, y, width, height) :: acc) rest
-                    with _ ->
+    | (Some image_a, Some image_b, Some regions_json) -> (
+        match validate_png_path ~label:"image_a" image_a with
+        | Error e -> Error e
+        | Ok image_a ->
+            match validate_png_path ~label:"image_b" image_b with
+            | Error e -> Error e
+            | Ok image_b ->
+                (* regions JSON 파싱 *)
+                let regions_result =
+                  try
+                    let json = Yojson.Safe.from_string regions_json in
+                    match json with
+                    | `List items ->
+                        let open Yojson.Safe.Util in
+                        let rec loop acc = function
+                          | [] -> Ok (List.rev acc)
+                          | item :: rest ->
+                              try
+                                let name = item |> member "name" |> to_string in
+                                let x = item |> member "x" |> to_int in
+                                let y = item |> member "y" |> to_int in
+                                let width = item |> member "width" |> to_int in
+                                let height = item |> member "height" |> to_int in
+                                if not (is_safe_region_name name) then
+                                  Error (Printf.sprintf "Invalid region name: %s" name)
+                                else if x < 0 || y < 0 || width <= 0 || height <= 0 then
+                                  Error (Printf.sprintf "Invalid region bounds for %s" name)
+                                else
+                                  loop ((name, x, y, width, height) :: acc) rest
+                              with _ ->
+                                Error "Invalid regions JSON format. Expected: [{name, x, y, width, height}, ...]"
+                        in
+                        loop [] items
+                    | _ -> Error "Invalid regions JSON format. Expected: [{name, x, y, width, height}, ...]"
+                  with _ -> Error "Invalid regions JSON format. Expected: [{name, x, y, width, height}, ...]"
+                in
+
+                (match regions_result with
+                | Error e -> Error e
+                | Ok regions ->
+                    if regions = [] then
                       Error "Invalid regions JSON format. Expected: [{name, x, y, width, height}, ...]"
-              in
-              loop [] items
-          | _ -> Error "Invalid regions JSON format. Expected: [{name, x, y, width, height}, ...]"
-        with _ -> Error "Invalid regions JSON format. Expected: [{name, x, y, width, height}, ...]"
-      in
+                    else begin
+                      (* 디렉토리 생성 *)
+                      mkdir_p output_dir;
 
-      (match regions_result with
-       | Error e -> Error e
-       | Ok regions ->
-         if regions = [] then
-           Error "Invalid regions JSON format. Expected: [{name, x, y, width, height}, ...]"
-         else begin
-           (* 디렉토리 생성 *)
-           mkdir_p output_dir;
+                      (* 각 영역별 SSIM 계산 *)
+                      let compare_region (name, x, y, w, h) =
+                        let crop_a = Filename.concat output_dir (Printf.sprintf "figma_%s.png" name) in
+                        let crop_b = Filename.concat output_dir (Printf.sprintf "html_%s.png" name) in
 
-          (* 각 영역별 SSIM 계산 *)
-          let compare_region (name, x, y, w, h) =
-            let crop_a = Filename.concat output_dir (Printf.sprintf "figma_%s.png" name) in
-            let crop_b = Filename.concat output_dir (Printf.sprintf "html_%s.png" name) in
+                        (* ImageMagick으로 영역 crop *)
+                        let args_a = [| "magick"; image_a; "-crop"; Printf.sprintf "%dx%d+%d+%d" w h x y; "+repage"; crop_a |] in
+                        let args_b = [| "magick"; image_b; "-crop"; Printf.sprintf "%dx%d+%d+%d" w h x y; "+repage"; crop_b |] in
+                        let _ = Safe_exec.run_stdout ~timeout_ms:20000 ~output_limit:(64 * 1024) "magick" args_a in
+                        let _ = Safe_exec.run_stdout ~timeout_ms:20000 ~output_limit:(64 * 1024) "magick" args_b in
 
-            (* ImageMagick으로 영역 crop *)
-            let args_a = [| "magick"; image_a; "-crop"; Printf.sprintf "%dx%d+%d+%d" w h x y; "+repage"; crop_a |] in
-            let args_b = [| "magick"; image_b; "-crop"; Printf.sprintf "%dx%d+%d+%d" w h x y; "+repage"; crop_b |] in
-            let _ = Safe_exec.run_stdout ~timeout_ms:20000 ~output_limit:(64 * 1024) "magick" args_a in
-            let _ = Safe_exec.run_stdout ~timeout_ms:20000 ~output_limit:(64 * 1024) "magick" args_b in
+                        (* SSIM 계산 *)
+                        let args_ssim = [| "magick"; "compare"; "-metric"; "SSIM"; crop_a; crop_b; "null:" |] in
+                        let output =
+                          match Safe_exec.run ~timeout_ms:20000 ~output_limit:(64 * 1024) "magick" args_ssim with
+                          | Ok out -> out.stderr
+                          | Error _ -> ""
+                        in
 
-            (* SSIM 계산 *)
-            let args_ssim = [| "magick"; "compare"; "-metric"; "SSIM"; crop_a; crop_b; "null:" |] in
-            let output =
-              match Safe_exec.run ~timeout_ms:20000 ~output_limit:(64 * 1024) "magick" args_ssim with
-              | Ok out -> out.stderr
-              | Error _ -> ""
-            in
+                        (* 결과 파싱: "0.876543 (0.123457)" 형식 *)
+                        let ssim =
+                          try
+                            let re = Str.regexp "(\\([0-9.]+\\))" in
+                            if Str.string_match re output 0 then
+                              let diff = float_of_string (Str.matched_group 1 output) in
+                              (1.0 -. diff) *. 100.0  (* 유사도 = (1 - 차이율) * 100 *)
+                            else
+                              let parts = String.split_on_char ' ' output in
+                              match parts with
+                              | first :: _ -> float_of_string first *. 100.0
+                              | _ -> 0.0
+                          with _ -> 0.0
+                        in
 
-            (* 결과 파싱: "0.876543 (0.123457)" 형식 *)
-            let ssim =
-              try
-                let re = Str.regexp "(\\([0-9.]+\\))" in
-                if Str.string_match re output 0 then
-                  let diff = float_of_string (Str.matched_group 1 output) in
-                  (1.0 -. diff) *. 100.0  (* 유사도 = (1 - 차이율) * 100 *)
-                else
-                  let parts = String.split_on_char ' ' output in
-                  match parts with
-                  | first :: _ -> float_of_string first *. 100.0
-                  | _ -> 0.0
-              with _ -> 0.0
-            in
+                        (* 차이 이미지 생성 *)
+                        let diff_image =
+                          if generate_diff then begin
+                            let diff_path = Filename.concat output_dir (Printf.sprintf "diff_%s.png" name) in
+                            let args_diff = [| "magick"; "compare"; crop_a; crop_b; diff_path |] in
+                            let _ = Safe_exec.run_stdout ~timeout_ms:20000 ~output_limit:(64 * 1024) "magick" args_diff in
+                            Some diff_path
+                          end else None
+                        in
 
-            (* 차이 이미지 생성 *)
-            let diff_image =
-              if generate_diff then begin
-                let diff_path = Filename.concat output_dir (Printf.sprintf "diff_%s.png" name) in
-                let args_diff = [| "magick"; "compare"; crop_a; crop_b; diff_path |] in
-                let _ = Safe_exec.run_stdout ~timeout_ms:20000 ~output_limit:(64 * 1024) "magick" args_diff in
-                Some diff_path
-              end else None
-            in
+                        `Assoc [
+                          ("name", `String name);
+                          ("region", `Assoc [
+                            ("x", `Int x);
+                            ("y", `Int y);
+                            ("width", `Int w);
+                            ("height", `Int h);
+                          ]);
+                          ("ssim_percent", `Float ssim);
+                          ("status", `String (if ssim >= 90.0 then "good" else if ssim >= 75.0 then "acceptable" else "needs_work"));
+                          ("figma_crop", `String crop_a);
+                          ("html_crop", `String crop_b);
+                          ("diff_image", match diff_image with Some p -> `String p | None -> `Null);
+                        ]
+                      in
 
-            `Assoc [
-              ("name", `String name);
-              ("region", `Assoc [
-                ("x", `Int x);
-                ("y", `Int y);
-                ("width", `Int w);
-                ("height", `Int h);
-              ]);
-              ("ssim_percent", `Float ssim);
-              ("status", `String (if ssim >= 90.0 then "good" else if ssim >= 75.0 then "acceptable" else "needs_work"));
-              ("figma_crop", `String crop_a);
-              ("html_crop", `String crop_b);
-              ("diff_image", match diff_image with Some p -> `String p | None -> `Null);
-            ]
-          in
+                      let results = List.map compare_region regions in
 
-          let results = List.map compare_region regions in
+                      (* 전체 통계 *)
+                      let ssims = List.filter_map (fun r ->
+                        match r with
+                        | `Assoc items ->
+                            (match List.assoc_opt "ssim_percent" items with
+                            | Some (`Float f) -> Some f
+                            | _ -> None)
+                        | _ -> None
+                      ) results in
+                      let avg_ssim = if ssims = [] then 0.0 else
+                        (List.fold_left (+.) 0.0 ssims) /. (float_of_int (List.length ssims)) in
+                      let min_ssim = if ssims = [] then 0.0 else List.fold_left min 100.0 ssims in
+                      let max_ssim = if ssims = [] then 0.0 else List.fold_left max 0.0 ssims in
 
-          (* 전체 통계 *)
-          let ssims = List.filter_map (fun r ->
-            match r with
-            | `Assoc items ->
-                (match List.assoc_opt "ssim_percent" items with
-                 | Some (`Float f) -> Some f
-                 | _ -> None)
-            | _ -> None
-          ) results in
-          let avg_ssim = if ssims = [] then 0.0 else
-            (List.fold_left (+.) 0.0 ssims) /. (float_of_int (List.length ssims)) in
-          let min_ssim = if ssims = [] then 0.0 else List.fold_left min 100.0 ssims in
-          let max_ssim = if ssims = [] then 0.0 else List.fold_left max 0.0 ssims in
+                      let summary = `Assoc [
+                        ("total_regions", `Int (List.length regions));
+                        ("average_ssim", `Float avg_ssim);
+                        ("min_ssim", `Float min_ssim);
+                        ("max_ssim", `Float max_ssim);
+                        ("overall_status", `String (
+                          if min_ssim >= 90.0 then "excellent"
+                          else if avg_ssim >= 85.0 then "good"
+                          else if avg_ssim >= 70.0 then "acceptable"
+                          else "needs_improvement"
+                        ));
+                      ] in
 
-          let summary = `Assoc [
-            ("total_regions", `Int (List.length regions));
-            ("average_ssim", `Float avg_ssim);
-            ("min_ssim", `Float min_ssim);
-            ("max_ssim", `Float max_ssim);
-            ("overall_status", `String (
-              if min_ssim >= 90.0 then "excellent"
-              else if avg_ssim >= 85.0 then "good"
-              else if avg_ssim >= 70.0 then "acceptable"
-              else "needs_improvement"
-            ));
-          ] in
-
-          let result = `Assoc [
-            ("summary", summary);
-            ("regions", `List results);
-            ("output_dir", `String output_dir);
-          ] in
-           Ok (make_text_content (Yojson.Safe.pretty_to_string result))
-         end)
+                      let result = `Assoc [
+                        ("summary", summary);
+                        ("regions", `List results);
+                        ("output_dir", `String output_dir);
+                      ] in
+                      Ok (make_text_content (Yojson.Safe.pretty_to_string result))
+                    end)
+      )
 
     | _ -> Error "Missing required parameters: image_a, image_b, regions"
 
