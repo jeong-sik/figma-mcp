@@ -29,6 +29,7 @@ Each job:
 - `name`: string (optional; default `job_N`)
 - `enabled`: bool (optional; default `true`)
 - `timeout_s`: number (optional; default `180`)
+- `retries`: number (optional; default `2`) transient MCP 오류 시 재시도 횟수
 
 Required fields by type:
 - `image_similarity`: `file_key`, `node_a_id`, `node_b_id`
@@ -45,6 +46,11 @@ Writes JSON Lines (one record per job run):
 - Default: `~/me/logs/figma-ssim-heartbeat.jsonl`
 - Override: `--log` or `FIGMA_SSIM_HEARTBEAT_LOG`
 
+Log rotation:
+- 기본 `50MB` 초과 시 rotate (`.1`, `.2`, ...) 합니다.
+- 비활성화: `--max-log-bytes 0`
+- 보관 개수: `--log-rotate-count N`
+
 Sensitive fields are redacted:
 - job args: `html`, `token`, `plugin_data`
 - parsed results: `final_html`
@@ -57,4 +63,9 @@ Typical flow:
 - set a real config path (not the example)
 - set env vars: `FIGMA_MCP_URL`, `FIGMA_MCP_API_KEY` (if needed), `FIGMA_TOKEN` (if needed)
 - load via `launchctl`
+
+### launchd: timer style (periodic oneshot)
+
+`--once` + `StartInterval` 조합을 쓰면 “항상 켜져있는 루프” 대신 주기 실행 형태로 운영할 수 있습니다.
+(crash 복구를 launchd가 처리)
 
