@@ -7330,7 +7330,14 @@ let handle_category category_name args =
       let full_name = "figma_" ^ tool_name in
       match Hashtbl.find_opt handler_registry full_name with
       | Some handler ->
-          let actual_args = Option.value ~default:(`Assoc []) args_param in
+          let actual_args = match args_param with
+            | Some a -> a
+            | None ->
+              (* Forward top-level args (except "tool") for flat argument style *)
+              (match args with
+               | `Assoc lst -> `Assoc (List.filter (fun (k, _) -> k <> "tool") lst)
+               | _ -> `Assoc [])
+          in
           handler actual_args
       | None ->
           (* 카테고리에 속하는지 확인 *)
