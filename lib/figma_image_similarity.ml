@@ -20,42 +20,30 @@ type metrics = {
   delta_e: float; (** Average CIEDE2000 color difference *)
 }
 
-let find_in_path bin =
-  let path = Sys.getenv_opt "PATH" |> Option.value ~default:"" in
-  let dirs = String.split_on_char ':' path in
-  (* Homebrew and common fallback paths for macOS *)
-  let fallback_dirs = ["/opt/homebrew/bin"; "/usr/local/bin"; "/usr/bin"] in
-  let all_dirs = dirs @ fallback_dirs in
-  let rec loop = function
-    | [] -> None
-    | dir :: rest ->
-        let candidate = Filename.concat dir bin in
-        if Sys.file_exists candidate then Some candidate
-        else loop rest
-  in
-  loop all_dirs
+let find_in_path = Safe_exec.find_in_path
 
 let run_cmd cmd =
-  match Sys.command cmd with
-  | 0 -> Ok ()
-  | code -> Error (Printf.sprintf "Command failed (%d): %s" code cmd)
+  (* Backward-compatible helper for tests: run a binary with no args. *)
+  match Safe_exec.run_stdout ~timeout_ms:15000 ~output_limit:(64 * 1024) cmd [| cmd |] with
+  | Ok _ -> Ok ()
+  | Error msg -> Error (Printf.sprintf "Command failed: %s" msg)
+
+let run_cmdv ~cmd ~args =
+  match Safe_exec.run_stdout ~timeout_ms:15000 ~output_limit:(64 * 1024) cmd args with
+  | Ok _ -> Ok ()
+  | Error msg -> Error (Printf.sprintf "Command failed: %s" msg)
 
 let convert_to_ppm ~input ~output =
-  let quoted s = Filename.quote s in
   (* PPM 변환: ImageMagick 우선 (sips는 PPM 미지원) *)
   match find_in_path "magick" with
   | Some magick ->
-      let cmd = Printf.sprintf "%s %s %s >/dev/null 2>&1"
-        magick (quoted input) (quoted output)
-      in
-      run_cmd cmd
+      let args = [| magick; input; output |] in
+      run_cmdv ~cmd:magick ~args
   | None ->
       (match find_in_path "convert" with
        | Some convert ->
-           let cmd = Printf.sprintf "%s %s %s >/dev/null 2>&1"
-             convert (quoted input) (quoted output)
-           in
-           run_cmd cmd
+           let args = [| convert; input; output |] in
+           run_cmdv ~cmd:convert ~args
        | None ->
            (* sips는 PPM 미지원이므로 BMP로 변환 후 ImageMagick으로 PPM 변환 필요 *)
            (* ImageMagick 없으면 에러 *)
@@ -295,48 +283,36 @@ let compare_with_nodejs ~path_a ~path_b : (metrics, string) result =
   match script_path with
   | None -> Error "ssim-compare.js not found"
   | Some script ->
-      let cmd = Printf.sprintf "node %s %s %s 2>&1"
-        (Filename.quote script)
-        (Filename.quote path_a)
-        (Filename.quote path_b)
-      in
-      let ic = Unix.open_process_in cmd in
-      (* 파이프에서는 in_channel_length 사용 불가 - 라인 단위로 읽기 *)
-      let buf = Buffer.create 1024 in
-      (try
-        while true do
-          Buffer.add_string buf (input_line ic);
-          Buffer.add_char buf '\n'
-        done
-      with End_of_file -> ());
-      let _ = Unix.close_process_in ic in
-      let output = Buffer.contents buf in
-      (* JSON 파싱 *)
-      try
-        let json = Yojson.Safe.from_string (String.trim output) in
-        let open Yojson.Safe.Util in
-        match json |> member "error" with
-        | `Null ->
-            let ssim = json |> member "ssim" |> to_float in
-            let psnr = json |> member "psnr" |> to_float in
-            let mse = json |> member "mse" |> to_float in
-            let delta_e = json |> member "deltaE" |> to_float_option |> Option.value ~default:0.0 in
-            let width = json |> member "width" |> to_int in
-            let height = json |> member "height" |> to_int in
-            Ok {
-              width_a = width;
-              height_a = height;
-              width_b = width;
-              height_b = height;
-              overlap_width = width;
-              overlap_height = height;
-              mse;
-              psnr;
-              ssim;
-              delta_e;
-            }
-        | error_msg -> Error (to_string error_msg)
-      with e -> Error (Printf.sprintf "JSON parse error: %s\nOutput: %s" (Printexc.to_string e) output)
+      let args = [| "node"; script; path_a; path_b |] in
+      match Safe_exec.run_stdout ~timeout_ms:20000 ~output_limit:(256 * 1024) "node" args with
+      | Error msg -> Error msg
+      | Ok output ->
+          (* JSON 파싱 *)
+          try
+            let json = Yojson.Safe.from_string (String.trim output) in
+            let open Yojson.Safe.Util in
+            match json |> member "error" with
+            | `Null ->
+                let ssim = json |> member "ssim" |> to_float in
+                let psnr = json |> member "psnr" |> to_float in
+                let mse = json |> member "mse" |> to_float in
+                let delta_e = json |> member "deltaE" |> to_float_option |> Option.value ~default:0.0 in
+                let width = json |> member "width" |> to_int in
+                let height = json |> member "height" |> to_int in
+                Ok {
+                  width_a = width;
+                  height_a = height;
+                  width_b = width;
+                  height_b = height;
+                  overlap_width = width;
+                  overlap_height = height;
+                  mse;
+                  psnr;
+                  ssim;
+                  delta_e;
+                }
+            | error_msg -> Error (to_string error_msg)
+          with e -> Error (Printf.sprintf "JSON parse error: %s\nOutput: %s" (Printexc.to_string e) output)
 
 (** 자동 fallback: OCaml native → Node.js *)
 let compare_paths_auto ~path_a ~path_b : (metrics, string) result =

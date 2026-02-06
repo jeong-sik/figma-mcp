@@ -152,8 +152,8 @@ let test_result_to_json () =
 (* 이 테스트는 Playwright가 설치되어 있어야 실행 가능 *)
 let test_render_html_to_png_basic () =
   (* Playwright 존재 여부 확인 *)
-  let playwright_check = Sys.command "which node > /dev/null 2>&1" in
-  if playwright_check <> 0 then
+  let playwright_check = Safe_exec.command_exists "node" in
+  if not playwright_check then
     Alcotest.skip ()
   else begin
     let html = {|
@@ -247,17 +247,17 @@ let test_diff_image_result_to_json () =
 
 let test_quadrant_analysis_integration () =
   (* ImageMagick 존재 여부 확인 *)
-  let magick_check = Sys.command "which magick > /dev/null 2>&1" in
-  if magick_check <> 0 then
+  let magick_check = Safe_exec.command_exists "magick" in
+  if not magick_check then
     Alcotest.skip ()
   else begin
     (* 두 개의 테스트 이미지 생성 *)
     let img1 = Visual_verifier.temp_file ~prefix:"test_q1" ~ext:"png" in
     let img2 = Visual_verifier.temp_file ~prefix:"test_q2" ~ext:"png" in
-    let cmd1 = Printf.sprintf "magick -size 100x100 xc:blue %s 2>/dev/null" img1 in
-    let cmd2 = Printf.sprintf "magick -size 100x100 xc:blue %s 2>/dev/null" img2 in
-    ignore (Sys.command cmd1);
-    ignore (Sys.command cmd2);
+    let args1 = [| "magick"; "-size"; "100x100"; "xc:blue"; img1 |] in
+    let args2 = [| "magick"; "-size"; "100x100"; "xc:blue"; img2 |] in
+    ignore (Safe_exec.run_stdout ~timeout_ms:20000 ~output_limit:(64 * 1024) "magick" args1);
+    ignore (Safe_exec.run_stdout ~timeout_ms:20000 ~output_limit:(64 * 1024) "magick" args2);
 
     if Sys.file_exists img1 && Sys.file_exists img2 then begin
       match Visual_verifier.quadrant_analysis ~figma_png:img1 ~html_png:img2 with
@@ -279,17 +279,17 @@ let test_quadrant_analysis_integration () =
 
 let test_generate_diff_images_integration () =
   (* ImageMagick 존재 여부 확인 *)
-  let magick_check = Sys.command "which magick > /dev/null 2>&1" in
-  if magick_check <> 0 then
+  let magick_check = Safe_exec.command_exists "magick" in
+  if not magick_check then
     Alcotest.skip ()
   else begin
     (* 두 개의 약간 다른 테스트 이미지 생성 *)
     let img1 = Visual_verifier.temp_file ~prefix:"test_d1" ~ext:"png" in
     let img2 = Visual_verifier.temp_file ~prefix:"test_d2" ~ext:"png" in
-    let cmd1 = Printf.sprintf "magick -size 100x100 xc:blue %s 2>/dev/null" img1 in
-    let cmd2 = Printf.sprintf "magick -size 100x100 xc:red %s 2>/dev/null" img2 in
-    ignore (Sys.command cmd1);
-    ignore (Sys.command cmd2);
+    let args1 = [| "magick"; "-size"; "100x100"; "xc:blue"; img1 |] in
+    let args2 = [| "magick"; "-size"; "100x100"; "xc:red"; img2 |] in
+    ignore (Safe_exec.run_stdout ~timeout_ms:20000 ~output_limit:(64 * 1024) "magick" args1);
+    ignore (Safe_exec.run_stdout ~timeout_ms:20000 ~output_limit:(64 * 1024) "magick" args2);
 
     let cleanup_imgs () =
       (try Unix.unlink img1 with Unix.Unix_error _ -> ());

@@ -44,6 +44,11 @@
  (name test_visual_verifier)
  (libraries figma_mcp alcotest yojson unix str))
 
+; Safe Exec tests
+(test
+ (name test_safe_exec)
+ (libraries figma_mcp alcotest unix))
+
 ; CSS 조정 디버그
 (executable
  (name debug_css)

@@ -2113,24 +2113,32 @@ let plugin_custom ~name ?(default_timeout=10000) ~validate ~build_payload args =
            let payload = build_payload validated args in
            plugin_exec ~channel_id ~name ~payload ~timeout_ms)
 
-let command_ok cmd =
-  Sys.command (cmd ^ " >/dev/null 2>&1") = 0
-
-let command_output cmd =
-  let ic = Unix.open_process_in cmd in
-  let output =
-    try input_line ic with
-    | End_of_file -> ""
-    | _ -> ""
-  in
-  let _ = Unix.close_process_in ic in
-  String.trim output
+let command_output cmd argv =
+  match Safe_exec.run_stdout ~timeout_ms:5000 ~output_limit:(64 * 1024) cmd argv with
+  | Ok out -> String.trim out
+  | Error _ -> ""
 
 let has_command name =
-  command_ok (Printf.sprintf "command -v %s" name)
+  Safe_exec.command_exists name
 
 let has_node_module name =
-  command_ok (Printf.sprintf "node -e \"require('%s')\"" name)
+  match Safe_exec.run ~timeout_ms:5000 ~output_limit:(32 * 1024) "node" [| "node"; "-e"; Printf.sprintf "require('%s')" name |] with
+  | Ok out ->
+      (match out.status with
+       | Unix.WEXITED 0 -> true
+       | _ -> false)
+  | Error _ -> false
+
+let mkdir_p path =
+  let rec loop p =
+    if p = Filename.dirname p then ()
+    else if Sys.file_exists p then ()
+    else begin
+      loop (Filename.dirname p);
+      try Unix.mkdir p 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ()
+    end
+  in
+  loop path
 
 let normalize_path path =
   try Some (Unix.realpath path) with _ -> None
@@ -3803,7 +3811,7 @@ let handle_compare_regions args : (Yojson.Safe.t, string) result =
   match (get_string "image_a" args, get_string "image_b" args, get_string "regions" args) with
   | (Some image_a, Some image_b, Some regions_json) ->
       (* 디렉토리 생성 *)
-      let _ = Unix.system (Printf.sprintf "mkdir -p %s" (Filename.quote output_dir)) in
+      mkdir_p output_dir;
 
       (* regions JSON 파싱 *)
       let regions =
@@ -3835,19 +3843,18 @@ let handle_compare_regions args : (Yojson.Safe.t, string) result =
           let crop_b = Printf.sprintf "%s/html_%s.png" output_dir name in
 
           (* ImageMagick으로 영역 crop *)
-          let cmd_a = Printf.sprintf "magick %s -crop %dx%d+%d+%d +repage %s 2>/dev/null"
-            (Filename.quote image_a) w h x y (Filename.quote crop_a) in
-          let cmd_b = Printf.sprintf "magick %s -crop %dx%d+%d+%d +repage %s 2>/dev/null"
-            (Filename.quote image_b) w h x y (Filename.quote crop_b) in
-          let _ = Unix.system cmd_a in
-          let _ = Unix.system cmd_b in
+          let args_a = [| "magick"; image_a; "-crop"; Printf.sprintf "%dx%d+%d+%d" w h x y; "+repage"; crop_a |] in
+          let args_b = [| "magick"; image_b; "-crop"; Printf.sprintf "%dx%d+%d+%d" w h x y; "+repage"; crop_b |] in
+          let _ = Safe_exec.run_stdout ~timeout_ms:20000 ~output_limit:(64 * 1024) "magick" args_a in
+          let _ = Safe_exec.run_stdout ~timeout_ms:20000 ~output_limit:(64 * 1024) "magick" args_b in
 
           (* SSIM 계산 *)
-          let ssim_cmd = Printf.sprintf "magick compare -metric SSIM %s %s null: 2>&1"
-            (Filename.quote crop_a) (Filename.quote crop_b) in
-          let ic = Unix.open_process_in ssim_cmd in
-          let output = try input_line ic with _ -> "" in
-          let _ = Unix.close_process_in ic in
+          let args_ssim = [| "magick"; "compare"; "-metric"; "SSIM"; crop_a; crop_b; "null:" |] in
+          let output =
+            match Safe_exec.run ~timeout_ms:20000 ~output_limit:(64 * 1024) "magick" args_ssim with
+            | Ok out -> out.stderr
+            | Error _ -> ""
+          in
 
           (* 결과 파싱: "0.876543 (0.123457)" 형식 *)
           let ssim =
@@ -3868,9 +3875,8 @@ let handle_compare_regions args : (Yojson.Safe.t, string) result =
           let diff_image =
             if generate_diff then begin
               let diff_path = Printf.sprintf "%s/diff_%s.png" output_dir name in
-              let diff_cmd = Printf.sprintf "magick compare %s %s %s 2>/dev/null"
-                (Filename.quote crop_a) (Filename.quote crop_b) (Filename.quote diff_path) in
-              let _ = Unix.system diff_cmd in
+              let args_diff = [| "magick"; "compare"; crop_a; crop_b; diff_path |] in
+              let _ = Safe_exec.run_stdout ~timeout_ms:20000 ~output_limit:(64 * 1024) "magick" args_diff in
               Some diff_path
             end else None
           in
@@ -3936,15 +3942,25 @@ let handle_evolution_report args : (Yojson.Safe.t, string) result =
 
   (* 최근 evolution 디렉토리 목록 *)
   let list_recent_runs () =
-    let cmd = "ls -dt /tmp/figma-evolution/run_* 2>/dev/null | head -10" in
-    let ic = Unix.open_process_in cmd in
-    let rec read_lines acc =
-      try read_lines ((input_line ic) :: acc)
-      with End_of_file -> List.rev acc
-    in
-    let lines = read_lines [] in
-    let _ = Unix.close_process_in ic in
-    lines
+    let base = "/tmp/figma-evolution" in
+    if not (Sys.file_exists base) then []
+    else
+      let entries = Sys.readdir base |> Array.to_list in
+      let runs =
+        entries
+        |> List.filter (fun name -> String.starts_with ~prefix:"run_" name)
+        |> List.map (fun name ->
+          let path = Filename.concat base name in
+          let mtime =
+            try (Unix.stat path).Unix.st_mtime with Unix.Unix_error _ -> 0.0
+          in
+          (mtime, path)
+        )
+        |> List.sort (fun (a, _) (b, _) -> compare b a)
+        |> List.map snd
+      in
+      let rec take n xs = match (n, xs) with | (0, _) -> [] | (_, []) -> [] | (k, x :: tl) -> x :: take (k - 1) tl in
+      take 10 runs
   in
 
   match run_dir with
@@ -3988,9 +4004,8 @@ let handle_evolution_report args : (Yojson.Safe.t, string) result =
             let last_png = Filename.concat dir (List.hd (List.rev pngs)) in
             let output = Filename.concat dir "evolution_comparison.png" in
             if Sys.file_exists figma_png && Sys.file_exists last_png then
-              let cmd = sprintf "montage '%s' '%s' -tile 2x1 -geometry +5+5 -background '#1a1a1a' '%s' 2>/dev/null"
-                figma_png last_png output in
-              let _ = Sys.command cmd in
+              let args = [| "montage"; figma_png; last_png; "-tile"; "2x1"; "-geometry"; "+5+5"; "-background"; "#1a1a1a"; output |] in
+              let _ = Safe_exec.run_stdout ~timeout_ms:20000 ~output_limit:(64 * 1024) "montage" args in
               if Sys.file_exists output then Some output else None
             else None
           else None
@@ -7185,7 +7200,7 @@ let handle_doctor _args : (Yojson.Safe.t, string) result =
   in
   let node_ok = has_command "node" in
   let node_version =
-    if node_ok then command_output "node -v" else "missing"
+    if node_ok then command_output "node" [| "node"; "-v" |] else "missing"
   in
   let playwright_ok = node_ok && has_node_module "playwright" in
   let pngjs_ok = node_ok && has_node_module "pngjs" in
