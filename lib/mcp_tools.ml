@@ -6908,7 +6908,8 @@ let handle_search args : (Yojson.Safe.t, string) result =
 
   match (file_key, token, query) with
   | (Some file_key, Some token, Some query) ->
-      (match Figma_effects.Perform.get_file ~token ~file_key () with
+      (* depth:4 covers Page→Frame→Group→Component; avoids 400 on large files *)
+      (match Figma_effects.Perform.get_file ~token ~file_key ~depth:4 () with
        | Ok json ->
            (match Figma_api.extract_document json with
             | Some doc_json ->
