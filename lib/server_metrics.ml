@@ -154,6 +154,27 @@ let finish_reqd ?bytes reqd status =
      | None -> ())
   )
 
+(* Record a response when we don't have a tracked reqd (e.g., low-level httpun errors). *)
+let record_untracked_response ?(bytes=0) status =
+  let t = now () in
+  let code = Httpun.Status.to_code status in
+  with_lock (fun () ->
+    total := !total + 1;
+    if code >= 200 && code < 300 then status_2xx := !status_2xx + 1
+    else if code >= 300 && code < 400 then status_3xx := !status_3xx + 1
+    else if code >= 400 && code < 500 then begin
+      status_4xx := !status_4xx + 1;
+      errors := !errors + 1
+    end else if code >= 500 && code < 600 then begin
+      status_5xx := !status_5xx + 1;
+      errors := !errors + 1
+    end;
+    if bytes > 0 then bytes_out := !bytes_out + bytes;
+    let now_sec = int_of_float t in
+    record_rps rps_1m now_sec;
+    record_rps rps_5m now_sec
+  )
+
 let sse_open () =
   with_lock (fun () ->
     sse_open_ref := !sse_open_ref + 1;

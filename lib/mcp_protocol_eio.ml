@@ -3614,16 +3614,40 @@ let make_request_handler ~clock ~domain_mgr ~sw ~eio_ctx server =
       eprintf "[http] request handler exception: %s\n%!" (Printexc.to_string exn);
       Response.text ~status:`Internal_server_error "Internal Server Error" reqd
 
-let error_handler _client_addr ?request:_ error start_response =
-  let response_body = start_response Httpun.Headers.empty in
-  let msg = match error with
-    | `Exn exn -> Printexc.to_string exn
+let error_handler _client_addr ?request error start_response =
+  let status =
+    match error with
+    | `Bad_request -> `Bad_request
+    | `Bad_gateway -> `Bad_gateway
+    | `Internal_server_error -> `Internal_server_error
+    | `Exn _ -> `Internal_server_error
+  in
+  let msg =
+    match error with
+    | `Exn exn ->
+        eprintf "[http] error handler exception: %s\n%!" (Printexc.to_string exn);
+        "Internal Server Error"
     | `Bad_request -> "Bad Request"
     | `Bad_gateway -> "Bad Gateway"
     | `Internal_server_error -> "Internal Server Error"
   in
+  let origin_opt =
+    match request with
+    | None -> None
+    | Some req -> Httpun.Headers.get req.Httpun.Request.headers "origin"
+  in
+  let cors_headers =
+    Cors.headers_for_origin_opt origin_opt ~include_methods:true ~include_headers:true
+  in
+  let headers = Httpun.Headers.of_list ([
+    ("content-type", "text/plain; charset=utf-8");
+    ("content-length", string_of_int (String.length msg));
+    ("connection", "close");
+  ] @ cors_headers) in
+  let response_body = start_response headers in
   Httpun.Body.Writer.write_string response_body msg;
-  Httpun.Body.Writer.close response_body
+  Httpun.Body.Writer.close response_body;
+  Server_metrics.record_untracked_response ~bytes:(String.length msg) status
 
 (** Run HTTP server with Eio *)
 let run ~sw ~net ~clock ~domain_mgr config server =

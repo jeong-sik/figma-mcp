@@ -174,3 +174,8 @@
 (test
  (name test_agent_queue_security)
  (libraries figma_mcp alcotest eio_main yojson))
+
+; Server metrics: record low-level errors without reqd tracking
+(test
+ (name test_server_metrics)
+ (libraries figma_mcp alcotest eio_main))

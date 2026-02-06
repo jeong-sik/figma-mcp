@@ -233,10 +233,8 @@ let log_warning context msg =
 (** 에러를 기술적 문자열로 변환 (디버깅용) *)
 let api_error_to_string = function
   | Http_error (code, msg, _) ->
-      if log_response_body then
-        sprintf "HTTP %d: %s" code (truncate_body msg)
-      else
-        sprintf "HTTP %d (body_bytes: %d)" code (String.length msg)
+      (* Avoid leaking response bodies into generic error strings. *)
+      sprintf "HTTP %d (body_bytes: %d)" code (String.length msg)
   | Json_error msg -> sprintf "JSON error: %s" msg
   | Network_error msg -> sprintf "Network error: %s" msg
   | Timeout_error -> "Request timeout"
