@@ -1,0 +1,35 @@
+name: Test
+
+on:
+  push:
+    branches:
+      - "main"
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup OCaml
+        uses: ocaml/setup-ocaml@v3
+        with:
+          ocaml-compiler: 5.2.x
+
+      - name: Pin git dependencies
+        run: |
+          opam pin add grpc-direct-core https://github.com/jeong-sik/grpc-direct.git#main -n -y
+          opam pin add grpc-direct https://github.com/jeong-sik/grpc-direct.git#main -n -y
+
+      - name: Install dependencies
+        run: |
+          opam install . --deps-only --with-test -y
+
+      - name: OCaml tests
+        run: opam exec -- dune test
+
+      - name: Python tests (optional)
+        if: ${{ hashFiles('scripts/test_*.py') != '' }}
+        run: python3 -m unittest discover -s scripts -p 'test_*.py'
