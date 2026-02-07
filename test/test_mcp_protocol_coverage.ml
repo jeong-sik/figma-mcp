@@ -782,6 +782,19 @@ module Edge_cases = struct
 
 end
 
+(** ============== Clamp Max Commands Tests ============== *)
+
+let test_clamp_max_commands_min () =
+  check int "clamp_max_commands(0)=1" 1 (Mcp_protocol_eio.clamp_max_commands 0)
+
+let test_clamp_max_commands_passthrough () =
+  check int "clamp_max_commands(10)=10" 10 (Mcp_protocol_eio.clamp_max_commands 10)
+
+let test_clamp_max_commands_max () =
+  let maxc = Figma_config.Plugin.max_commands in
+  check int "clamp_max_commands(max+1)=max"
+    maxc (Mcp_protocol_eio.clamp_max_commands (maxc + 1))
+
 (** ============== Test Registration ============== *)
 
 let protocol_tests = [
@@ -893,9 +906,16 @@ let edge_case_tests = [
   "whitespace in json", `Quick, Edge_cases.test_whitespace_in_json;
 ]
 
+let clamp_tests = [
+  "min clamp", `Quick, test_clamp_max_commands_min;
+  "passthrough", `Quick, test_clamp_max_commands_passthrough;
+  "max clamp", `Quick, test_clamp_max_commands_max;
+]
+
 let () =
   run "MCP Protocol Coverage" [
     "mcp_protocol", protocol_tests;
     "mcp_protocol_eio", eio_tests;
     "edge_cases", edge_case_tests;
+    "clamp_max_commands", clamp_tests;
   ]
