@@ -47,6 +47,7 @@ let agent_status_to_string = function
 
 type agent_request = {
   id: string;
+  request_secret: string;
   node: Yojson.Safe.t;
   platform: string;
   prompt: string;
@@ -55,6 +56,7 @@ type agent_request = {
   created_at: float;
   mutable status: agent_status;
   mutable claimed_by: string option;
+  mutable claim_token: string option;
   mutable claimed_at: float option;
   mutable last_heartbeat: float option;
   mutable attempts: int;
@@ -84,10 +86,45 @@ let agent_heartbeat_ttl_sec = env_int ~name:"FIGMA_MCP_AGENT_HEARTBEAT_TTL_SEC" 
 let agent_max_age_sec = env_int ~name:"FIGMA_MCP_AGENT_MAX_AGE_SEC" ~default:900
 let agent_max_attempts = env_int ~name:"FIGMA_MCP_AGENT_MAX_ATTEMPTS" ~default:3
 
+let hex_of_bytes (b : bytes) =
+  let hex = "0123456789abcdef" in
+  let len = Bytes.length b in
+  let out = Bytes.create (len * 2) in
+  for i = 0 to (len - 1) do
+    let v = Char.code (Bytes.get b i) in
+    Bytes.set out (i * 2) hex.[v lsr 4];
+    Bytes.set out (i * 2 + 1) hex.[v land 0x0f];
+  done;
+  Bytes.unsafe_to_string out
+
+let random_bytes len =
+  let fd = Unix.openfile "/dev/urandom" [Unix.O_RDONLY] 0 in
+  Fun.protect
+    ~finally:(fun () -> try Unix.close fd with _ -> ())
+    (fun () ->
+      let buf = Bytes.create len in
+      let rec loop off =
+        if off >= len then ()
+        else
+          let n = Unix.read fd buf off (len - off) in
+          if n = 0 then failwith "Unexpected EOF reading /dev/urandom"
+          else loop (off + n)
+      in
+      loop 0;
+      buf)
+
+let random_hex len = hex_of_bytes (random_bytes len)
+
+let new_request_id () = "req_" ^ random_hex 16
+let new_request_secret () = random_hex 16
+let new_claim_token () = random_hex 16
+
 let agent_add_request ~priority ~context_digest node platform prompt =
-  let id = Printf.sprintf "req-%d-%d" (int_of_float (now () *. 1000.0)) (Random.int 10000) in
+  let id = new_request_id () in
+  let request_secret = new_request_secret () in
   let req = {
     id;
+    request_secret;
     node;
     platform;
     prompt;
@@ -96,6 +133,7 @@ let agent_add_request ~priority ~context_digest node platform prompt =
     created_at = now ();
     status = Pending;
     claimed_by = None;
+    claim_token = None;
     claimed_at = None;
     last_heartbeat = None;
     attempts = 0;
@@ -105,7 +143,7 @@ let agent_add_request ~priority ~context_digest node platform prompt =
   } in
   Eio.Mutex.use_rw ~protect:true agent_queue_mutex (fun () ->
     Hashtbl.add agent_queue id req;
-    id)
+    (id, request_secret))
 
 let agent_get_pending () =
   Eio.Mutex.use_rw ~protect:true agent_queue_mutex (fun () ->
@@ -136,6 +174,7 @@ let agent_claim ~worker_id =
           end else begin
             req.status <- Claimed;
             req.claimed_by <- Some worker_id;
+            req.claim_token <- Some (new_claim_token ());
             req.claimed_at <- Some (now ());
             req.last_heartbeat <- Some (now ());
             req.attempts <- req.attempts + 1;
@@ -144,49 +183,68 @@ let agent_claim ~worker_id =
     in
     pick sorted)
 
-let agent_heartbeat ~worker_id req_id =
+let agent_heartbeat ~worker_id ~claim_token req_id =
   Eio.Mutex.use_rw ~protect:true agent_queue_mutex (fun () ->
     match Hashtbl.find_opt agent_queue req_id with
-    | Some req when req.status = Claimed && req.claimed_by = Some worker_id ->
+    | Some req when req.status = Claimed && req.claimed_by = Some worker_id -> (
+        match req.claim_token with
+        | Some t when t = claim_token ->
         req.last_heartbeat <- Some (now ());
         Ok ()
+        | _ -> Error "invalid_claim_token")
     | Some _ -> Error "not_claimed_by_worker"
     | None -> Error "not_found")
 
-let agent_abandon ~worker_id ~reason req_id =
+let agent_abandon ~worker_id ~claim_token ~reason req_id =
   Eio.Mutex.use_rw ~protect:true agent_queue_mutex (fun () ->
     match Hashtbl.find_opt agent_queue req_id with
-    | Some req when req.status = Claimed && req.claimed_by = Some worker_id ->
+    | Some req when req.status = Claimed && req.claimed_by = Some worker_id -> (
+        match req.claim_token with
+        | Some t when t = claim_token ->
         req.status <- Pending;
         req.claimed_by <- None;
+        req.claim_token <- None;
         req.claimed_at <- None;
         req.last_heartbeat <- None;
         req.error <- Some reason;
         Ok ()
+        | _ -> Error "invalid_claim_token")
     | Some _ -> Error "not_claimed_by_worker"
     | None -> Error "not_found")
 
-let agent_submit_result ?worker_id ?context_digest req_id code =
+let agent_submit_result ?worker_id ?context_digest ~claim_token req_id code =
   Eio.Mutex.use_rw ~protect:true agent_queue_mutex (fun () ->
     match Hashtbl.find_opt agent_queue req_id with
     | None -> Error "not_found"
     | Some req ->
         let drifted = ref req.drifted in
         let error = ref None in
-        (match req.status, worker_id, req.claimed_by with
-         | Claimed, Some w, Some c when w <> c ->
+        (match req.status with
+         | Claimed -> (
+             match req.claim_token with
+             | Some t when t = claim_token -> ()
+             | _ ->
+                 drifted := true;
+                 error := Some "invalid_claim_token")
+         | _ ->
              drifted := true;
-             error := Some "worker_mismatch"
-         | Claimed, None, Some _ ->
-             drifted := true
-         | Pending, _, _ ->
-             drifted := true
-         | _ -> ());
-        (match context_digest with
-         | Some d when d <> "" && d <> req.context_digest ->
-             drifted := true;
-             error := Some "context_drift"
-         | _ -> ());
+             if !error = None then error := Some "not_claimed");
+        if !error = None then
+          (match req.status, worker_id, req.claimed_by with
+           | Claimed, Some w, Some c when w <> c ->
+               drifted := true;
+               error := Some "worker_mismatch"
+           | Claimed, None, Some _ ->
+               drifted := true
+           | Pending, _, _ ->
+               drifted := true
+           | _ -> ());
+        if !error = None then
+          (match context_digest with
+           | Some d when d <> "" && d <> req.context_digest ->
+               drifted := true;
+               error := Some "context_drift"
+           | _ -> ());
         req.drifted <- !drifted;
         (match !error with
          | Some msg ->
@@ -195,6 +253,7 @@ let agent_submit_result ?worker_id ?context_digest req_id code =
          | None ->
              req.result <- Some code;
              req.status <- Completed;
+             req.claim_token <- None;
              Ok ()))
 
 let agent_get_result req_id =
@@ -215,6 +274,7 @@ let agent_cleanup_old () =
            if (t -. last) > heartbeat_ttl || (t -. Option.value ~default:req.created_at req.claimed_at) > claim_ttl then begin
              req.status <- Pending;
              req.claimed_by <- None;
+             req.claim_token <- None;
              req.claimed_at <- None;
              req.last_heartbeat <- None;
              req.error <- Some "claim_timeout";
@@ -577,10 +637,8 @@ module Request = struct
     respond_error reqd `Payload_too_large body
 
   let respond_internal_error reqd exn =
-    let body = Printf.sprintf
-      "500 Internal Server Error: %s" (Printexc.to_string exn)
-    in
-    respond_error reqd `Internal_server_error body
+    eprintf "[http] internal error: %s\n%!" (Printexc.to_string exn);
+    respond_error reqd `Internal_server_error "500 Internal Server Error"
 
   let read_body_async reqd callback =
     let request = Httpun.Reqd.request reqd in
@@ -993,6 +1051,13 @@ let clamp_poll_ms value =
   let value = max 0 value in
   if value > plugin_poll_max_ms then plugin_poll_max_ms else value
 
+let clamp_max_commands value =
+  let value = max 1 value in
+  if value > Figma_config.Plugin.max_commands then
+    Figma_config.Plugin.max_commands
+  else
+    value
+
 let wait_for_commands ~clock ~channel_id ~max ~timeout_ms =
   let commands = Figma_plugin_bridge.poll_commands ~channel_id ~max in
   if commands <> [] || timeout_ms <= 0 then
@@ -1048,7 +1113,11 @@ let plugin_poll_handler ~clock _request reqd =
         (match get_string_field "channel_id" json with
          | None -> json_error "Missing channel_id" reqd
          | Some channel_id ->
-             let max_commands = get_int_field "max_commands" json |> Option.value ~default:1 in
+             let max_commands =
+               get_int_field "max_commands" json
+               |> Option.value ~default:1
+               |> clamp_max_commands
+             in
              let wait_ms =
                match get_int_field "wait_ms" json with
                | Some value -> clamp_poll_ms value
@@ -1613,7 +1682,7 @@ let plugin_analyze_handler ~sw:_ ~eio_ctx:_ _request reqd =
 
 (** ============== Agent Queue Handlers ============== *)
 
-let agent_request_json ~include_node ~include_prompt req =
+let agent_request_json ?(include_claim_token=false) ~include_node ~include_prompt req =
   let base = [
     ("id", `String req.id);
     ("platform", `String req.platform);
@@ -1622,6 +1691,7 @@ let agent_request_json ~include_node ~include_prompt req =
     ("status", `String (agent_status_to_string req.status));
     ("attempts", `Int req.attempts);
     ("claimed_by", (match req.claimed_by with Some v -> `String v | None -> `Null));
+    ("claim_token", (match include_claim_token, req.claim_token with true, Some v -> `String v | _ -> `Null));
     ("claimed_at", (match req.claimed_at with Some v -> `Float v | None -> `Null));
     ("last_heartbeat", (match req.last_heartbeat with Some v -> `Float v | None -> `Null));
     ("drifted", `Bool req.drifted);
@@ -1652,9 +1722,12 @@ let agent_request_handler _request reqd =
           if ctx_digest <> "" then ctx_digest
           else Digest.to_hex (Digest.string (full_prompt ^ "\n" ^ node_info))
         in
-        let req_id = agent_add_request ~priority ~context_digest node platform full_prompt in
+        let (req_id, request_secret) =
+          agent_add_request ~priority ~context_digest node platform full_prompt
+        in
         let result = `Assoc [
           ("request_id", `String req_id);
+          ("request_secret", `String request_secret);
           ("status", `String "queued");
           ("priority", `Int priority);
           ("context_digest", `String context_digest);
@@ -1667,7 +1740,7 @@ let agent_pending_handler _request reqd =
   agent_cleanup_old ();
   let pending = agent_get_pending () in
   let requests = List.map (fun req ->
-    agent_request_json ~include_node:true ~include_prompt:true req
+    agent_request_json ~include_node:false ~include_prompt:false req
   ) pending in
   let result = `Assoc [("pending", `List requests); ("count", `Int (List.length pending))] in
   Response.json (Yojson.Safe.to_string result) reqd
@@ -1690,7 +1763,7 @@ let agent_claim_handler _request reqd =
           | Some req ->
               let result = `Assoc [
                 ("status", `String "claimed");
-                ("request", agent_request_json ~include_node:true ~include_prompt:true req);
+                ("request", agent_request_json ~include_claim_token:true ~include_node:true ~include_prompt:true req);
               ] in
               Response.json (Yojson.Safe.to_string result) reqd
         end
@@ -1705,10 +1778,11 @@ let agent_heartbeat_handler _request reqd =
         let open Yojson.Safe.Util in
         let worker_id = member "worker_id" json |> to_string_option |> Option.value ~default:"" in
         let req_id = member "request_id" json |> to_string_option |> Option.value ~default:"" in
-        if worker_id = "" || req_id = "" then
-          json_error "worker_id and request_id required" reqd
+        let claim_token = member "claim_token" json |> to_string_option |> Option.value ~default:"" in
+        if worker_id = "" || req_id = "" || claim_token = "" then
+          json_error "worker_id, request_id and claim_token required" reqd
         else
-          match agent_heartbeat ~worker_id req_id with
+          match agent_heartbeat ~worker_id ~claim_token req_id with
           | Ok () ->
               let result = `Assoc [("status", `String "ok"); ("request_id", `String req_id)] in
               Response.json (Yojson.Safe.to_string result) reqd
@@ -1725,10 +1799,11 @@ let agent_abandon_handler _request reqd =
         let worker_id = member "worker_id" json |> to_string_option |> Option.value ~default:"" in
         let req_id = member "request_id" json |> to_string_option |> Option.value ~default:"" in
         let reason = member "reason" json |> to_string_option |> Option.value ~default:"abandoned" in
-        if worker_id = "" || req_id = "" then
-          json_error "worker_id and request_id required" reqd
+        let claim_token = member "claim_token" json |> to_string_option |> Option.value ~default:"" in
+        if worker_id = "" || req_id = "" || claim_token = "" then
+          json_error "worker_id, request_id and claim_token required" reqd
         else
-          match agent_abandon ~worker_id ~reason req_id with
+          match agent_abandon ~worker_id ~claim_token ~reason req_id with
           | Ok () ->
               let result = `Assoc [("status", `String "ok"); ("request_id", `String req_id)] in
               Response.json (Yojson.Safe.to_string result) reqd
@@ -1744,11 +1819,13 @@ let agent_result_handler _request reqd =
         let open Yojson.Safe.Util in
         let req_id = member "request_id" json |> to_string_option |> Option.value ~default:"" in
         let code = member "code" json |> to_string_option |> Option.value ~default:"" in
+        let claim_token = member "claim_token" json |> to_string_option |> Option.value ~default:"" in
         let worker_id = member "worker_id" json |> to_string_option in
         let context_digest = member "context_digest" json |> to_string_option in
-        if req_id = "" || code = "" then json_error "request_id and code required" reqd
+        if req_id = "" || code = "" || claim_token = "" then
+          json_error "request_id, code and claim_token required" reqd
         else
-          match agent_submit_result ?worker_id ?context_digest req_id code with
+          match agent_submit_result ?worker_id ?context_digest ~claim_token req_id code with
           | Ok () ->
               let result = `Assoc [("status", `String "submitted"); ("request_id", `String req_id)] in
               Response.json (Yojson.Safe.to_string result) reqd
@@ -1759,8 +1836,20 @@ let agent_result_handler _request reqd =
 let agent_status_handler request reqd =
   let path = Request.path request in
   let req_id = String.sub path 14 (String.length path - 14) in (* /agent/status/ = 14 chars *)
+  let request_secret =
+    match Httpun.Headers.get request.Httpun.Request.headers "x-mcp-request-secret" with
+    | Some v ->
+        let v = String.trim v in
+        if v = "" then None else Some v
+    | None -> None
+  in
   match agent_get_result req_id with
   | Some req ->
+      let authorized =
+        match request_secret with
+        | Some s -> s = req.request_secret
+        | None -> false
+      in
       let base = [
         ("status", `String (agent_status_to_string req.status));
         ("request_id", `String req.id);
@@ -1773,10 +1862,12 @@ let agent_status_handler request reqd =
         ("drifted", `Bool req.drifted);
         ("error", (match req.error with Some v -> `String v | None -> `Null));
         ("age_sec", `Float (Unix.gettimeofday () -. req.created_at));
+        ("code_available", `Bool (req.status = Completed && req.result <> None));
+        ("authorized", `Bool authorized);
       ] in
       let result =
         match req.status, req.result with
-        | Completed, Some code -> `Assoc (("code", `String code) :: base)
+        | Completed, Some code when authorized -> `Assoc (("code", `String code) :: base)
         | _ -> `Assoc base
       in
       Response.json (Yojson.Safe.to_string result) reqd
@@ -2999,6 +3090,44 @@ let extract_animations_handler ~sw:_ ~eio_ctx:_ _request reqd =
   )
 
 (** POST /webhook/figma - Figma webhook handler for design changes *)
+let constant_time_equal a b =
+  let a = String.trim a in
+  let b = String.trim b in
+  let la = String.length a in
+  let lb = String.length b in
+  if la <> lb then false
+  else
+    let diff = ref 0 in
+    for i = 0 to la - 1 do
+      diff := !diff lor (Char.code a.[i] lxor Char.code b.[i])
+    done;
+    !diff = 0
+
+let webhook_passcode_secret_opt () =
+  let nonempty name =
+    match Sys.getenv_opt name with
+    | Some v ->
+        let v = String.trim v in
+        if v = "" then None else Some v
+    | None -> None
+  in
+  match nonempty "FIGMA_MCP_WEBHOOK_PASSCODE" with
+  | Some _ as v -> v
+  | None -> nonempty "FIGMA_WEBHOOK_PASSCODE"
+
+let validate_webhook_passcode ~allow_no_auth ~secret_opt ~passcode =
+  match secret_opt with
+  | None ->
+      if allow_no_auth then
+        Error "Webhook passcode required when no-auth mode is enabled (set FIGMA_MCP_WEBHOOK_PASSCODE)"
+      else
+        Ok ()
+  | Some secret ->
+      let passcode = String.trim passcode in
+      if passcode = "" then Error "Missing webhook passcode"
+      else if constant_time_equal secret passcode then Ok ()
+      else Error "Invalid webhook passcode"
+
 let webhook_handler ~sw:_ ~eio_ctx:_ _request reqd =
   Request.read_body_async reqd (fun body_str ->
     match parse_json body_str with
@@ -3013,11 +3142,15 @@ let webhook_handler ~sw:_ ~eio_ctx:_ _request reqd =
         let timestamp = member "timestamp" json |> to_string_option |> Option.value ~default:"" in
         let passcode = member "passcode" json |> to_string_option |> Option.value ~default:"" in
 
-        (* Verify webhook (in production, check passcode against stored secret) *)
-        let _ = passcode in
+        let secret_opt = webhook_passcode_secret_opt () in
+        (match validate_webhook_passcode ~allow_no_auth:!allow_no_auth ~secret_opt ~passcode with
+         | Error err ->
+             let body = `Assoc [("error", `String err)] in
+             Response.json ~status:`Forbidden (Yojson.Safe.to_string body) reqd
+         | Ok () ->
 
-        (* Log the webhook event *)
-        printf "[Webhook] %s: file=%s (%s) at %s\n%!" event_type file_key file_name timestamp;
+             (* Log the webhook event *)
+             printf "[Webhook] %s: file=%s (%s) at %s\n%!" event_type file_key file_name timestamp;
 
         (* Determine action based on event type *)
         let action = match event_type with
@@ -3042,7 +3175,7 @@ let webhook_handler ~sw:_ ~eio_ctx:_ _request reqd =
             ("variants", `String "/plugin/extract-variants");
           ]);
         ] in
-        Response.json (Yojson.Safe.to_string result) reqd
+             Response.json (Yojson.Safe.to_string result) reqd)
   )
 
 (** POST /plugin/code-to-figma - Convert code to Figma DSL *)
@@ -3127,6 +3260,74 @@ Output ONLY valid JSON array, no explanation. Example:
         end
   )
 
+(** ============== Vision Compare Safety ============== *)
+
+let has_suffix ~suffix s =
+  let ls = String.length s in
+  let l = String.length suffix in
+  ls >= l && String.sub s (ls - l) l = suffix
+
+let trim s = String.trim s
+
+let split_csv s =
+  s
+  |> String.split_on_char ','
+  |> List.map trim
+  |> List.filter (fun x -> x <> "")
+
+let normalize_dir_prefix path =
+  let p = trim path in
+  if p = "" then None
+  else
+    let rp = try Unix.realpath p with _ -> p in
+    if rp = "/" then Some rp
+    else if has_suffix ~suffix:"/" rp then Some rp
+    else Some (rp ^ "/")
+
+let is_under_dir ~dir_prefix path =
+  if dir_prefix = "/" then true
+  else
+    let lp = String.length dir_prefix in
+    String.length path >= lp && String.sub path 0 lp = dir_prefix
+
+let validate_reference_image_path ~roots ~max_bytes path : (string, string) result =
+  if trim path = "" then
+    Error "reference path required"
+  else if not (Sys.file_exists path) then
+    Error "Reference image not found"
+  else
+    let lower = String.lowercase_ascii path in
+    if not (has_suffix ~suffix:".png" lower) then
+      Error "Reference must be a .png file"
+    else
+      let st =
+        try Ok (Unix.stat path)
+        with Unix.Unix_error (e, _, _) ->
+          Error (Printf.sprintf "Failed to stat reference image: %s" (Unix.error_message e))
+      in
+      match st with
+      | Error e -> Error e
+      | Ok st ->
+          if st.Unix.st_kind <> Unix.S_REG then
+            Error "Reference must be a regular file"
+          else if st.Unix.st_size > max_bytes then
+            Error "Reference image too large"
+          else
+            let rp =
+              try Ok (Unix.realpath path)
+              with _ -> Error "Failed to resolve reference image path"
+            in
+            match rp with
+            | Error e -> Error e
+            | Ok rp ->
+                let prefixes =
+                  roots
+                  |> List.filter_map normalize_dir_prefix
+                in
+                if prefixes = [] then Ok rp
+                else if List.exists (fun dir_prefix -> is_under_dir ~dir_prefix rp) prefixes then Ok rp
+                else Error "Reference path not allowed (set FIGMA_MCP_VISION_REFERENCE_ROOTS)"
+
 (** POST /plugin/vision-compare - Compare Figma export with rendered code *)
 let vision_compare_handler ~sw:_ ~eio_ctx:_ _request reqd =
   Request.read_body_async reqd (fun body_str ->
@@ -3145,10 +3346,22 @@ let vision_compare_handler ~sw:_ ~eio_ctx:_ _request reqd =
         end else if code = "" then begin
           json_error "code required" reqd
         end else begin
-          (* Generate temp HTML file from code *)
-          let html_path = sprintf "/tmp/figma-vision-%d.html" (int_of_float (Unix.gettimeofday () *. 1000.0)) in
-          let rendered_path = sprintf "/tmp/figma-vision-%d-rendered.png" (int_of_float (Unix.gettimeofday () *. 1000.0)) in
-
+          let roots =
+            match Sys.getenv_opt "FIGMA_MCP_VISION_REFERENCE_ROOTS" with
+            | None -> []
+            | Some v -> split_csv v
+          in
+          let max_bytes =
+            env_int ~name:"FIGMA_MCP_VISION_REFERENCE_MAX_BYTES" ~default:(50 * 1024 * 1024)
+          in
+          match validate_reference_image_path ~roots ~max_bytes reference_path with
+          | Error err ->
+              let result = `Assoc [
+                ("error", `String err);
+                ("hint", `String "Configure FIGMA_MCP_VISION_REFERENCE_ROOTS to restrict allowed reference paths.");
+              ] in
+              Response.json ~status:`Bad_request (Yojson.Safe.to_string result) reqd
+          | Ok reference_path ->
           (* Wrap code in HTML boilerplate *)
           let html_content = sprintf {|<!DOCTYPE html>
 <html><head>
@@ -3161,46 +3374,72 @@ body { font-family: 'Inter', -apple-system, sans-serif; }
 <div id="root">%s</div>
 </body></html>|} code
           in
-
-          (* Write HTML file *)
-          Out_channel.with_open_bin html_path (fun oc ->
-            output_string oc html_content
-          );
-
-          (* Run render script *)
-          let scripts_dir = Sys.getcwd () ^ "/scripts" in
-          let render_cmd = sprintf "cd %s && node render-html.js %s %s %d %d 2>&1" scripts_dir html_path rendered_path width height in
-          let render_result = Unix.open_process_in render_cmd in
-          let _ = try input_line render_result with End_of_file -> "" in
-          let _ = Unix.close_process_in render_result in
-
-          (* Run SSIM comparison - using shell script (no Python deps) *)
-          let ssim_cmd = sprintf "%s/ssim_compare.sh %s %s 2>&1" scripts_dir reference_path rendered_path in
-          let ssim_result = Unix.open_process_in ssim_cmd in
-          let ssim_output = try input_line ssim_result with End_of_file -> "{}" in
-          let _ = Unix.close_process_in ssim_result in
-
-          (* Parse SSIM result *)
-          (try
-            let ssim_json = Yojson.Safe.from_string ssim_output in
-            let ssim_score = member "ssim" ssim_json |> to_float_option |> Option.value ~default:0.0 in
-            let passed = ssim_score >= threshold in
-
-            (* Cleanup temp files *)
-            (try Sys.remove html_path with _ -> ());
-            if passed then (try Sys.remove rendered_path with _ -> ());
-
-            let result = `Assoc [
-              ("ssim", `Float ssim_score);
-              ("threshold", `Float threshold);
-              ("pass", `Bool passed);
-              ("reference", `String reference_path);
-              ("rendered", `String (if passed then "(cleaned up)" else rendered_path));
-            ] in
-            Response.json (Yojson.Safe.to_string result) reqd
-          with _ ->
-            let result = `Assoc [("error", `String "SSIM comparison failed"); ("raw", `String ssim_output)] in
-            Response.json (Yojson.Safe.to_string result) reqd)
+          (* Render HTML -> PNG (Playwright) *)
+          match Visual_verifier.render_html_to_png ~width ~height html_content with
+          | Error err ->
+              let result = `Assoc [
+                ("error", `String ("Render failed: " ^ err));
+                ("reference", `String reference_path);
+                ("hint", `String "Ensure Node + Playwright deps are installed under ./scripts (npm ci) and try again.");
+              ] in
+              Response.json ~status:`Internal_server_error (Yojson.Safe.to_string result) reqd
+          | Ok rendered_path ->
+              (* Compare with SSIM + region analysis (Node script fallback if needed) *)
+              (match Visual_verifier.compare_renders_with_regions ~figma_png:reference_path ~html_png:rendered_path with
+               | Error err ->
+                   let result = `Assoc [
+                     ("error", `String ("SSIM comparison failed: " ^ err));
+                     ("reference", `String reference_path);
+                     ("rendered", `String rendered_path);
+                   ] in
+                   Response.json ~status:`Internal_server_error (Yojson.Safe.to_string result) reqd
+               | Ok metrics ->
+                   let ssim_score = metrics.ssim in
+                   let delta_e = metrics.delta_e in
+                   let human_ssim = Visual_verifier.calculate_human_ssim ssim_score delta_e in
+                   let passed = ssim_score >= threshold in
+                   if passed then (try Sys.remove rendered_path with _ -> ());
+                   let advanced_json =
+                     match metrics.advanced with
+                     | None -> `Null
+                     | Some adv ->
+                         `Assoc [
+                           ("true_ssim", `Float adv.true_ssim);
+                           ("ms_ssim", `Float adv.ms_ssim);
+                           ("pixel_match", `Float adv.pixel_match);
+                           ("lpips", (match adv.lpips with Some v -> `Float v | None -> `Null));
+                         ]
+                   in
+                   let result = `Assoc [
+                     ("ssim", `Float ssim_score);
+                     ("delta_e", `Float delta_e);
+                     ("human_ssim", `Float human_ssim);
+                     ("threshold", `Float threshold);
+                     ("pass", `Bool passed);
+                     ("reference", `String reference_path);
+                     ("rendered", `String (if passed then "(cleaned up)" else rendered_path));
+                     ("regions", `Assoc [
+                       ("quadrants", `Assoc [
+                         ("top_left", `Float metrics.regions.quadrants.top_left);
+                         ("top_right", `Float metrics.regions.quadrants.top_right);
+                         ("bottom_left", `Float metrics.regions.quadrants.bottom_left);
+                         ("bottom_right", `Float metrics.regions.quadrants.bottom_right);
+                       ]);
+                       ("strips", `Assoc [
+                         ("top", `Float metrics.regions.strips.strip_top);
+                         ("middle", `Float metrics.regions.strips.strip_middle);
+                         ("bottom", `Float metrics.regions.strips.strip_bottom);
+                       ]);
+                       ("edges", `Assoc [
+                         ("top", `Float metrics.regions.edges.edge_top);
+                         ("bottom", `Float metrics.regions.edges.edge_bottom);
+                         ("left", `Float metrics.regions.edges.edge_left);
+                         ("right", `Float metrics.regions.edges.edge_right);
+                       ]);
+                     ]);
+	                     ("advanced", advanced_json);
+	                   ] in
+	                   Response.json (Yojson.Safe.to_string result) reqd)
         end
   )
 
@@ -3372,19 +3611,43 @@ let make_request_handler ~clock ~domain_mgr ~sw ~eio_ctx server =
     try
       route_request ~clock ~domain_mgr ~sw ~eio_ctx server request reqd
     with exn ->
-      let msg = Printf.sprintf "Internal Server Error: %s" (Printexc.to_string exn) in
-      Response.text ~status:`Internal_server_error msg reqd
+      eprintf "[http] request handler exception: %s\n%!" (Printexc.to_string exn);
+      Response.text ~status:`Internal_server_error "Internal Server Error" reqd
 
-let error_handler _client_addr ?request:_ error start_response =
-  let response_body = start_response Httpun.Headers.empty in
-  let msg = match error with
-    | `Exn exn -> Printexc.to_string exn
+let error_handler _client_addr ?request error start_response =
+  let status =
+    match error with
+    | `Bad_request -> `Bad_request
+    | `Bad_gateway -> `Bad_gateway
+    | `Internal_server_error -> `Internal_server_error
+    | `Exn _ -> `Internal_server_error
+  in
+  let msg =
+    match error with
+    | `Exn exn ->
+        eprintf "[http] error handler exception: %s\n%!" (Printexc.to_string exn);
+        "Internal Server Error"
     | `Bad_request -> "Bad Request"
     | `Bad_gateway -> "Bad Gateway"
     | `Internal_server_error -> "Internal Server Error"
   in
+  let origin_opt =
+    match request with
+    | None -> None
+    | Some req -> Httpun.Headers.get req.Httpun.Request.headers "origin"
+  in
+  let cors_headers =
+    Cors.headers_for_origin_opt origin_opt ~include_methods:true ~include_headers:true
+  in
+  let headers = Httpun.Headers.of_list ([
+    ("content-type", "text/plain; charset=utf-8");
+    ("content-length", string_of_int (String.length msg));
+    ("connection", "close");
+  ] @ cors_headers) in
+  let response_body = start_response headers in
   Httpun.Body.Writer.write_string response_body msg;
-  Httpun.Body.Writer.close response_body
+  Httpun.Body.Writer.close response_body;
+  Server_metrics.record_untracked_response ~bytes:(String.length msg) status
 
 (** Run HTTP server with Eio *)
 let run ~sw ~net ~clock ~domain_mgr config server =

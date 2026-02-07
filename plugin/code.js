@@ -5,6 +5,11 @@
 
 figma.showUI(__html__, { width: 360, height: 600 });
 
+// UI<->plugin message hardening: a per-session nonce that must be echoed back
+// in every UI->plugin message (and included in plugin->UI messages).
+const sessionNonce = Math.random().toString(16).slice(2) + Date.now().toString(16);
+figma.ui.postMessage({ type: "init", nonce: sessionNonce });
+
 const MIXED = figma.mixed;
 const MAX_PAYLOAD_CHARS = 2000000;
 
@@ -1323,14 +1328,22 @@ function extractTokens() {
 
 // Selection change listener
 figma.on("selectionchange", function() {
-  figma.ui.postMessage({ type: "selection_update", selection: getSelectionData() });
+  figma.ui.postMessage({ type: "selection_update", nonce: sessionNonce, selection: getSelectionData() });
 });
 
 figma.ui.onmessage = async (msg) => {
+  // Allow the UI to request the nonce in case the initial init message was missed.
+  if (msg && msg.type === "hello") {
+    figma.ui.postMessage({ type: "init", nonce: sessionNonce });
+    return;
+  }
+
+  if (!msg || msg.nonce !== sessionNonce) return;
+
   // Handle selection request
   if (msg.type === "request_selection") {
-    figma.ui.postMessage({ type: "selection_update", selection: getSelectionData() });
-    figma.ui.postMessage({ type: "tokens_update", tokens: extractTokens() });
+    figma.ui.postMessage({ type: "selection_update", nonce: sessionNonce, selection: getSelectionData() });
+    figma.ui.postMessage({ type: "tokens_update", nonce: sessionNonce, tokens: extractTokens() });
     return;
   }
 
@@ -1340,6 +1353,7 @@ figma.ui.onmessage = async (msg) => {
 
     figma.ui.postMessage({
       type: "command_result",
+      nonce: sessionNonce,
       command_id: command.id,
       action: command.name,
       ok: result.ok,

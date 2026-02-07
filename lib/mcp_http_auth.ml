@@ -44,6 +44,17 @@ let expected_api_key env_name =
   | Some v -> Some v
   | None -> None
 
+let constant_time_equal a b =
+  let la = String.length a in
+  let lb = String.length b in
+  if la <> lb then false
+  else
+    let diff = ref 0 in
+    for i = 0 to la - 1 do
+      diff := !diff lor (Char.code a.[i] lxor Char.code b.[i])
+    done;
+    !diff = 0
+
 let check_api_key ~env_name ~allow_no_auth headers =
   if allow_no_auth then Ok ()
   else
@@ -51,5 +62,5 @@ let check_api_key ~env_name ~allow_no_auth headers =
     | None -> Error Missing
     | Some expected -> (
         match extract_api_key headers with
-        | Some provided when String.equal provided expected -> Ok ()
+        | Some provided when constant_time_equal provided expected -> Ok ()
         | _ -> Error Invalid)

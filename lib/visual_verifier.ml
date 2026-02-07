@@ -48,38 +48,41 @@ let temp_file ~prefix ~ext =
   ensure_dir temp_dir;
   Filename.concat temp_dir (generate_temp_filename ~prefix ~ext)
 
-(** 프로세스 실행 및 출력 캡처 *)
-let run_command cmd args =
-  let stdout_read, stdout_write = Unix.pipe () in
-  let stderr_read, stderr_write = Unix.pipe () in
+let run_ok ~cmd ~args =
+  match Safe_exec.run ~timeout_ms:20000 ~output_limit:(256 * 1024) cmd args with
+  | Error e -> Error e
+  | Ok out ->
+      if out.timed_out then Error "Process timed out"
+      else
+        match out.status with
+        | Unix.WEXITED 0 -> Ok out
+        | Unix.WEXITED code -> Error (sprintf "Exit code %d: %s" code out.stderr)
+        | Unix.WSIGNALED sig_num -> Error (sprintf "Killed by signal %d" sig_num)
+        | Unix.WSTOPPED _ -> Error "Process stopped"
 
-  let pid = Unix.create_process cmd args Unix.stdin stdout_write stderr_write in
-  Unix.close stdout_write;
-  Unix.close stderr_write;
-
-  let stdout_channel = Unix.in_channel_of_descr stdout_read in
-  let stderr_channel = Unix.in_channel_of_descr stderr_read in
-
-  let stdout_content =
-    let buf = Buffer.create 1024 in
-    (try while true do Buffer.add_channel buf stdout_channel 1 done with End_of_file -> ());
-    Buffer.contents buf
+let mkdir_p path =
+  let rec loop p =
+    if p = Filename.dirname p then ()
+    else if Sys.file_exists p then ()
+    else begin
+      loop (Filename.dirname p);
+      try Unix.mkdir p 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ()
+    end
   in
-  let stderr_content =
-    let buf = Buffer.create 1024 in
-    (try while true do Buffer.add_channel buf stderr_channel 1 done with End_of_file -> ());
-    Buffer.contents buf
-  in
+  loop path
 
-  close_in stdout_channel;
-  close_in stderr_channel;
-
-  let _, status = Unix.waitpid [] pid in
-  match status with
-  | Unix.WEXITED 0 -> Ok stdout_content
-  | Unix.WEXITED code -> Error (sprintf "Exit code %d: %s" code stderr_content)
-  | Unix.WSIGNALED sig_num -> Error (sprintf "Killed by signal %d" sig_num)
-  | Unix.WSTOPPED _ -> Error "Process stopped"
+let copy_file ~src ~dst =
+  let buf = Bytes.create 65536 in
+  In_channel.with_open_bin src (fun ic ->
+    Out_channel.with_open_bin dst (fun oc ->
+      let rec pump () =
+        match In_channel.input ic buf 0 (Bytes.length buf) with
+        | 0 -> ()
+        | n -> Out_channel.output oc buf 0 n; pump ()
+      in
+      pump ()
+    )
+  )
 
 (** ============== 핵심 기능 ============== *)
 
@@ -115,11 +118,11 @@ let render_html_to_png ?(width=375) ?(height=812) html =
     string_of_int height;
   |] in
 
-  match run_command "node" args with
+  match run_ok ~cmd:"node" ~args with
   | Ok output ->
     (* JSON 응답 파싱 *)
     (try
-      let json = Yojson.Safe.from_string (String.trim output) in
+      let json = Yojson.Safe.from_string (String.trim output.stdout) in
       let open Yojson.Safe.Util in
       if json |> member "success" |> to_bool then
         Ok output_path
@@ -127,7 +130,7 @@ let render_html_to_png ?(width=375) ?(height=812) html =
         Error (json |> member "error" |> to_string_option |> Option.value ~default:"Unknown error")
     with _ ->
       if Sys.file_exists output_path then Ok output_path
-      else Error ("Failed to parse render output: " ^ output))
+      else Error ("Failed to parse render output: " ^ output.stdout))
   | Error e -> Error e
 
 (** 두 PNG 이미지의 SSIM 및 Delta E 비교
@@ -253,21 +256,12 @@ let parse_diff_regions json =
 
 (** Node.js ssim-compare.js로 비교 (영역 정보 포함) *)
 let compare_renders_with_regions ~figma_png ~html_png : (comparison_with_regions, string) result =
-  let cmd = sprintf "node %s %s %s 2>&1"
-    (Filename.quote ssim_script_path)
-    (Filename.quote figma_png)
-    (Filename.quote html_png)
+  let args = [| "node"; ssim_script_path; figma_png; html_png |] in
+  let output =
+    match run_ok ~cmd:"node" ~args with
+    | Ok out -> out.stdout
+    | Error e -> e
   in
-  let ic = Unix.open_process_in cmd in
-  let buf = Buffer.create 1024 in
-  (try
-    while true do
-      Buffer.add_string buf (input_line ic);
-      Buffer.add_char buf '\n'
-    done
-  with End_of_file -> ());
-  let _ = Unix.close_process_in ic in
-  let output = Buffer.contents buf in
   try
     let json = Yojson.Safe.from_string (String.trim output) in
     let open Yojson.Safe.Util in
@@ -587,6 +581,7 @@ type verification_result = {
   final_html: string option;
   evolution_history: evolution_step list;  (* 진화 과정 기록 *)
   evolution_dir: string;                    (* 진화 저장 디렉토리 *)
+  errors: string list;                      (* 실패/부분 실패 원인 (진단용) *)
 }
 
 (** evolution_step을 JSON으로 변환 *)
@@ -615,6 +610,7 @@ let result_to_json result =
     ("final_html", match result.final_html with Some h -> `String h | None -> `Null);
     ("evolution_history", `List (List.map step_to_json result.evolution_history));
     ("evolution_dir", `String result.evolution_dir);
+    ("errors", `List (List.map (fun e -> `String e) result.errors));
   ]
 
 (** 진화 디렉토리 생성 *)
@@ -622,7 +618,7 @@ let create_evolution_dir () =
   let timestamp = Unix.gettimeofday () in
   let dir = sprintf "/tmp/figma-evolution/run_%d" (int_of_float (timestamp *. 1000.0)) in
   let html_dir = Filename.concat dir "html" in
-  let _ = Sys.command (sprintf "mkdir -p %s" (Filename.quote html_dir)) in
+  mkdir_p html_dir;
   dir
 
 (** HTML을 파일로 저장 *)
@@ -636,7 +632,7 @@ let save_html ~dir ~step html =
 (** PNG를 evolution 디렉토리로 복사 *)
 let save_png ~dir ~step ~src_png =
   let dst = sprintf "%s/step%d_render.png" dir step in
-  let _ = Sys.command (sprintf "cp %s %s" (Filename.quote src_png) (Filename.quote dst)) in
+  copy_file ~src:src_png ~dst;
   dst
 
 (** Visual Feedback Loop 실행
@@ -664,10 +660,9 @@ let verify_visual
   let evo_dir = if save_evolution then create_evolution_dir () else "/tmp/figma-visual" in
 
   (* Figma 원본도 evolution 디렉토리에 복사 *)
-  let _ = if save_evolution then
-    Sys.command (sprintf "cp %s %s"
-      (Filename.quote figma_png)
-      (Filename.quote (Filename.concat evo_dir "figma_original.png"))) |> ignore
+  let _ =
+    if save_evolution then
+      copy_file ~src:figma_png ~dst:(Filename.concat evo_dir "figma_original.png")
   in
 
   (* 외부 렌더링 이미지가 제공된 경우: Playwright 스킵, 단일 비교만 수행 *)
@@ -687,19 +682,22 @@ let verify_visual
          figma_png; html_png = saved_png; corrections_applied = [];
          final_html = Some html;
          evolution_history = [step];
-         evolution_dir = evo_dir }
-     | Error _e ->
+         evolution_dir = evo_dir;
+         errors = [] }
+     | Error e ->
        { ssim = 0.0; delta_e = 0.0; human_ssim = 0.0; passed = false; iterations = 0;
          figma_png; html_png = external_png; corrections_applied = [];
          final_html = Some html;
          evolution_history = [];
-         evolution_dir = evo_dir })
+         evolution_dir = evo_dir;
+         errors = [sprintf "compare failed: %s" e] })
   | Some _missing_png ->
     { ssim = 0.0; delta_e = 0.0; human_ssim = 0.0; passed = false; iterations = 0;
       figma_png; html_png = ""; corrections_applied = [];
       final_html = Some html;
       evolution_history = [];
-      evolution_dir = evo_dir }
+      evolution_dir = evo_dir;
+      errors = ["html_png_provided path does not exist"] }
   | None ->
     (* 기본 모드: Playwright 렌더링 + 반복 개선 *)
     let rec loop iteration current_html corrections history =
@@ -721,37 +719,42 @@ let verify_visual
             figma_png; html_png = saved_png; corrections_applied = corrections;
             final_html = Some current_html;
             evolution_history = List.rev (step :: history);
-            evolution_dir = evo_dir }
-        | Error _ ->
+            evolution_dir = evo_dir;
+            errors = [] }
+        | Error e ->
           { ssim = 0.0; delta_e = 0.0; human_ssim = 0.0; passed = false; iterations = iteration - 1;
             figma_png; html_png = ""; corrections_applied = corrections;
             final_html = Some current_html;
             evolution_history = List.rev history;
-            evolution_dir = evo_dir })
-      | Error _ ->
+            evolution_dir = evo_dir;
+            errors = [sprintf "compare failed: %s" e] })
+      | Error e ->
         { ssim = 0.0; delta_e = 0.0; human_ssim = 0.0; passed = false; iterations = iteration - 1;
           figma_png; html_png = ""; corrections_applied = corrections;
           final_html = Some current_html;
           evolution_history = List.rev history;
-          evolution_dir = evo_dir }
+          evolution_dir = evo_dir;
+          errors = [sprintf "render failed: %s" e] }
     else
       match render_html_to_png ~width ~height current_html with
-      | Error _e ->
+      | Error e ->
         { ssim = 0.0; delta_e = 0.0; human_ssim = 0.0; passed = false; iterations = iteration;
           figma_png; html_png = ""; corrections_applied = corrections;
           final_html = None;
           evolution_history = List.rev history;
-          evolution_dir = evo_dir }
+          evolution_dir = evo_dir;
+          errors = [sprintf "render failed: %s" e] }
       | Ok html_png ->
         let saved_png = if save_evolution then save_png ~dir:evo_dir ~step:iteration ~src_png:html_png else html_png in
         let saved_html = if save_evolution then save_html ~dir:evo_dir ~step:iteration current_html else "" in
         match compare_renders_with_regions ~figma_png ~html_png with
-        | Error _ ->
+        | Error e ->
           { ssim = 0.0; delta_e = 0.0; human_ssim = 0.0; passed = false; iterations = iteration;
             figma_png; html_png = saved_png; corrections_applied = corrections;
             final_html = Some current_html;
             evolution_history = List.rev history;
-            evolution_dir = evo_dir }
+            evolution_dir = evo_dir;
+            errors = [sprintf "compare failed: %s" e] }
         | Ok result ->
           let hssim = calculate_human_ssim result.ssim result.delta_e in
           let step = { step_num = iteration; step_ssim = result.ssim;
@@ -765,7 +768,8 @@ let verify_visual
               figma_png; html_png = saved_png; corrections_applied = corrections;
               final_html = Some current_html;
               evolution_history = List.rev (step :: history);
-              evolution_dir = evo_dir }
+              evolution_dir = evo_dir;
+              errors = [] }
           else
             (* 조정 힌트 생성 및 적용 - 영역별 diff 분석 활용 *)
             let hints = suggest_corrections ~ssim:result.ssim ~diff_regions:result.regions in
@@ -796,12 +800,10 @@ let quadrant_analysis ~figma_png ~html_png =
   let crop_and_compare ~crop_spec ~suffix =
     let figma_crop = temp_file ~prefix:("figma_" ^ suffix) ~ext:"png" in
     let html_crop = temp_file ~prefix:("html_" ^ suffix) ~ext:"png" in
-    let cmd_a = sprintf "magick %s -crop %s +repage %s 2>/dev/null"
-      (Filename.quote figma_png) crop_spec (Filename.quote figma_crop) in
-    let cmd_b = sprintf "magick %s -crop %s +repage %s 2>/dev/null"
-      (Filename.quote html_png) crop_spec (Filename.quote html_crop) in
-    match (run_command "sh" [|"sh"; "-c"; cmd_a|],
-           run_command "sh" [|"sh"; "-c"; cmd_b|]) with
+    let args_a = [| "magick"; figma_png; "-crop"; crop_spec; "+repage"; figma_crop |] in
+    let args_b = [| "magick"; html_png; "-crop"; crop_spec; "+repage"; html_crop |] in
+    match (run_ok ~cmd:"magick" ~args:args_a,
+           run_ok ~cmd:"magick" ~args:args_b) with
     | (Ok _, Ok _) ->
         (match compare_renders ~figma_png:figma_crop ~html_png:html_crop with
          | Ok (ssim, de) -> Some (ssim, de)
@@ -849,33 +851,23 @@ let generate_diff_images ~figma_png ~html_png =
   let diff_overlay = temp_file ~prefix:"diff_overlay" ~ext:"png" in
 
   (* Side-by-side 이미지 생성 *)
-  let cmd_side = sprintf "magick %s %s +append %s 2>/dev/null"
-    (Filename.quote figma_png) (Filename.quote html_png) (Filename.quote side_by_side) in
+  let args_side = [| "magick"; figma_png; html_png; "+append"; side_by_side |] in
+  let args_diff = [| "magick"; "compare"; "-metric"; "AE"; "-highlight-color"; "red"; "-lowlight-color"; "none"; figma_png; html_png; diff_overlay |] in
 
-  (* Diff overlay 생성 (차이를 빨간색으로 하이라이트) *)
-  (* ImageMagick compare는:
-     - metric을 stderr로 출력
-     - 이미지가 다르면 exit code 1 반환 (에러가 아님!)
-     - 따라서 stderr를 파일로 캡처한 후 읽어야 함 *)
-  let metric_tmp = temp_file ~prefix:"metric" ~ext:"txt" in
-  let cmd_diff = sprintf "magick compare -metric AE -highlight-color red -lowlight-color none %s %s %s 2>%s; cat %s"
-    (Filename.quote figma_png) (Filename.quote html_png) (Filename.quote diff_overlay) (Filename.quote metric_tmp) (Filename.quote metric_tmp) in
-
-  match run_command "sh" [|"sh"; "-c"; cmd_side|] with
+  match run_ok ~cmd:"magick" ~args:args_side with
   | Error e -> Error (sprintf "Failed to create side-by-side: %s" e)
   | Ok _ ->
       (* compare 명령은 stderr에 pixel count를 출력함 *)
       (* 출력 형식: "10000 (1)" 또는 "10000" - 첫 번째 숫자만 추출 *)
-      match run_command "sh" [|"sh"; "-c"; cmd_diff|] with
-      | Ok diff_pixels_str | Error diff_pixels_str ->
-          (* metric_tmp 파일에서 값을 직접 읽기 (fallback) *)
-          let diff_pixels_str =
-            if String.trim diff_pixels_str = "" || String.length diff_pixels_str < 2 then
-              try
-                In_channel.with_open_bin metric_tmp (fun ic -> input_line ic)
-              with _ -> diff_pixels_str
-            else diff_pixels_str
-          in
+      let diff_pixels_str =
+        match Safe_exec.run ~timeout_ms:20000 ~output_limit:(64 * 1024) "magick" args_diff with
+        | Ok out ->
+            (match out.status with
+             | Unix.WEXITED 0 | Unix.WEXITED 1 -> out.stderr
+             | Unix.WEXITED code -> out.stderr ^ Printf.sprintf " (exit %d)" code
+             | _ -> out.stderr)
+        | Error e -> e
+      in
           let diff_count =
             let trimmed = String.trim diff_pixels_str in
             (* 공백이나 '('로 분리하여 첫 번째 숫자만 추출 *)
@@ -896,11 +888,11 @@ let generate_diff_images ~figma_png ~html_png =
           (* 이미지 크기로 비율 계산 *)
           let get_image_size path =
             (* identify -format "%w %h" 명령으로 크기 획득 *)
-            let cmd = sprintf "magick identify -format '%%w %%h' %s 2>/dev/null" (Filename.quote path) in
-            match run_command "sh" [|"sh"; "-c"; cmd|] with
+            let args = [| "magick"; "identify"; "-format"; "%w %h"; path |] in
+            match run_ok ~cmd:"magick" ~args with
             | Ok size_str ->
                 (try
-                  let parts = String.split_on_char ' ' (String.trim size_str) in
+                  let parts = String.split_on_char ' ' (String.trim size_str.stdout) in
                   match parts with
                   | [w; h] -> Some (int_of_string w * int_of_string h)
                   | _ -> None

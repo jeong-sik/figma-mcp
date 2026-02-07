@@ -121,6 +121,15 @@ let run format components server host port grpc_port public allow_no_auth =
     exit 2
   end;
   let http_enabled = match port with Some _ -> true | None -> false in
+  if http_enabled
+     && (not (is_loopback_host host))
+     && allow_no_auth_enabled
+     && not (Figma_mcp.Mcp_http_auth.env_truthy "FIGMA_MCP_ALLOW_NO_AUTH_PUBLIC") then begin
+    Printf.eprintf
+      "FIGMA-MCP: Refusing to run allow-no-auth on non-loopback host (%s). Set FIGMA_MCP_ALLOW_NO_AUTH_PUBLIC=1 to override.\n%!"
+      host;
+    exit 2
+  end;
   if http_enabled then require_api_key allow_no_auth_enabled;
   match (port, grpc_port) with
   | (Some http_p, Some grpc_p) ->

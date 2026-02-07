@@ -44,6 +44,11 @@
  (name test_visual_verifier)
  (libraries figma_mcp alcotest yojson unix str))
 
+; Safe Exec tests
+(test
+ (name test_safe_exec)
+ (libraries figma_mcp alcotest unix))
+
 ; CSS 조정 디버그
 (executable
  (name debug_css)
@@ -149,3 +154,28 @@
  (libraries figma_mcp alcotest yojson)
  (deps
   (glob_files fixtures/code_connect/*.json)))
+
+; Webhook passcode validation (no HTTP reqd, pure logic)
+(test
+ (name test_webhook_security)
+ (libraries figma_mcp alcotest))
+
+; Compare regions output_dir / region name safety checks
+(test
+ (name test_compare_regions_security)
+ (libraries figma_mcp alcotest yojson))
+
+; Vision compare input safety checks (reference path validation)
+(test
+ (name test_vision_compare_security)
+ (libraries figma_mcp alcotest unix))
+
+; Agent queue security (claim token enforcement)
+(test
+ (name test_agent_queue_security)
+ (libraries figma_mcp alcotest eio_main yojson))
+
+; Server metrics: record low-level errors without reqd tracking
+(test
+ (name test_server_metrics)
+ (libraries figma_mcp alcotest eio_main))
