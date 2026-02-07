@@ -6908,7 +6908,8 @@ let handle_search args : (Yojson.Safe.t, string) result =
 
   match (file_key, token, query) with
   | (Some file_key, Some token, Some query) ->
-      (match Figma_effects.Perform.get_file ~token ~file_key () with
+      (* depth:4 covers Page→Frame→Group→Component; avoids 400 on large files *)
+      (match Figma_effects.Perform.get_file ~token ~file_key ~depth:4 () with
        | Ok json ->
            (match Figma_api.extract_document json with
             | Some doc_json ->
@@ -7330,7 +7331,14 @@ let handle_category category_name args =
       let full_name = "figma_" ^ tool_name in
       match Hashtbl.find_opt handler_registry full_name with
       | Some handler ->
-          let actual_args = Option.value ~default:(`Assoc []) args_param in
+          let actual_args = match args_param with
+            | Some a -> a
+            | None ->
+              (* Forward top-level args (except "tool") for flat argument style *)
+              (match args with
+               | `Assoc lst -> `Assoc (List.filter (fun (k, _) -> k <> "tool") lst)
+               | _ -> `Assoc [])
+          in
           handler actual_args
       | None ->
           (* 카테고리에 속하는지 확인 *)
