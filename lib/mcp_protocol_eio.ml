@@ -692,6 +692,10 @@ let sse_clients : (int, sse_client) Hashtbl.t = Hashtbl.create 16
 (* JS safe integer: 2^53 - 1. We keep SSE client ids numeric for compatibility,
    but make them unguessable to mitigate client_id hijacking. *)
 let max_js_safe_client_id = Int64.sub (Int64.shift_left 1L 53) 1L
+let sse_client_id_mask =
+  (* Keep within OCaml int range for 32-bit builds, while staying JS-safe. *)
+  let max_int64 = Int64.of_int max_int in
+  if Int64.compare max_int64 max_js_safe_client_id < 0 then max_int64 else max_js_safe_client_id
 
 let random_sse_client_id () =
   let int64_of_be_string s =
@@ -707,7 +711,7 @@ let random_sse_client_id () =
   in
   let rec loop () =
     let bytes = Mirage_crypto_rng.generate 8 in
-    let v = int64_of_be_string bytes |> fun x -> Int64.logand x max_js_safe_client_id in
+    let v = int64_of_be_string bytes |> fun x -> Int64.logand x sse_client_id_mask in
     if v = 0L then loop ()
     else
       let id = Int64.to_int v in
