@@ -10,6 +10,28 @@
       "timeout_s": 240
     },
     {
+      "name": "verify-home-screen-semantic",
+      "type": "verify_semantic",
+      "file_key": "YOUR_FILE_KEY",
+      "node_id": "123:456",
+      "html": "<!doctype html><html><body><div id='root'>PASTE_RENDERED_HTML_HERE</div></body></html>",
+      "score_threshold": 0.85,
+      "timeout_s": 240
+    },
+    {
+      "name": "verify-home-screen-both",
+      "type": "verify_both",
+      "file_key": "YOUR_FILE_KEY",
+      "node_id": "123:456",
+      "html": "<!doctype html><html><body><div id='root'>PASTE_RENDERED_HTML_HERE</div></body></html>",
+      "require_semantic_pass": true,
+      "require_visual_pass": false,
+      "run_visual_on_semantic_fail": true,
+      "target_ssim": 0.95,
+      "max_iterations": 1,
+      "timeout_s": 240
+    },
+    {
       "name": "image-similarity-a-vs-b",
       "type": "image_similarity",
       "file_key": "YOUR_FILE_KEY",
@@ -37,4 +59,3 @@
     }
   ]
 }
-

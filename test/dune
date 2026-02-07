@@ -19,6 +19,11 @@
  (name test_semantic_mapper)
  (libraries figma_mcp alcotest str))
 
+; Semantic Verifier tests (meaning-first verification)
+(test
+ (name test_semantic_verifier)
+ (libraries figma_mcp alcotest yojson str))
+
 ; CIEDE2000 검증 테스트 (CIE TR 142-2001 테스트 데이터)
 (test
  (name test_ciede2000)

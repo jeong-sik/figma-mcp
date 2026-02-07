@@ -222,6 +222,28 @@ def parse_json_maybe(text: str | None) -> dict | list | None:
         return None
 
 
+def resolve_job_html(job: dict) -> str | None:
+    """Resolve HTML payload for semantic verification jobs.
+
+    Priority:
+      1) inline `html` field
+      2) `html_path` file contents (if file exists locally)
+      3) raw `html_path` string (lets the server treat it as a path if available there)
+    """
+    html = job.get("html")
+    if isinstance(html, str) and html.strip() != "":
+        return html
+    html_path = job.get("html_path")
+    if not isinstance(html_path, str) or html_path.strip() == "":
+        return None
+    html_path = expand_path(html_path.strip())
+    try:
+        with open(html_path, "r", encoding="utf-8") as f:
+            return f.read()
+    except OSError:
+        return html_path
+
+
 def load_config(path: str) -> dict:
     with open(path, "r", encoding="utf-8") as f:
         return json.load(f)
@@ -243,14 +265,17 @@ def validate_jobs(config: dict) -> list[dict]:
             raise ValueError(f"config.jobs[{idx}].enabled must be a boolean")
         name = job.get("name") or f"job_{idx}"
         job_type = job.get("type")
-        if job_type not in ("image_similarity", "verify_visual", "fidelity_loop"):
+        if job_type not in ("image_similarity", "verify_visual", "verify_semantic", "verify_both", "fidelity_loop"):
             raise ValueError(
-                f"config.jobs[{idx}].type must be one of: image_similarity, verify_visual, fidelity_loop"
+                f"config.jobs[{idx}].type must be one of: "
+                "image_similarity, verify_visual, verify_semantic, verify_both, fidelity_loop"
             )
 
         required: list[str]
         if job_type == "image_similarity":
             required = ["file_key", "node_a_id", "node_b_id"]
+        elif job_type in ("verify_semantic", "verify_both"):
+            required = ["file_key", "node_id"]
         else:
             required = ["file_key", "node_id"]
         missing = [k for k in required if k not in job]
@@ -258,6 +283,12 @@ def validate_jobs(config: dict) -> list[dict]:
             raise ValueError(
                 f"config.jobs[{idx}] missing required field(s): {', '.join(missing)}"
             )
+
+        if job_type in ("verify_semantic", "verify_both"):
+            if "html" not in job and "html_path" not in job:
+                raise ValueError(
+                    f"config.jobs[{idx}] must include one of: html, html_path"
+                )
 
         out.append({**job, "name": name})
     return out
@@ -394,6 +425,28 @@ def run_job(mcp_url: str, job: dict, mcp_api_key: str | None) -> dict:
     args: dict = {}
     verdict = "unknown"
 
+    timeout_s = int(job.get("timeout_s", 180))
+    retries = int(job.get("retries", 2))
+
+    def call_tool(tool: str, tool_args: dict) -> dict:
+        return mcp_call_tool_with_retry(
+            mcp_url,
+            tool,
+            tool_args,
+            timeout_s=timeout_s,
+            mcp_api_key=mcp_api_key,
+            retries=retries,
+            base_delay_s=0.5,
+            max_delay_s=10.0,
+        )
+
+    def parse_result(raw: dict) -> tuple[str | None, dict | list | None]:
+        text = extract_text_content(raw)
+        parsed = parse_json_maybe(text)
+        if isinstance(text, str) and len(text) > 4000:
+            text = text[:4000] + "...<truncated>"
+        return text, parsed
+
     if job_type == "image_similarity":
         tool_name = "figma_image_similarity"
         args = {
@@ -401,7 +454,6 @@ def run_job(mcp_url: str, job: dict, mcp_api_key: str | None) -> dict:
             "node_a_id": job["node_a_id"],
             "node_b_id": job["node_b_id"],
         }
-        # Optional knobs
         for k in (
             "format",
             "token",
@@ -415,6 +467,20 @@ def run_job(mcp_url: str, job: dict, mcp_api_key: str | None) -> dict:
         ):
             if k in job:
                 args[k] = job[k]
+
+        raw_result = call_tool(tool_name, args)
+        text, parsed = parse_result(raw_result)
+
+        best_score = parsed.get("best_score") if isinstance(parsed, dict) else None
+        target = job.get("target_ssim")
+        if isinstance(best_score, (int, float)) and isinstance(target, (int, float)):
+            verdict = "pass" if float(best_score) >= float(target) else "fail"
+        else:
+            verdict = "ok"
+
+        args_for_log = sanitize_for_log(args)
+        parsed_for_log = sanitize_for_log(parsed)
+
     elif job_type == "verify_visual":
         tool_name = "figma_verify_visual"
         args = {
@@ -435,6 +501,158 @@ def run_job(mcp_url: str, job: dict, mcp_api_key: str | None) -> dict:
         ):
             if k in job:
                 args[k] = job[k]
+
+        raw_result = call_tool(tool_name, args)
+        text, parsed = parse_result(raw_result)
+
+        overall_passed = bool(parsed.get("overall_passed", False)) if isinstance(parsed, dict) else False
+        verdict = "pass" if overall_passed else "fail"
+
+        args_for_log = sanitize_for_log(args)
+        parsed_for_log = sanitize_for_log(parsed)
+
+    elif job_type == "verify_semantic":
+        tool_name = "figma_verify_semantic"
+        html = resolve_job_html(job)
+        if not isinstance(html, str) or html.strip() == "":
+            raise ValueError("verify_semantic job requires non-empty html/html_path")
+        args = {
+            "file_key": job["file_key"],
+            "node_id": job["node_id"],
+            "html": html,
+        }
+        for k in (
+            "token",
+            "width",
+            "height",
+            "score_threshold",
+            "text_bbox_tol_px",
+            "font_size_tol_px",
+            "font_weight_tol",
+            "text_color_tol_rgb",
+            "version",
+        ):
+            if k in job:
+                args[k] = job[k]
+
+        raw_result = call_tool(tool_name, args)
+        text, parsed = parse_result(raw_result)
+
+        sem_passed = False
+        if isinstance(parsed, dict):
+            sem = parsed.get("semantic_verification")
+            if isinstance(sem, dict):
+                sem_passed = bool(sem.get("passed", False))
+        verdict = "pass" if sem_passed else "fail"
+
+        args_for_log = sanitize_for_log(args)
+        parsed_for_log = sanitize_for_log(parsed)
+
+    elif job_type == "verify_both":
+        html = resolve_job_html(job)
+        if not isinstance(html, str) or html.strip() == "":
+            raise ValueError("verify_both job requires non-empty html/html_path")
+
+        require_semantic_pass = bool(job.get("require_semantic_pass", True))
+        require_visual_pass = bool(job.get("require_visual_pass", False))
+        run_visual_on_semantic_pass = bool(job.get("run_visual_on_semantic_pass", False))
+        run_visual_on_semantic_fail = bool(job.get("run_visual_on_semantic_fail", True))
+
+        sem_args = {
+            "file_key": job["file_key"],
+            "node_id": job["node_id"],
+            "html": html,
+        }
+        for k in (
+            "token",
+            "width",
+            "height",
+            "score_threshold",
+            "text_bbox_tol_px",
+            "font_size_tol_px",
+            "font_weight_tol",
+            "text_color_tol_rgb",
+            "version",
+        ):
+            if k in job:
+                sem_args[k] = job[k]
+
+        sem_raw = call_tool("figma_verify_semantic", sem_args)
+        sem_text, sem_parsed = parse_result(sem_raw)
+
+        semantic_passed = False
+        if isinstance(sem_parsed, dict):
+            sem = sem_parsed.get("semantic_verification")
+            if isinstance(sem, dict):
+                semantic_passed = bool(sem.get("passed", False))
+
+        run_visual = require_visual_pass
+        if semantic_passed and run_visual_on_semantic_pass:
+            run_visual = True
+        if (not semantic_passed) and run_visual_on_semantic_fail:
+            run_visual = True
+
+        vis_args: dict | None = None
+        vis_text: str | None = None
+        vis_parsed: dict | list | None = None
+        visual_passed: bool | None = None
+
+        if run_visual:
+            vis_args = {
+                "file_key": job["file_key"],
+                "node_id": job["node_id"],
+            }
+            # If user provided HTML, pass it through to keep the comparison deterministic.
+            vis_args["html"] = html
+            for k in (
+                "token",
+                "html_screenshot",
+                "target_ssim",
+                "max_iterations",
+                "width",
+                "height",
+                "version",
+                "mode",
+                "checkpoints",
+            ):
+                if k in job:
+                    vis_args[k] = job[k]
+
+            vis_raw = call_tool("figma_verify_visual", vis_args)
+            vis_text, vis_parsed = parse_result(vis_raw)
+            visual_passed = bool(vis_parsed.get("overall_passed", False)) if isinstance(vis_parsed, dict) else False
+
+        semantic_ok = semantic_passed if require_semantic_pass else True
+        visual_ok = (visual_passed is True) if require_visual_pass else True
+        overall_passed = bool(semantic_ok and visual_ok)
+
+        verdict = "pass" if overall_passed else "fail"
+        tool_name = "figma_verify_semantic+figma_verify_visual" if run_visual else "figma_verify_semantic"
+
+        args = {
+            "semantic": sem_args,
+            "visual": (vis_args or {}),
+            "policy": {
+                "require_semantic_pass": require_semantic_pass,
+                "require_visual_pass": require_visual_pass,
+                "run_visual_on_semantic_pass": run_visual_on_semantic_pass,
+                "run_visual_on_semantic_fail": run_visual_on_semantic_fail,
+            },
+        }
+        parsed = {
+            "semantic": sem_parsed,
+            "visual": vis_parsed,
+            "semantic_passed": semantic_passed,
+            "visual_passed": visual_passed,
+            "overall_passed": overall_passed,
+        }
+        text = json.dumps(parsed, ensure_ascii=False)
+        if len(text) > 4000:
+            text = text[:4000] + "...<truncated>"
+
+        args_for_log = sanitize_for_log(args)
+        parsed_for_log = sanitize_for_log(parsed)
+
     else:
         tool_name = "figma_fidelity_loop"
         args = {
@@ -466,53 +684,19 @@ def run_job(mcp_url: str, job: dict, mcp_api_key: str | None) -> dict:
             if k in job:
                 args[k] = job[k]
 
-    timeout_s = int(job.get("timeout_s", 180))
-    retries = int(job.get("retries", 2))
-    raw_result = mcp_call_tool_with_retry(
-        mcp_url,
-        tool_name,
-        args,
-        timeout_s=timeout_s,
-        mcp_api_key=mcp_api_key,
-        retries=retries,
-        base_delay_s=0.5,
-        max_delay_s=10.0,
-    )
-    text = extract_text_content(raw_result)
-    parsed = parse_json_maybe(text)
-    args_for_log = sanitize_for_log(args)
-    parsed_for_log = sanitize_for_log(parsed)
+        raw_result = call_tool(tool_name, args)
+        text, parsed = parse_result(raw_result)
 
-    if isinstance(text, str) and len(text) > 4000:
-        text = text[:4000] + "...<truncated>"
-
-    # Determine verdict
-    if job_type == "verify_visual":
-        overall_passed = False
-        if isinstance(parsed, dict):
-            overall_passed = bool(parsed.get("overall_passed", False))
-        verdict = "pass" if overall_passed else "fail"
-    elif job_type == "image_similarity":
-        best_score = None
-        if isinstance(parsed, dict):
-            best_score = parsed.get("best_score")
-        target = job.get("target_ssim")
-        if isinstance(best_score, (int, float)) and isinstance(target, (int, float)):
-            verdict = "pass" if float(best_score) >= float(target) else "fail"
-        else:
-            verdict = "ok"
-    else:
-        best_score = None
-        achieved = None
-        if isinstance(parsed, dict):
-            best_score = parsed.get("best_score")
-            achieved = parsed.get("achieved")
+        achieved = parsed.get("achieved") if isinstance(parsed, dict) else None
         if achieved is True:
             verdict = "pass"
         elif achieved is False:
             verdict = "fail"
         else:
             verdict = "ok"
+
+        args_for_log = sanitize_for_log(args)
+        parsed_for_log = sanitize_for_log(parsed)
 
     duration_ms = int((time.time() - started) * 1000)
     return {
