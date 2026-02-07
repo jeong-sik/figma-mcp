@@ -1,0 +1,15 @@
+{
+  "version": "1.0",
+  "components": [
+    {
+      "id": "dup",
+      "figma": {"name": "Button"},
+      "code": {"export": "Button"}
+    },
+    {
+      "id": "dup",
+      "figma": {"name": "Button"},
+      "code": {"export": "Button"}
+    }
+  ]
+}

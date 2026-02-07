@@ -1,0 +1,10 @@
+{
+  "version": "1.0",
+  "components": [
+    {
+      "id": "no.export",
+      "figma": {"name": "Card"},
+      "code": {"export": ""}
+    }
+  ]
+}
