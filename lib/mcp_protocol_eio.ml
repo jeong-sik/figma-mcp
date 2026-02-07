@@ -3790,13 +3790,7 @@ let start_server ?(config = default_config) server =
   Eio_main.run @@ fun env ->
   let net = Eio.Stdenv.net env in
   let clock = Eio.Stdenv.clock env in
-  (* Domain_manager.run dispatches MCP requests to separate OS domains.
-     Eio capabilities (net, clock, client) are tied to the main domain's
-     event loop; using them from spawned domains causes
-     "Switch accessed from wrong domain!" errors.
-     Eio fibers provide sufficient concurrency for I/O-bound MCP requests.
-     Cloud Run scales horizontally for true parallelism. *)
-  let domain_mgr = None in
+  let domain_mgr = Some (Eio.Stdenv.domain_mgr env) in
 
   (* Graceful shutdown setup *)
   let switch_ref = ref None in
