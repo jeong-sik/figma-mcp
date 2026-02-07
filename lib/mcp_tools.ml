@@ -307,6 +307,26 @@ let tool_figma_verify_visual : tool_def = {
   ] ["file_key"; "node_id"];
 }
 
+(** Semantic Verification - Meaning-first checks (layout/text/style) *)
+let tool_figma_verify_semantic : tool_def = {
+  name = "figma_verify_semantic";
+  description = "✅ VERIFY: Semantic-first 검증 (레이아웃/텍스트/스타일). Figma Design IR(absoluteBoundingBox, text nodes, basic style)과 HTML DOM metrics(Playwright) 비교. SSIM보다 빠르고 덜 flaky하므로 figma_verify_visual 전에 gate로 권장. 반환: passed, score, mismatches.";
+  input_schema = object_schema [
+    ("file_key", string_prop "Figma 파일 키");
+    ("node_id", string_prop "노드 ID (예: 123:456)");
+    ("token", string_prop "Figma Personal Access Token (optional if FIGMA_TOKEN env var is set)");
+    ("html", string_prop "검증할 HTML 코드 또는 파일 경로");
+    ("width", number_prop "뷰포트 너비 (기본값: 375)");
+    ("height", number_prop "뷰포트 높이 (기본값: 812)");
+    ("score_threshold", number_prop "통과 score threshold (0-1, 기본값: 0.90)");
+    ("text_bbox_tol_px", number_prop "텍스트 bbox 허용 오차(px, 기본값: 4.0)");
+    ("font_size_tol_px", number_prop "폰트 크기 허용 오차(px, 기본값: 1.5)");
+    ("font_weight_tol", number_prop "폰트 weight 허용 오차(기본값: 150)");
+    ("text_color_tol_rgb", number_prop "텍스트 색상 RGB 거리 허용치(0-1, 기본값: 0.15)");
+    ("version", string_prop "특정 파일 버전 ID");
+  ] ["file_key"; "node_id"; "html"];
+}
+
 (** Region-based comparison - 영역별 상세 비교 *)
 let tool_figma_compare_regions : tool_def = {
   name = "figma_compare_regions";
@@ -988,7 +1008,7 @@ let tool_categories = [
   { name = "visual";
     description = "시각 검증 (SSIM, 비교)";
     (* NOTE: compare_elements, compare_regions, evolution_report는 DEPRECATED → figma_compare(mode=...)로 통합 *)
-    tools = ["verify_visual"; "image_similarity"; "compare"; "fidelity_loop"; "fidelity_review"] };
+    tools = ["verify_semantic"; "verify_visual"; "image_similarity"; "compare"; "fidelity_loop"; "fidelity_review"] };
   { name = "plugin";
     description = "Figma 플러그인 브릿지";
     tools = ["plugin"; "plugin_connect"; "plugin_use_channel"; "plugin_status";
@@ -1032,6 +1052,7 @@ let all_detailed_tools = [
   tool_figma_fidelity_loop;
   tool_figma_image_similarity;
   tool_figma_verify_visual;
+  tool_figma_verify_semantic;
   tool_figma_export_image;
   tool_figma_export_smart;
   tool_figma_get_image_fills;
@@ -3806,6 +3827,85 @@ let handle_verify_visual args : (Yojson.Safe.t, string) result =
                      ] in
                      Ok (make_text_content (Yojson.Safe.pretty_to_string full_result)))))
   | _ -> Error "Missing required parameters: file_key, node_id, token"
+
+(** figma_verify_semantic 핸들러 - Semantic-first Verification *)
+let handle_verify_semantic args : (Yojson.Safe.t, string) result =
+  let file_key = get_string "file_key" args in
+  let node_id = get_string "node_id" args in
+  let token = resolve_token args in
+  let html = get_string "html" args in
+  let width = get_int_positive "width" 375 args in
+  let height = get_int_positive "height" 812 args in
+  let version = get_string "version" args in
+
+  let score_threshold =
+    get_float_or "score_threshold" Semantic_verifier.default_config.score_threshold args
+  in
+  let text_bbox_tol_px =
+    get_float_or "text_bbox_tol_px" Semantic_verifier.default_config.text_bbox_tol_px args
+  in
+  let font_size_tol_px =
+    get_float_or "font_size_tol_px" Semantic_verifier.default_config.font_size_tol_px args
+  in
+  let font_weight_tol =
+    get_int_positive "font_weight_tol" Semantic_verifier.default_config.font_weight_tol args
+  in
+  let text_color_tol_rgb =
+    get_float_or "text_color_tol_rgb" Semantic_verifier.default_config.text_color_tol_rgb args
+  in
+
+  let config = {
+    Semantic_verifier.default_config with
+    score_threshold;
+    text_bbox_tol_px;
+    font_size_tol_px;
+    font_weight_tol;
+    text_color_tol_rgb;
+  } in
+
+  let ( let* ) r f = match r with Ok v -> f v | Error e -> Error e in
+
+  match (file_key, node_id, token, html) with
+  | (Some file_key, Some node_id, Some token, Some html_code) ->
+      let* nodes_json =
+        match Figma_effects.Perform.get_nodes ~token ~file_key
+                ~node_ids:[node_id] ~depth:10 ?version () with
+        | Ok j -> Ok j
+        | Error err -> Error (Printf.sprintf "Failed to get node JSON: %s" err)
+      in
+
+      let* dsl_node =
+        let parsed_node_opt =
+          match member "nodes" nodes_json with
+          | Some (`Assoc nodes_map) ->
+              (match find_node_entry nodes_map ~node_id with
+               | Some (_key, node_data) ->
+                   (match member "document" node_data with
+                    | Some doc_json -> Figma_parser.parse_node doc_json
+                    | _ -> None)
+               | None -> None)
+          | _ -> None
+        in
+        match parsed_node_opt with
+        | Some n -> Ok n
+        | None -> Error "Failed to parse DSL node for semantic verification"
+      in
+
+      let* metrics =
+        match Html_metrics.extract ~width ~height html_code with
+        | Ok m -> Ok m
+        | Error e -> Error (Printf.sprintf "Failed to extract HTML metrics: %s" e)
+      in
+
+      let* sem = Semantic_verifier.verify ~config ~dsl_node ~html:metrics () in
+
+      let full_result = `Assoc [
+        ("file_key", `String file_key);
+        ("node_id", `String node_id);
+        ("semantic_verification", Semantic_verifier.result_to_json sem);
+      ] in
+      Ok (make_text_content (Yojson.Safe.pretty_to_string full_result))
+  | _ -> Error "Missing required parameters: file_key, node_id, token, html"
 
 (** figma_compare_regions 핸들러 - 영역별 상세 비교 *)
 let handle_compare_regions args : (Yojson.Safe.t, string) result =
@@ -7779,6 +7879,7 @@ let all_handlers_sync : (string * tool_handler_sync) list = [
   ("figma_fidelity_loop", wrap_sync_pure handle_fidelity_loop);
   ("figma_image_similarity", wrap_sync_pure handle_image_similarity);
   ("figma_verify_visual", wrap_sync_pure handle_verify_visual);
+  ("figma_verify_semantic", wrap_sync_pure handle_verify_semantic);
   ("figma_export_image", wrap_sync_pure handle_export_image);
   ("figma_export_smart", wrap_sync_pure handle_export_smart);
   ("figma_get_image_fills", wrap_sync_pure handle_get_image_fills);
