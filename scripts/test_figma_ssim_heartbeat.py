@@ -193,5 +193,130 @@ class TestLock(unittest.TestCase):
             M.release_lock(lock)
 
 
+class TestRunJob(unittest.TestCase):
+    def _mk_result(self, obj):
+        return {"content": [{"text": json.dumps(obj)}]}
+
+    def _with_stub(self, stub, fn):
+        orig = M.mcp_call_tool_with_retry
+        M.mcp_call_tool_with_retry = stub
+        try:
+            return fn()
+        finally:
+            M.mcp_call_tool_with_retry = orig
+
+    def test_run_job_verify_semantic_pass(self):
+        calls = []
+
+        def stub(_mcp_url, name, args, **_kwargs):
+            calls.append((name, args))
+            if name == "figma_verify_semantic":
+                return self._mk_result({"semantic_verification": {"passed": True}})
+            raise AssertionError(f"unexpected tool: {name}")
+
+        job = {
+            "name": "s",
+            "type": "verify_semantic",
+            "file_key": "k",
+            "node_id": "1:2",
+            "html": "<div id='root'></div>",
+        }
+
+        rec = self._with_stub(stub, lambda: M.run_job("http://mcp", job, mcp_api_key=None))
+        self.assertEqual(rec["verdict"], "pass")
+        self.assertEqual(rec["tool"], "figma_verify_semantic")
+        self.assertEqual(len(calls), 1)
+
+    def test_run_job_verify_semantic_fail(self):
+        def stub(_mcp_url, name, _args, **_kwargs):
+            if name == "figma_verify_semantic":
+                return self._mk_result({"semantic_verification": {"passed": False}})
+            raise AssertionError(f"unexpected tool: {name}")
+
+        job = {
+            "name": "s",
+            "type": "verify_semantic",
+            "file_key": "k",
+            "node_id": "1:2",
+            "html": "<div id='root'></div>",
+        }
+
+        rec = self._with_stub(stub, lambda: M.run_job("http://mcp", job, mcp_api_key=None))
+        self.assertEqual(rec["verdict"], "fail")
+
+    def test_run_job_verify_both_default_skips_visual_on_semantic_pass(self):
+        calls = []
+
+        def stub(_mcp_url, name, args, **_kwargs):
+            calls.append((name, args))
+            if name == "figma_verify_semantic":
+                return self._mk_result({"semantic_verification": {"passed": True}})
+            if name == "figma_verify_visual":
+                return self._mk_result({"overall_passed": True})
+            raise AssertionError(f"unexpected tool: {name}")
+
+        job = {
+            "name": "b",
+            "type": "verify_both",
+            "file_key": "k",
+            "node_id": "1:2",
+            "html": "<div id='root'></div>",
+        }
+
+        rec = self._with_stub(stub, lambda: M.run_job("http://mcp", job, mcp_api_key=None))
+        self.assertEqual(rec["verdict"], "pass")
+        self.assertEqual(rec["tool"], "figma_verify_semantic")
+        self.assertEqual([c[0] for c in calls], ["figma_verify_semantic"])
+
+    def test_run_job_verify_both_runs_visual_on_semantic_fail(self):
+        calls = []
+
+        def stub(_mcp_url, name, args, **_kwargs):
+            calls.append((name, args))
+            if name == "figma_verify_semantic":
+                return self._mk_result({"semantic_verification": {"passed": False}})
+            if name == "figma_verify_visual":
+                return self._mk_result({"overall_passed": True})
+            raise AssertionError(f"unexpected tool: {name}")
+
+        job = {
+            "name": "b",
+            "type": "verify_both",
+            "file_key": "k",
+            "node_id": "1:2",
+            "html": "<div id='root'></div>",
+        }
+
+        rec = self._with_stub(stub, lambda: M.run_job("http://mcp", job, mcp_api_key=None))
+        self.assertEqual(rec["verdict"], "fail")  # semantic required by default
+        self.assertEqual(rec["tool"], "figma_verify_semantic+figma_verify_visual")
+        self.assertEqual([c[0] for c in calls], ["figma_verify_semantic", "figma_verify_visual"])
+
+    def test_run_job_verify_both_require_visual_pass(self):
+        calls = []
+
+        def stub(_mcp_url, name, args, **_kwargs):
+            calls.append((name, args))
+            if name == "figma_verify_semantic":
+                return self._mk_result({"semantic_verification": {"passed": True}})
+            if name == "figma_verify_visual":
+                return self._mk_result({"overall_passed": False})
+            raise AssertionError(f"unexpected tool: {name}")
+
+        job = {
+            "name": "b",
+            "type": "verify_both",
+            "file_key": "k",
+            "node_id": "1:2",
+            "html": "<div id='root'></div>",
+            "require_visual_pass": True,
+        }
+
+        rec = self._with_stub(stub, lambda: M.run_job("http://mcp", job, mcp_api_key=None))
+        self.assertEqual(rec["verdict"], "fail")
+        self.assertEqual(rec["tool"], "figma_verify_semantic+figma_verify_visual")
+        self.assertEqual([c[0] for c in calls], ["figma_verify_semantic", "figma_verify_visual"])
+
+
 if __name__ == "__main__":
     unittest.main()
