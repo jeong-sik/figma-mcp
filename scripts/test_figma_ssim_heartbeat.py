@@ -57,6 +57,23 @@ class TestConfigValidation(unittest.TestCase):
             M.validate_jobs({"jobs": [{"type": "image_similarity", "file_key": "k"}]})
         with self.assertRaises(ValueError):
             M.validate_jobs({"jobs": [{"type": "verify_visual", "file_key": "k"}]})
+        with self.assertRaises(ValueError):
+            M.validate_jobs({"jobs": [{"type": "verify_semantic", "file_key": "k", "node_id": "1:2"}]})
+        with self.assertRaises(ValueError):
+            M.validate_jobs({"jobs": [{"type": "verify_both", "file_key": "k", "node_id": "1:2"}]})
+
+    def test_validate_jobs_semantic_allows_html_or_html_path(self):
+        jobs = M.validate_jobs(
+            {
+                "jobs": [
+                    {"type": "verify_semantic", "file_key": "k", "node_id": "1:2", "html": "<div/>"},
+                    {"type": "verify_both", "file_key": "k", "node_id": "1:3", "html_path": "/tmp/example.html"},
+                ]
+            }
+        )
+        self.assertEqual(len(jobs), 2)
+        self.assertEqual(jobs[0]["type"], "verify_semantic")
+        self.assertEqual(jobs[1]["type"], "verify_both")
 
 
 class TestSanitization(unittest.TestCase):

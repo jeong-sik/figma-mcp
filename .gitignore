@@ -8,6 +8,9 @@ _opam/
 # Node.js
 node_modules/
 
+# Gemini CLI state/cache
+.gemini/
+
 # Python
 __pycache__/
 *.pyc
