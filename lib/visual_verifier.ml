@@ -34,8 +34,11 @@ let default_max_iterations = 5
 
 (** 디렉토리 생성 (존재하지 않으면) *)
 let ensure_dir path =
-  if not (Sys.file_exists path) then
-    Unix.mkdir path 0o755
+  if Sys.file_exists path then ()
+  else
+    (* Best-effort: in concurrent runs another fiber/process may have created it. *)
+    try Unix.mkdir path 0o755 with
+    | Unix.Unix_error (Unix.EEXIST, _, _) -> ()
 
 (** 고유 파일명 생성 *)
 let generate_temp_filename ~prefix ~ext =
@@ -615,11 +618,21 @@ let result_to_json result =
 
 (** 진화 디렉토리 생성 *)
 let create_evolution_dir () =
-  let timestamp = Unix.gettimeofday () in
-  let dir = sprintf "/tmp/figma-evolution/run_%d" (int_of_float (timestamp *. 1000.0)) in
-  let html_dir = Filename.concat dir "html" in
-  mkdir_p html_dir;
-  dir
+  let base_dir = "/tmp/figma-evolution" in
+  ensure_dir base_dir;
+  let pid = Unix.getpid () in
+  let rec attempt tries =
+    let timestamp_ms = int_of_float (Unix.gettimeofday () *. 1000.0) in
+    let nonce = Random.int 1_000_000 in
+    let dir = sprintf "%s/run_%d_%d_%06d" base_dir timestamp_ms pid nonce in
+    try
+      Unix.mkdir dir 0o755;
+      ensure_dir (Filename.concat dir "html");
+      dir
+    with
+    | Unix.Unix_error (Unix.EEXIST, _, _) when tries < 25 -> attempt (tries + 1)
+  in
+  attempt 0
 
 (** HTML을 파일로 저장 *)
 let save_html ~dir ~step html =
@@ -657,7 +670,7 @@ let verify_visual
     ~figma_png
     html
   =
-  let evo_dir = if save_evolution then create_evolution_dir () else "/tmp/figma-visual" in
+  let evo_dir = if save_evolution then create_evolution_dir () else temp_dir in
 
   (* Figma 원본도 evolution 디렉토리에 복사 *)
   let _ =

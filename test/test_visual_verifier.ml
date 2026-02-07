@@ -22,6 +22,23 @@ let test_ensure_dir () =
   (* 정리 - 실패해도 무시 *)
   (try Unix.rmdir test_dir with Unix.Unix_error _ -> ())
 
+let test_create_evolution_dir_unique () =
+  (* Ensure evolution dirs are unique even if called in quick succession. *)
+  let dir1 = Visual_verifier.create_evolution_dir () in
+  let dir2 = Visual_verifier.create_evolution_dir () in
+  check bool "unique dirs" true (dir1 <> dir2);
+  check bool "dir1 exists" true (Sys.file_exists dir1);
+  check bool "dir2 exists" true (Sys.file_exists dir2);
+  check bool "dir1 html exists" true (Sys.file_exists (Filename.concat dir1 "html"));
+  check bool "dir2 html exists" true (Sys.file_exists (Filename.concat dir2 "html"));
+  (* Best-effort cleanup (dirs should be empty). *)
+  let cleanup dir =
+    (try Unix.rmdir (Filename.concat dir "html") with Unix.Unix_error _ -> ());
+    (try Unix.rmdir dir with Unix.Unix_error _ -> ())
+  in
+  cleanup dir1;
+  cleanup dir2
+
 (** ============== Correction Hint 테스트 ============== *)
 
 let test_hint_to_json_padding () =
@@ -179,6 +196,7 @@ let test_render_html_to_png_basic () =
 let utility_tests = [
   "temp file generation", `Quick, test_temp_file_generation;
   "ensure dir", `Quick, test_ensure_dir;
+  "create evolution dir unique", `Quick, test_create_evolution_dir_unique;
 ]
 
 let hint_tests = [
