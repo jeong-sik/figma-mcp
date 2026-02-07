@@ -39,11 +39,15 @@ let ensure_dir path =
     try Unix.mkdir path 0o755 with
     | Unix.Unix_error (Unix.EEXIST, _, _) -> ()
 
+(* Domain-safe counter for unique temp file names (no Random global state). *)
+let temp_counter = Atomic.make 0
+
 (** 고유 파일명 생성 *)
 let generate_temp_filename ~prefix ~ext =
-  let timestamp = Unix.gettimeofday () in
-  let random = Random.int 10000 in
-  sprintf "%s_%d_%04d.%s" prefix (int_of_float timestamp) random ext
+  let ts_ms = int_of_float (Unix.gettimeofday () *. 1000.0) in
+  let pid = Unix.getpid () in
+  let counter = Atomic.fetch_and_add temp_counter 1 in
+  sprintf "%s_%d_%d_%d.%s" prefix ts_ms pid counter ext
 
 (** 임시 파일 경로 생성 *)
 let temp_file ~prefix ~ext =
