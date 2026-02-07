@@ -871,10 +871,13 @@ let test_resolve_token_env_figma_token () =
         (Mcp_tools.resolve_token args))
 
 let test_resolve_token_env_other_denied () =
-  with_env "AWS_SECRET_ACCESS_KEY" (Some "shh") (fun () ->
-      let args = `Assoc [ ("token", `String "env:AWS_SECRET_ACCESS_KEY") ] in
-      check (option string) "env:OTHER denied" None
-        (Mcp_tools.resolve_token args))
+  (* Hermetic: FIGMA_TOKEN may be set in the parent environment when running
+     tests locally; clear it so we can assert env:OTHER is denied. *)
+  with_env "FIGMA_TOKEN" None (fun () ->
+      with_env "AWS_SECRET_ACCESS_KEY" (Some "shh") (fun () ->
+          let args = `Assoc [ ("token", `String "env:AWS_SECRET_ACCESS_KEY") ] in
+          check (option string) "env:OTHER denied" None
+            (Mcp_tools.resolve_token args)))
 
 let test_resolve_token_fallback_figma_token () =
   with_env "FIGMA_TOKEN" (Some "abc") (fun () ->
@@ -883,9 +886,11 @@ let test_resolve_token_fallback_figma_token () =
         (Mcp_tools.resolve_token args))
 
 let test_resolve_token_literal () =
-  let args = `Assoc [ ("token", `String "literal") ] in
-  check (option string) "literal token" (Some "literal")
-    (Mcp_tools.resolve_token args)
+  (* Hermetic: ensure FIGMA_TOKEN does not override literal resolution. *)
+  with_env "FIGMA_TOKEN" None (fun () ->
+      let args = `Assoc [ ("token", `String "literal") ] in
+      check (option string) "literal token" (Some "literal")
+        (Mcp_tools.resolve_token args))
 
 let token_resolution_tests = [
   "resolve env:FIGMA_TOKEN", `Quick, test_resolve_token_env_figma_token;

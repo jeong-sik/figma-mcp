@@ -148,6 +148,13 @@
  (name test_figma_stats)
  (libraries figma_mcp alcotest str))
 
+; figma_search handler tests (multiword + JSON output)
+(test
+ (name test_figma_search_tool)
+ (libraries figma_mcp alcotest yojson str unix)
+ (deps
+  (glob_files fixtures/*.json)))
+
 ; Coverage: figma_tokens, figma_cache, figma_compare (existing but unwired)
 (test
  (name test_utils_coverage)
