@@ -171,31 +171,43 @@ let agent_submit_result ?worker_id ?context_digest req_id code =
     match Hashtbl.find_opt agent_queue req_id with
     | None -> Error "not_found"
     | Some req ->
-        let drifted = ref req.drifted in
-        let error = ref None in
-        (match req.status, worker_id, req.claimed_by with
-         | Claimed, Some w, Some c when w <> c ->
-             drifted := true;
-             error := Some "worker_mismatch"
-         | Claimed, None, Some _ ->
-             drifted := true
-         | Pending, _, _ ->
-             drifted := true
-         | _ -> ());
-        (match context_digest with
-         | Some d when d <> "" && d <> req.context_digest ->
-             drifted := true;
-             error := Some "context_drift"
-         | _ -> ());
-        req.drifted <- !drifted;
-        (match !error with
-         | Some msg ->
-             req.error <- Some msg;
-             Error msg
-         | None ->
-             req.result <- Some code;
-             req.status <- Completed;
-             Ok ()))
+        let release_to_pending ~error =
+          req.drifted <- true;
+          req.status <- Pending;
+          req.claimed_by <- None;
+          req.claimed_at <- None;
+          req.last_heartbeat <- None;
+          req.error <- Some error;
+          Error error
+        in
+        match req.status with
+        | Completed -> Error "already_completed"
+        | Failed -> Error "already_failed"
+        | Pending -> release_to_pending ~error:"not_claimed"
+        | Claimed ->
+            (* Enforce claim semantics: require a claim before accepting results.
+               If worker_id is missing, allow for backward compatibility but mark drifted. *)
+            let base_check =
+              match req.claimed_by, worker_id with
+              | None, _ -> release_to_pending ~error:"missing_claim"
+              | Some claimed, Some w when w <> claimed ->
+                  release_to_pending ~error:"worker_mismatch"
+              | Some _claimed, None ->
+                  req.drifted <- true;
+                  Ok ()
+              | Some _claimed, Some _w -> Ok ()
+            in
+            (match base_check with
+             | Error _ as e -> e
+             | Ok () ->
+                 match context_digest with
+                 | Some d when d <> "" && d <> req.context_digest ->
+                     release_to_pending ~error:"context_drift"
+	                 | _ ->
+	                     req.result <- Some code;
+	                     req.status <- Completed;
+	                     Ok ())
+	  )
 
 let agent_get_result req_id =
   Eio.Mutex.use_rw ~protect:true agent_queue_mutex (fun () ->

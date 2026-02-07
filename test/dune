@@ -14,6 +14,11 @@
  (name test_mcp_protocol_coverage)
  (libraries figma_mcp alcotest yojson str))
 
+; Agent Queue state machine tests (claim/heartbeat/result semantics)
+(test
+ (name test_agent_queue)
+ (libraries figma_mcp alcotest yojson eio_main))
+
 ; Semantic Style DSL Mapper 테스트 (Phase 1 - Tier 1)
 (test
  (name test_semantic_mapper)
