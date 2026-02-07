@@ -28,6 +28,13 @@ type mcp_resource = {
   mime_type: string;
 }
 
+type mcp_resource_template = {
+  uri_template: string;
+  name: string;
+  description: string;
+  mime_type: string;
+}
+
 type prompt_arg = {
   name: string;
   description: string;
@@ -156,6 +163,14 @@ let resource_to_json (r : mcp_resource) : Yojson.Safe.t =
     ("mimeType", `String r.mime_type);
   ]
 
+let resource_template_to_json (t : mcp_resource_template) : Yojson.Safe.t =
+  `Assoc [
+    ("uriTemplate", `String t.uri_template);
+    ("name", `String t.name);
+    ("description", `String t.description);
+    ("mimeType", `String t.mime_type);
+  ]
+
 let prompt_arg_to_json (arg : prompt_arg) : Yojson.Safe.t =
   `Assoc [
     ("name", `String arg.name);
@@ -187,6 +202,7 @@ type mcp_server = {
   tools: tool_def list;
   handlers_sync: (string * tool_handler_sync) list;
   resources: mcp_resource list;
+  resource_templates: mcp_resource_template list;
   prompts: mcp_prompt list;
   read_resource: resource_reader;
 }
@@ -428,6 +444,8 @@ chrome 도구 불가 시 `figma_verify_visual` 내장 Playwright 사용:
 
 - `figma://docs/fidelity` - Fidelity DSL v3 스펙
 - `figma://docs/usage` - 사용 가이드 (도구 선택 예시)
+- `figma://docs/tokens` - Variables(Design Tokens) 리소스/템플릿 사용 가이드
+- `figma://tokens/{file_key}` - Variables를 토큰(JSON)으로 제공 (format=raw|resolved|dtcg)
 |}
 
 let handle_initialize params : Yojson.Safe.t =
@@ -454,6 +472,10 @@ let handle_tools_list server _params : Yojson.Safe.t =
 let handle_resources_list server _params : Yojson.Safe.t =
   let resources_json = List.map resource_to_json server.resources in
   `Assoc [("resources", `List resources_json)]
+
+let handle_resource_templates_list server _params : Yojson.Safe.t =
+  let templates_json = List.map resource_template_to_json server.resource_templates in
+  `Assoc [("resourceTemplates", `List templates_json)]
 
 let handle_prompts_list server _params : Yojson.Safe.t =
   let prompts_json = List.map prompt_to_json server.prompts in
@@ -548,7 +570,7 @@ let process_request_sync server req : Yojson.Safe.t =
       make_success_response id (handle_resources_list server req.params)
 
   | "resources/templates/list" ->
-      make_success_response id (`Assoc [("resourceTemplates", `List [])])
+      make_success_response id (handle_resource_templates_list server req.params)
 
   | "resources/read" ->
       (match handle_resources_read server req.params with
@@ -602,5 +624,12 @@ let run_stdio_server server =
 
 (** ============== 서버 생성 헬퍼 ============== *)
 
-let create_server ?(handlers_sync=[]) tools resources prompts read_resource =
-  { tools; handlers_sync; resources; prompts; read_resource }
+let create_server
+  ?(handlers_sync=[])
+  ?(resource_templates=[])
+  tools
+  resources
+  prompts
+  read_resource
+  =
+  { tools; handlers_sync; resources; resource_templates; prompts; read_resource }

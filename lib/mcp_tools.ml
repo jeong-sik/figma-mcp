@@ -7433,6 +7433,21 @@ let resources : mcp_resource list = [
     description = "정확도 우선 호출 패턴 및 옵션";
     mime_type = "text/markdown";
   };
+  {
+    uri = "figma://docs/tokens";
+    name = "Tokens";
+    description = "Figma Variables(Design Tokens) 리소스/템플릿 사용 가이드";
+    mime_type = "text/markdown";
+  };
+]
+
+let resource_templates : mcp_resource_template list = [
+  {
+    uri_template = "figma://tokens/{file_key}";
+    name = "Design tokens";
+    description = "Figma Variables API를 design tokens로 제공합니다. Query: format=raw|resolved|dtcg (default: resolved)";
+    mime_type = "application/json";
+  };
 ]
 
 let prompts : mcp_prompt list = [
@@ -7521,6 +7536,27 @@ let prompts : mcp_prompt list = [
 ]
 
 let read_resource uri =
+  let starts_with ~prefix s =
+    let lp = String.length prefix in
+    String.length s >= lp && String.sub s 0 lp = prefix
+  in
+  let parse_query q =
+    q
+    |> String.split_on_char '&'
+    |> List.filter_map (fun part ->
+      match String.split_on_char '=' part with
+      | [k; v] when k <> "" -> Some (k, v)
+      | [k] when k <> "" -> Some (k, "")
+      | _ -> None)
+  in
+  let split_query s =
+    match String.index_opt s '?' with
+    | None -> (s, [])
+    | Some i ->
+        let base = String.sub s 0 i in
+        let q = String.sub s (i + 1) (String.length s - i - 1) in
+        (base, parse_query q)
+  in
   match uri with
   | "figma://docs/fidelity" ->
       let body = {|
@@ -7616,9 +7652,201 @@ let read_resource uri =
 - Use `use_absolute_bounds=true` to include effects in render bounds
 |} in
       Ok ("text/markdown", body)
+  | "figma://docs/tokens" ->
+      let body = {|
+# Tokens (Figma Variables)
+
+이 서버는 Figma Variables(Design Tokens)를 MCP **resource**로도 제공합니다.
+
+## Static resource
+- `figma://docs/tokens` (이 문서)
+
+## Resource template
+- `figma://tokens/{file_key}`
+  - Query:
+    - `format=resolved` (기본값): default mode 기준 값 포함
+    - `format=raw`: Figma Variables API 원본
+    - `format=dtcg`: 토큰 트리(leaf에 `$type`/`$value`), alias는 `{path}` 형태로 표현
+
+## Notes
+- 인증은 `FIGMA_TOKEN` 환경변수로 처리합니다.
+- `format=dtcg`는 spec strict-compat을 보장하지 않습니다. (leaf 구조는 DTCG 스타일, 루트는 `$extensions` 메타 포함)
+|} in
+      Ok ("text/markdown", body)
+  | uri when starts_with ~prefix:"figma://tokens/" uri ->
+      let (base, q) = split_query uri in
+      let prefix = "figma://tokens/" in
+      let file_key =
+        String.sub base (String.length prefix) (String.length base - String.length prefix)
+        |> String.trim
+      in
+      let format = List.assoc_opt "format" q |> Option.value ~default:"resolved" in
+      (match Sys.getenv_opt "FIGMA_TOKEN" with
+       | None ->
+           Error "Missing FIGMA_TOKEN env var (required for figma://tokens/{file_key})"
+       | Some token ->
+           if file_key = "" then
+             Error "Missing file_key in resource URI. Use figma://tokens/{file_key}"
+           else
+             (match fetch_variables_cached ~file_key ~token with
+              | Error err -> Error err
+              | Ok (json, source) ->
+                  (match format with
+                   | "raw" ->
+                       Ok ("application/json", Yojson.Safe.pretty_to_string json)
+                   | "resolved" ->
+                       let resolved = resolve_variables json in
+                       Ok ("application/json", Yojson.Safe.pretty_to_string resolved)
+                   | "dtcg" ->
+                       let resolved = resolve_variables json in
+                       let assoc_string_opt key = function
+                         | `Assoc fields -> (
+                             match List.assoc_opt key fields with
+                             | Some (`String s) -> Some s
+                             | _ -> None)
+                         | _ -> None
+                       in
+                       let assoc_value key = function
+                         | `Assoc fields -> List.assoc_opt key fields |> Option.value ~default:`Null
+                         | _ -> `Null
+                       in
+                       let resolved_map =
+                         match resolved with
+                         | `Assoc fields -> (
+                             match List.assoc_opt "resolved" fields with
+                             | Some (`Assoc vars) -> vars
+                             | _ -> [])
+                         | _ -> []
+                       in
+                       let name_segments name =
+                         name
+                         |> String.split_on_char '/'
+                         |> List.map String.trim
+                         |> List.filter (fun s -> s <> "")
+                       in
+                       let path_of_segments segs = String.concat "/" segs in
+                       let id_to_path =
+                         resolved_map
+                         |> List.filter_map (fun (var_id, var_json) ->
+                           match assoc_string_opt "name" var_json with
+                           | None -> None
+                           | Some name ->
+                               let segs = name_segments name in
+                               let segs = if segs = [] then [var_id] else segs in
+                               Some (var_id, path_of_segments segs))
+                       in
+                       let is_token_obj = function
+                         | `Assoc fields ->
+                             List.exists (fun (k, _) -> k = "$value" || k = "$type") fields
+                         | _ -> false
+                       in
+                       let ensure_group_obj v =
+                         match v with
+                         | `Assoc _ when is_token_obj v -> `Assoc [("$self", v)]
+                         | `Assoc _ as a -> a
+                         | _ -> `Assoc []
+                       in
+                       let rec insert_token tree segments token_obj =
+                         match (tree, segments) with
+                         | (`Assoc fields, []) -> `Assoc fields
+                         | (`Assoc fields, [last]) ->
+                             let existing = List.assoc_opt last fields in
+                             let fields_no_last = List.remove_assoc last fields in
+                             (match existing with
+                              | None -> `Assoc ((last, token_obj) :: fields_no_last)
+                              | Some ex ->
+                                  if is_token_obj ex then
+                                    `Assoc ((last, token_obj) :: fields_no_last)
+                                  else
+                                    let group = ensure_group_obj ex in
+                                    let group_fields = match group with `Assoc gf -> gf | _ -> [] in
+                                    let group_fields = ("$self", token_obj) :: (List.remove_assoc "$self" group_fields) in
+                                    `Assoc ((last, `Assoc group_fields) :: fields_no_last))
+                         | (`Assoc fields, seg :: rest) ->
+                             let child = List.assoc_opt seg fields |> Option.value ~default:(`Assoc []) |> ensure_group_obj in
+                             let child' = insert_token child rest token_obj in
+                             let fields_no_seg = List.remove_assoc seg fields in
+                             `Assoc ((seg, child') :: fields_no_seg)
+                         | (_other, _segments) -> tree
+                       in
+                       let dtcg_type resolved_type =
+                         match String.lowercase_ascii resolved_type with
+                         | "float" -> "number"
+                         | other -> other
+                       in
+                       let alias_target_id = function
+                         | `Assoc fields -> (
+                             match List.assoc_opt "type" fields, List.assoc_opt "id" fields with
+                             | Some (`String "VARIABLE_ALIAS"), Some (`String id) -> Some id
+                             | _ -> None)
+                         | _ -> None
+                       in
+                       let build_token var_id var_json =
+                         let name = assoc_string_opt "name" var_json |> Option.value ~default:var_id in
+                         let segs = name_segments name in
+                         let segs = if segs = [] then [var_id] else segs in
+                         let resolved_type =
+                           assoc_string_opt "resolvedType" var_json |> Option.value ~default:"unknown"
+                         in
+                         let raw_value = assoc_value "defaultValue" var_json in
+                         let value =
+                           match alias_target_id raw_value with
+                           | None -> raw_value
+                           | Some target_id ->
+                               (match List.assoc_opt target_id id_to_path with
+                                | Some p -> `String ("{" ^ p ^ "}")
+                                | None -> raw_value)
+                         in
+                         let figma_ext =
+                           `Assoc [
+                             ("id", `String var_id);
+                             ("name", `String name);
+                             ("collectionId", assoc_value "collectionId" var_json);
+                             ("defaultModeId", assoc_value "defaultModeId" var_json);
+                             ("defaultModeName", assoc_value "defaultModeName" var_json);
+                             ("resolvedType", `String resolved_type);
+                           ]
+                         in
+                         let token_obj =
+                           `Assoc [
+                             ("$type", `String (dtcg_type resolved_type));
+                             ("$value", value);
+                             ("$extensions", `Assoc [("figma", figma_ext)]);
+                           ]
+                         in
+                         (segs, token_obj)
+                       in
+                       let tree =
+                         List.fold_left (fun acc (var_id, var_json) ->
+                           let (segs, token_obj) = build_token var_id var_json in
+                           insert_token acc segs token_obj
+                         ) (`Assoc []) resolved_map
+                       in
+                       let meta =
+                         `Assoc [
+                           ("figmaFileKey", `String file_key);
+                           ("variablesSource", source);
+                           ("generatedAtUnixMs", `Int (int_of_float (Unix.gettimeofday () *. 1000.0)));
+                         ]
+                       in
+                       let tree_fields =
+                         match tree with
+                         | `Assoc fields -> fields
+                         | _ -> []
+                       in
+                       let out = `Assoc (("$extensions", `Assoc [("figma", meta)]) :: tree_fields) in
+                       Ok ("application/json", Yojson.Safe.pretty_to_string out)
+                   | _ ->
+                       Error "Invalid format. Use raw|resolved|dtcg")))
   | _ -> Error "Resource not found"
 
 (** ============== 서버 생성 ============== *)
 
 let create_figma_server () =
-  Mcp_protocol.create_server ~handlers_sync:all_handlers_sync public_tools resources prompts read_resource
+  Mcp_protocol.create_server
+    ~handlers_sync:all_handlers_sync
+    ~resource_templates
+    public_tools
+    resources
+    prompts
+    read_resource

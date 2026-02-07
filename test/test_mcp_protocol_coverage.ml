@@ -320,6 +320,12 @@ module Protocol_tests = struct
       arguments = [];
       text = "Hello!";
     } in
+    let template : Mcp_protocol.mcp_resource_template = {
+      uri_template = "file:///template/{name}.txt";
+      name = "Template";
+      description = "Test template";
+      mime_type = "text/plain";
+    } in
     let echo_handler params =
       Ok (`Assoc [("content", `List [`Assoc [
         ("type", `String "text");
@@ -334,6 +340,7 @@ module Protocol_tests = struct
     in
     Mcp_protocol.create_server
       ~handlers_sync:[("echo", echo_handler)]
+      ~resource_templates:[template]
       [tool] [resource] [prompt] read_resource
 
   let test_handle_initialize () =
@@ -524,9 +531,14 @@ module Protocol_tests = struct
     | `Assoc fields ->
         (match List.assoc_opt "result" fields with
          | Some (`Assoc result_fields) ->
-             check (option json_testable) "empty templates"
-               (Some (`List []))
-               (List.assoc_opt "resourceTemplates" result_fields)
+             (match List.assoc_opt "resourceTemplates" result_fields with
+              | Some (`List [ `Assoc template_fields ]) ->
+                  check (option json_testable) "uriTemplate"
+                    (Some (`String "file:///template/{name}.txt"))
+                    (List.assoc_opt "uriTemplate" template_fields)
+              | Some (`List lst) ->
+                  fail (Printf.sprintf "Expected 1 template, got %d" (List.length lst))
+              | _ -> fail "Expected resourceTemplates list")
          | _ -> fail "Expected result object")
     | _ -> fail "Expected Assoc"
 
