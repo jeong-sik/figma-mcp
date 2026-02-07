@@ -22,7 +22,6 @@ let render_script_path =
       let candidates = [
         Filename.concat (Sys.getcwd ()) "scripts/render-html.js";
         Filename.concat (Filename.dirname Sys.executable_name) "../scripts/render-html.js";
-        "/Users/dancer/me/.worktrees/figma-mcp-streaming/features/figma-mcp/scripts/render-html.js";
       ] in
       List.find_opt Sys.file_exists candidates
       |> Option.value ~default:"scripts/render-html.js"
@@ -218,7 +217,6 @@ let ssim_script_path =
   let candidates = [
     Filename.concat (Sys.getcwd ()) "scripts/ssim-compare.js";
     Filename.concat (Filename.dirname Sys.executable_name) "../scripts/ssim-compare.js";
-    "/Users/dancer/me/.worktrees/figma-mcp-streaming/features/figma-mcp/scripts/ssim-compare.js";
   ] in
   List.find_opt Sys.file_exists candidates
   |> Option.value ~default:"scripts/ssim-compare.js"
