@@ -688,7 +688,36 @@ type sse_client = {
   mutable connected: bool;
 }
 let sse_clients : (int, sse_client) Hashtbl.t = Hashtbl.create 16
-let sse_client_counter = ref 0
+
+(* JS safe integer: 2^53 - 1. We keep SSE client ids numeric for compatibility,
+   but make them unguessable to mitigate client_id hijacking. *)
+let max_js_safe_client_id = Int64.sub (Int64.shift_left 1L 53) 1L
+let sse_client_id_mask =
+  (* Keep within OCaml int range for 32-bit builds, while staying JS-safe. *)
+  let max_int64 = Int64.of_int max_int in
+  if Int64.compare max_int64 max_js_safe_client_id < 0 then max_int64 else max_js_safe_client_id
+
+let random_sse_client_id () =
+  let int64_of_be_string s =
+    let rec go i acc =
+      if i = 8 then acc
+      else
+        let acc =
+          Int64.(logor (shift_left acc 8) (of_int (Char.code s.[i])))
+        in
+        go (i + 1) acc
+    in
+    go 0 0L
+  in
+  let rec loop () =
+    let bytes = Mirage_crypto_rng.generate 8 in
+    let v = int64_of_be_string bytes |> fun x -> Int64.logand x sse_client_id_mask in
+    if v = 0L then loop ()
+    else
+      let id = Int64.to_int v in
+      if Hashtbl.mem sse_clients id then loop () else id
+  in
+  loop ()
 
 let format_sse_data data =
   if data = "" then
@@ -700,8 +729,7 @@ let format_sse_data data =
     |> String.concat "\n"
 
 let register_sse_client body =
-  incr sse_client_counter;
-  let id = !sse_client_counter in
+  let id = random_sse_client_id () in
   let client = { body; mutex = Eio.Mutex.create (); connected = true } in
   Hashtbl.add sse_clients id client;
   Server_metrics.sse_open ();
@@ -877,12 +905,12 @@ let mcp_post_handler ~sw ~domain_mgr ~eio_ctx server request reqd =
                  Response.json response_str reqd
              with exn ->
                eprintf "[MCP] request failed: %s\n%!" (Printexc.to_string exn);
-               let err = Mcp_protocol.make_error_response `Null
-                 Mcp_protocol.internal_error (Printexc.to_string exn) None in
-               if wants_sse then
-                 Response.sse_message (Yojson.Safe.to_string err) reqd
-               else
-                 Response.json ~status:`Internal_server_error (Yojson.Safe.to_string err) reqd)))
+                let err = Mcp_protocol.make_error_response `Null
+                  Mcp_protocol.internal_error "Internal server error" None in
+                if wants_sse then
+                  Response.sse_message (Yojson.Safe.to_string err) reqd
+                else
+                  Response.json ~status:`Internal_server_error (Yojson.Safe.to_string err) reqd)))
 
 (** MCP SSE handler for streamable-http protocol (GET /mcp) *)
 let mcp_sse_handler ~clock _request reqd =

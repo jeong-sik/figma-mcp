@@ -351,11 +351,17 @@ let test_is_http_url_http () =
 let test_is_http_url_https () =
   check bool "https url" true (Mcp_tools.is_http_url "https://example.com")
 
+let test_is_http_url_httpx () =
+  check bool "httpx not http" false (Mcp_tools.is_http_url "httpx://example.com")
+
 let test_is_http_url_ftp () =
   check bool "ftp not http" false (Mcp_tools.is_http_url "ftp://example.com")
 
 let test_is_http_url_path () =
   check bool "path not http" false (Mcp_tools.is_http_url "/local/path")
+
+let test_is_http_url_bare_http () =
+  check bool "bare http is not url" false (Mcp_tools.is_http_url "http")
 
 let test_is_http_url_short () =
   check bool "short string" false (Mcp_tools.is_http_url "hi")
@@ -378,8 +384,10 @@ let url_util_tests = [
   "strip_query empty", `Quick, test_strip_query_empty;
   "is_http_url http", `Quick, test_is_http_url_http;
   "is_http_url https", `Quick, test_is_http_url_https;
+  "is_http_url httpx", `Quick, test_is_http_url_httpx;
   "is_http_url ftp", `Quick, test_is_http_url_ftp;
   "is_http_url path", `Quick, test_is_http_url_path;
+  "is_http_url bare http", `Quick, test_is_http_url_bare_http;
   "is_http_url short", `Quick, test_is_http_url_short;
   "file_ext_from_url png", `Quick, test_file_ext_from_url_png;
   "file_ext_from_url jpg", `Quick, test_file_ext_from_url_jpg;
