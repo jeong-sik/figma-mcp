@@ -6,8 +6,14 @@ open Printf
 (** Progress token type *)
 type progress_token = string
 
-(** SSE client reference (set by mcp_protocol_eio at startup) *)
-let sse_clients_ref : (int, (unit -> unit)) Hashtbl.t ref = ref (Hashtbl.create 10)
+(** Fiber-local client id (HTTP streamable SSE). *)
+let client_id_key : int Eio.Fiber.key = Eio.Fiber.create_key ()
+
+let with_client_id client_id fn =
+  Eio.Fiber.with_binding client_id_key client_id fn
+
+(** SSE client sender functions (set by mcp_protocol_eio at startup) *)
+let sse_clients_ref : (int, (string -> unit)) Hashtbl.t ref = ref (Hashtbl.create 10)
 
 (** Register progress sender function *)
 let register_progress_sender ~client_id ~sender =
@@ -28,16 +34,47 @@ let set_broadcast_fn fn =
 let make_progress_token () =
   sprintf "progress_%d_%d" (Unix.getpid ()) (int_of_float (Unix.gettimeofday () *. 1000.))
 
-(** Send progress notification via broadcast *)
+let progress_notification_json ~token ~current ~total ~message =
+  `Assoc [
+    ("jsonrpc", `String "2.0");
+    ("method", `String "notifications/progress");
+    ("params",
+      `Assoc [
+        ("progressToken", `String token);
+        ("progress", `Int current);
+        ("total", `Int total);
+        ("message", `String message);
+      ]);
+  ]
+  |> Yojson.Safe.to_string
+
+(** Send progress notification.
+
+    Prefer sending to the current fiber's bound SSE client (streamable HTTP).
+    Falls back to broadcast (best-effort) for non-streamable contexts. *)
 let send_progress ~token ~current ~total ~message () =
-  let data = sprintf
-    {|{"jsonrpc":"2.0","method":"notifications/progress","params":{"progressToken":"%s","progress":%d,"total":%d,"message":"%s"}}|}
-    token current total message
-  in
+  let data = progress_notification_json ~token ~current ~total ~message in
   eprintf "[progress] %s: %d/%d - %s\n%!" token current total message;
-  match !broadcast_fn with
-  | Some fn -> fn data
-  | None -> ()
+  let try_scoped () =
+    match Eio.Fiber.get client_id_key with
+    | None -> false
+    | Some client_id ->
+        (match Hashtbl.find_opt !sse_clients_ref client_id with
+         | None -> false
+         | Some sender ->
+             (try
+               sender data;
+               true
+             with _ ->
+               (* Client is likely disconnected; avoid retry storms. *)
+               Hashtbl.remove !sse_clients_ref client_id;
+               false))
+  in
+  if try_scoped () then ()
+  else
+    match !broadcast_fn with
+    | Some fn -> fn data
+    | None -> ()
 
 (** Alias for send_progress *)
 let update_progress = send_progress

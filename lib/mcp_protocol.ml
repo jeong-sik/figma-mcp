@@ -571,6 +571,10 @@ let process_request_sync server req : Yojson.Safe.t =
 let run_stdio_server server =
   (* stderr로 로깅 *)
   eprintf "[%s] MCP Server started (protocol: %s)\n%!" server_name protocol_version;
+  (* Best-effort progress notifications for stdio clients. *)
+  Mcp_progress.set_broadcast_fn (fun data ->
+    print_endline data;
+    flush stdout);
 
   try
     while true do

@@ -747,6 +747,8 @@ let unregister_sse_client id =
         true
     | None -> false
   in
+  (* Prevent progress sender leaks. *)
+  Mcp_progress.unregister_progress_sender id;
   Hashtbl.remove sse_clients id;
   if was_connected then Server_metrics.sse_close ()
 
@@ -892,12 +894,13 @@ let mcp_post_handler ~sw ~domain_mgr ~eio_ctx server request reqd =
          | Some (id, client) ->
              Response.accepted reqd;
              Eio.Fiber.fork ~sw (fun () ->
-               try
-                 let response_str = run_mcp_request ~domain_mgr ~eio_ctx server body_str in
-                 send_sse_event client ~event:"message" ~data:response_str
-               with exn ->
-                 eprintf "[MCP] SSE request failed (client=%d): %s\n%!" id (Printexc.to_string exn);
-                 unregister_sse_client id)
+               Mcp_progress.with_client_id id (fun () ->
+                 try
+                   let response_str = run_mcp_request ~domain_mgr ~eio_ctx server body_str in
+                   send_sse_event client ~event:"message" ~data:response_str
+                 with exn ->
+                   eprintf "[MCP] SSE request failed (client=%d): %s\n%!" id (Printexc.to_string exn);
+                   unregister_sse_client id))
          | None ->
              (* Check Accept header for SSE support (MCP Streamable HTTP) *)
              let wants_sse = Request.accepts_sse request in
@@ -921,6 +924,12 @@ let mcp_sse_handler ~clock _request reqd =
   Response.sse_stream reqd ~on_write:(fun body ->
     (* Register client for shutdown broadcast *)
     let client_id, client = register_sse_client body in
+    Mcp_progress.register_progress_sender
+      ~client_id
+      ~sender:(fun data ->
+        if client.connected then
+          try send_sse_event client ~event:"notification" ~data
+          with _ -> ());
 
     (* Send initial endpoint event (MCP protocol requirement) *)
     let endpoint = sprintf "/mcp?client_id=%d" client_id in
