@@ -3692,8 +3692,12 @@ let handle_verify_visual args : (Yojson.Safe.t, string) result =
   match (file_key, node_id, token) with
   | (Some file_key, Some node_id, Some token) ->
       (* 1. Figma에서 노드 PNG 내보내기 *)
-      let figma_png_path = Printf.sprintf "/tmp/figma-visual/figma_%s_%s.png"
-        file_key (sanitize_node_id node_id) in
+      (* Use unique temp paths to avoid cross-run collisions. *)
+      let figma_png_path =
+        Visual_verifier.temp_file
+          ~prefix:(Printf.sprintf "figma_%s_%s" (sanitize_file_key file_key) (sanitize_node_id node_id))
+          ~ext:"png"
+      in
       (match Figma_effects.Perform.get_images ~token ~file_key
               ~node_ids:[node_id] ~format:"png" ~scale:1.0 ?version () with
        | Error err -> Error (Printf.sprintf "Failed to get Figma image: %s" err)
