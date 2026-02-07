@@ -1106,9 +1106,14 @@ let make_category_tool cat : tool_def =
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
+        ("mode", `Assoc [
+          ("type", `String "string");
+          ("enum", `List [`String "list"; `String "describe"; `String "call"]);
+          ("description", `String "동작 모드. 기본(auto): tool/args 유무로 list/describe/call 결정");
+        ]);
         ("tool", `Assoc [
           ("type", `String "string");
-          ("description", `String "실행할 도구 이름 (예: verify_visual). 생략시 목록 반환");
+          ("description", `String "하위 도구 이름 (예: verify_visual). 생략시 목록(list). tool만 주고 args 생략하면 describe로 스키마/설명 반환");
         ]);
         ("args", `Assoc [
           ("type", `String "object");
@@ -7826,42 +7831,108 @@ let handle_codegen_sync args : (Yojson.Safe.t, string) result =
 
 (** 카테고리 도구 핸들러 - tool 파라미터로 하위 도구 실행 또는 목록 반환 *)
 let handle_category category_name args =
+  let mode_param = get_string "mode" args |> Option.map String.lowercase_ascii in
   let tool_param = get_string "tool" args in
   let args_param = member "args" args in
-  match tool_param with
-  | None ->
-      (* tool 미지정: 카테고리 도구 목록 반환 *)
-      (match List.find_opt (fun c -> c.name = category_name) tool_categories with
-       | Some cat ->
-           let tools_info = List.map (fun tool_name ->
-             `Assoc [
-               ("name", `String tool_name);
-               ("full_name", `String ("figma_" ^ tool_name));
-             ]
-           ) cat.tools in
-           let info = `Assoc [
-             ("category", `String category_name);
-             ("description", `String cat.description);
-             ("tool_count", `Int (List.length cat.tools));
-             ("tools", `List tools_info);
-             ("usage", `String (sprintf "figma_%s tool=<tool_name> args={...}" category_name));
-           ] in
-           Ok (make_text_content (Yojson.Safe.pretty_to_string info))
-       | None ->
-           Error (sprintf "Unknown category: %s" category_name))
-  | Some tool_name ->
-      (* tool 지정: 해당 도구 핸들러 호출 *)
-      let full_name = "figma_" ^ tool_name in
-      match Hashtbl.find_opt handler_registry full_name with
-      | Some handler ->
-          let actual_args = Option.value ~default:(`Assoc []) args_param in
-          handler actual_args
-      | None ->
-          (* 카테고리에 속하는지 확인 *)
-          if find_tool_in_category category_name tool_name then
-            Error (sprintf "Tool '%s' exists but handler not found. Try 'figma_%s' directly." tool_name tool_name)
-          else
-            Error (sprintf "Tool '%s' not found in category '%s'. Use 'figma_%s' to see available tools." tool_name category_name category_name)
+
+  let find_tool_def (full_name : string) : tool_def option =
+    List.find_opt (fun (t : tool_def) -> t.name = full_name) all_detailed_tools
+  in
+
+  let effective_mode : [ `List | `Describe | `Call ] =
+    match mode_param with
+    | Some "list" -> `List
+    | Some "describe" -> `Describe
+    | Some "call" -> `Call
+    | Some other ->
+        (* Fail fast for invalid modes: prevents accidental calls when user mistypes. *)
+        raise (Invalid_argument (sprintf "Invalid mode: %s (use list|describe|call)" other))
+    | None ->
+        match tool_param, args_param with
+        | None, _ -> `List
+        | Some _, None -> `Describe
+        | Some _, Some _ -> `Call
+  in
+
+  try
+    match effective_mode with
+    | `List ->
+        (match List.find_opt (fun c -> c.name = category_name) tool_categories with
+         | Some cat ->
+             let tools_info =
+               List.map (fun tool_name ->
+                 let full_name = "figma_" ^ tool_name in
+                 let desc =
+                   match find_tool_def full_name with
+                   | Some t -> `String t.description
+                   | None -> `Null
+                 in
+                 `Assoc [
+                   ("name", `String tool_name);
+                   ("full_name", `String full_name);
+                   ("description", desc);
+                 ]
+               ) cat.tools
+             in
+             let info =
+               `Assoc [
+                 ("category", `String category_name);
+                 ("description", `String cat.description);
+                 ("tool_count", `Int (List.length cat.tools));
+                 ("tools", `List tools_info);
+                 ("usage", `String (sprintf "figma_%s mode=call tool=<tool_name> args={...}" category_name));
+                 ("usage_describe", `String (sprintf "figma_%s mode=describe tool=<tool_name>" category_name));
+               ]
+             in
+             Ok (make_text_content (Yojson.Safe.pretty_to_string info))
+         | None ->
+             Error (sprintf "Unknown category: %s" category_name))
+
+    | `Describe ->
+        (match tool_param with
+         | None ->
+             Error (sprintf "Missing required parameter: tool (category=%s)" category_name)
+         | Some tool_name ->
+             if not (find_tool_in_category category_name tool_name) then
+               Error (sprintf "Tool '%s' not found in category '%s'. Use figma_%s mode=list to see available tools." tool_name category_name category_name)
+             else
+               let full_name = "figma_" ^ tool_name in
+               (match find_tool_def full_name with
+                | Some t ->
+                    let info =
+                      `Assoc [
+                        ("category", `String category_name);
+                        ("name", `String tool_name);
+                        ("full_name", `String full_name);
+                        ("description", `String t.description);
+                        ("input_schema", t.input_schema);
+                        ("usage", `String (sprintf "figma_%s mode=call tool=%s args={...}" category_name tool_name));
+                      ]
+                    in
+                    Ok (make_text_content (Yojson.Safe.pretty_to_string info))
+                | None ->
+                    Error (sprintf "Tool '%s' exists but tool definition not found. Try 'tools/list'." full_name)))
+
+    | `Call ->
+        (match tool_param with
+         | None ->
+             Error (sprintf "Missing required parameter: tool (category=%s)" category_name)
+         | Some tool_name ->
+             if not (find_tool_in_category category_name tool_name) then
+               Error (sprintf "Tool '%s' not found in category '%s'. Use figma_%s mode=list to see available tools." tool_name category_name category_name)
+             else
+               let full_name = "figma_" ^ tool_name in
+               match Hashtbl.find_opt handler_registry full_name with
+               | Some handler ->
+                   (match args_param with
+                    | None ->
+                        Error "Missing required parameter: args (mode=call)"
+                    | Some actual_args ->
+                        handler actual_args)
+               | None ->
+                   Error (sprintf "Tool '%s' exists but handler not found. Try 'figma_%s' directly." tool_name tool_name))
+  with
+  | Invalid_argument msg -> Error msg
 
 (** 동기 핸들러 리스트 - HTTP/Eio 모드에서 사용 *)
 

@@ -184,3 +184,8 @@
 (test
  (name test_server_metrics)
  (libraries figma_mcp alcotest eio_main))
+
+; Category tools: list/describe/call behavior
+(test
+ (name test_category_tools)
+ (libraries figma_mcp alcotest yojson))
