@@ -156,25 +156,54 @@ end
 (** {1 CORS Configuration} *)
 
 module Cors = struct
+  type profile =
+    | Compat
+    | Strict
+
+  let get_string_nonempty ~default name =
+    match Sys.getenv_opt name with
+    | Some v when String.trim v <> "" -> v
+    | _ -> default
+
+  let profile () =
+    match get_string_nonempty ~default:"compat" "FIGMA_MCP_CORS_PROFILE" |> String.lowercase_ascii with
+    | "strict" -> Strict
+    | _ -> Compat
+
+  let allowed_origins_default () =
+    match profile () with
+    | Compat -> ["http://localhost:*"; "http://127.0.0.1:*"; "https://www.figma.com"; "null"]
+    | Strict -> ["https://www.figma.com"]
+
+  let allow_private_network_default () =
+    match profile () with
+    | Compat -> true
+    | Strict -> false
+
+  let allow_headers_default () =
+    match profile () with
+    | Compat ->
+        "Content-Type, Accept, Mcp-Session-Id, Mcp-Protocol-Version, Authorization, X-API-Key, X-MCP-API-Key, Access-Control-Request-Private-Network"
+    | Strict ->
+        "Content-Type, Accept, Mcp-Session-Id, Mcp-Protocol-Version, Authorization, X-API-Key, X-MCP-API-Key"
+
   (** restrict | permissive *)
-  let mode =
-    get_string ~default:"restrict" "FIGMA_MCP_CORS_MODE"
+  let mode () =
+    get_string_nonempty ~default:"restrict" "FIGMA_MCP_CORS_MODE"
 
   (** Allowed origins, supports :* port wildcard (e.g., http://localhost:* ) *)
-  let allowed_origins =
+  let allowed_origins () =
     get_string_list
-      ~default:["http://localhost:*"; "http://127.0.0.1:*"; "https://www.figma.com"; "null"]
+      ~default:(allowed_origins_default ())
       "FIGMA_MCP_CORS_ALLOWED_ORIGINS"
 
   (** Allow private network access from browser preflight *)
-  let allow_private_network =
-    get_bool ~default:true "FIGMA_MCP_CORS_ALLOW_PRIVATE_NETWORK"
+  let allow_private_network () =
+    get_bool ~default:(allow_private_network_default ()) "FIGMA_MCP_CORS_ALLOW_PRIVATE_NETWORK"
 
   (** Allow headers list for preflight *)
-  let allow_headers =
-    get_string
-      ~default:"Content-Type, Accept, Mcp-Session-Id, Mcp-Protocol-Version, Authorization, X-API-Key, X-MCP-API-Key, Access-Control-Request-Private-Network"
-      "FIGMA_MCP_CORS_ALLOW_HEADERS"
+  let allow_headers () =
+    get_string_nonempty ~default:(allow_headers_default ()) "FIGMA_MCP_CORS_ALLOW_HEADERS"
 end
 
 (** {1 Asset Configuration} *)

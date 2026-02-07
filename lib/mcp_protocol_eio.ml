@@ -307,10 +307,10 @@ let agent_queue_stats_json () =
 (** ============== Request/Response Helpers ============== *)
 
 module Cors = struct
-  let mode = String.lowercase_ascii Figma_config.Cors.mode
-  let allowed_origins = Figma_config.Cors.allowed_origins
-  let allow_private_network = Figma_config.Cors.allow_private_network
-  let allow_headers = Figma_config.Cors.allow_headers
+  let mode () = String.lowercase_ascii (Figma_config.Cors.mode ())
+  let allowed_origins () = Figma_config.Cors.allowed_origins ()
+  let allow_private_network () = Figma_config.Cors.allow_private_network ()
+  let allow_headers () = Figma_config.Cors.allow_headers ()
 
   let origin_of reqd =
     let request = Httpun.Reqd.request reqd in
@@ -404,51 +404,55 @@ module Cors = struct
     match parse_origin_value origin with
     | None -> false
     | Some origin_value ->
+        let allowed = allowed_origins () in
         List.exists
           (fun pattern ->
             match parse_pattern pattern with
             | Some parsed -> matches_pattern origin_value parsed
             | None -> false)
-          allowed_origins
+          allowed
 
   let is_allowed reqd =
-    match mode with
+    match mode () with
     | "restrict" -> (
         match origin_of reqd with
         | None -> true
         | Some origin -> origin_allowed origin)
     | _ -> true
 
-  let allow_origin_value reqd =
-    match mode with
+  let allow_origin_value_of_origin_opt origin_opt =
+    match mode () with
     | "permissive" -> Some "*"
     | "restrict" -> (
-        match origin_of reqd with
+        match origin_opt with
         | Some origin when origin_allowed origin -> Some origin
         | _ -> None)
     | _ -> Some "*"
 
-  let headers reqd ~include_methods ~include_headers =
-    let base =
-      match allow_origin_value reqd with
-      | Some origin ->
+  let headers_for_origin_opt origin_opt ~include_methods ~include_headers =
+    match allow_origin_value_of_origin_opt origin_opt with
+    | None -> []
+    | Some origin ->
+        let base =
           let vary = if origin = "*" then [] else [("vary", "Origin")] in
           ("access-control-allow-origin", origin) :: vary
-      | None -> []
-    in
-    let headers =
-      if include_methods then
-        ("access-control-allow-methods", "GET, POST, OPTIONS") :: base
-      else base
-    in
-    let headers =
-      if include_headers then
-        ("access-control-allow-headers", allow_headers) :: headers
-      else headers
-    in
-    if allow_private_network then
-      ("access-control-allow-private-network", "true") :: headers
-    else headers
+        in
+        let headers =
+          if include_methods then
+            ("access-control-allow-methods", "GET, POST, OPTIONS") :: base
+          else base
+        in
+        let headers =
+          if include_headers then
+            ("access-control-allow-headers", allow_headers ()) :: headers
+          else headers
+        in
+        if allow_private_network () then
+          ("access-control-allow-private-network", "true") :: headers
+        else headers
+
+  let headers reqd ~include_methods ~include_headers =
+    headers_for_origin_opt (origin_of reqd) ~include_methods ~include_headers
 end
 
 module Response = struct

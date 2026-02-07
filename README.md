@@ -151,8 +151,9 @@ security add-generic-password -s "figma-mcp" -a "FIGMA_TOKEN" -w "YOUR_TOKEN"
 
 ## CORS 설정 (HTTP)
 
+- `FIGMA_MCP_CORS_PROFILE`: `compat`(기본) 또는 `strict` (기본값 프리셋; `strict` 기본값은 `null` 불허 + `access-control-allow-private-network` 비활성화)
 - `FIGMA_MCP_CORS_MODE`: `restrict`(기본) 또는 `permissive`
-- `FIGMA_MCP_CORS_ALLOWED_ORIGINS`: 허용 Origin 목록 (쉼표 구분, 예: `https://app.example.com,https://*.example.com`)
+- `FIGMA_MCP_CORS_ALLOWED_ORIGINS`: 허용 Origin 목록 (쉼표 구분, 예: `https://app.example.com,http://localhost:*`). 지원: `null`, `*`, `:*`(port wildcard)
 - `FIGMA_MCP_CORS_ALLOW_PRIVATE_NETWORK`: `true`일 때 `access-control-allow-private-network` 헤더 추가
 - `FIGMA_MCP_CORS_ALLOW_HEADERS`: 허용 헤더 목록 (기본: `Content-Type, Accept, Mcp-Session-Id, Mcp-Protocol-Version, Authorization, X-API-Key, X-MCP-API-Key, Access-Control-Request-Private-Network`)
 
