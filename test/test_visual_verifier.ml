@@ -172,6 +172,56 @@ let test_render_html_to_png_basic () =
       Alcotest.skip ()
   end
 
+(** Progress callback 테스트 (provided HTML PNG 경로) *)
+let test_verify_visual_progress_external_png () =
+  (* ImageMagick 존재 여부 확인 *)
+  let magick_check = Sys.command "which magick > /dev/null 2>&1" in
+  if magick_check <> 0 then
+    Alcotest.skip ()
+  else begin
+    (* 두 개의 테스트 이미지 생성 (동일 이미지) *)
+    let figma_png = Visual_verifier.temp_file ~prefix:"test_prog_figma" ~ext:"png" in
+    let html_png = Visual_verifier.temp_file ~prefix:"test_prog_html" ~ext:"png" in
+    let cmd1 = Printf.sprintf "magick -size 64x64 xc:blue %s 2>/dev/null" (Filename.quote figma_png) in
+    let cmd2 = Printf.sprintf "magick -size 64x64 xc:blue %s 2>/dev/null" (Filename.quote html_png) in
+    ignore (Sys.command cmd1);
+    ignore (Sys.command cmd2);
+
+    let cleanup () =
+      (try Unix.unlink figma_png with Unix.Unix_error _ -> ());
+      (try Unix.unlink html_png with Unix.Unix_error _ -> ())
+    in
+
+    if not (Sys.file_exists figma_png && Sys.file_exists html_png) then begin
+      cleanup ();
+      Alcotest.skip ()
+    end else begin
+      let calls = ref [] in
+      let on_progress ~current ~total ~message:_ =
+        calls := (current, total) :: !calls
+      in
+      let _result =
+        Visual_verifier.verify_visual
+          ~target_ssim:0.0
+          ~on_progress
+          ~html_png_provided:html_png
+          ~figma_png
+          "<html><body><div>progress</div></body></html>"
+      in
+      let calls = List.rev !calls in
+      check bool "progress called" true (List.length calls >= 2);
+      (match calls with
+       | (c0, t0) :: _ ->
+           check int "start current" 0 c0;
+           check int "start total" 1 t0
+       | _ -> ());
+      let (cl, tl) = List.nth calls (List.length calls - 1) in
+      check int "end current" 1 cl;
+      check int "end total" 1 tl;
+      cleanup ()
+    end
+  end
+
 (** ============== 테스트 그룹 ============== *)
 
 let utility_tests = [
@@ -207,6 +257,7 @@ let result_tests = [
 
 let integration_tests = [
   "render html to png basic", `Slow, test_render_html_to_png_basic;
+  "verify visual progress (external png)", `Slow, test_verify_visual_progress_external_png;
 ]
 
 (** ============== Diff 시각화 테스트 (Phase 4) ============== *)

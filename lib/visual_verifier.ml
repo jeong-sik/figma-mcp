@@ -657,10 +657,23 @@ let verify_visual
     ?(width=375)
     ?(height=812)
     ?(save_evolution=true)
+    ?(on_progress=(fun ~current:_ ~total:_ ~message:_ -> ()))
     ?html_png_provided
     ~figma_png
     html
   =
+  let total =
+    match html_png_provided with
+    | Some p when Sys.file_exists p -> 1
+    | Some _ -> 1
+    | None -> max_iterations
+  in
+  let report ~current ~total ~message =
+    (* Progress callbacks must never fail the main verification loop. *)
+    try on_progress ~current ~total ~message with _ -> ()
+  in
+  report ~current:0 ~total ~message:"verify_visual started";
+
   let evo_dir = if save_evolution then create_evolution_dir () else "/tmp/figma-visual" in
 
   (* Figma 원본도 evolution 디렉토리에 복사 *)
@@ -673,11 +686,14 @@ let verify_visual
   (* 외부 렌더링 이미지가 제공된 경우: Playwright 스킵, 단일 비교만 수행 *)
   match html_png_provided with
   | Some external_png when Sys.file_exists external_png ->
+    report ~current:1 ~total ~message:"verify_visual comparing with provided HTML PNG";
     let saved_png = if save_evolution then save_png ~dir:evo_dir ~step:1 ~src_png:external_png else external_png in
     let saved_html = if save_evolution then save_html ~dir:evo_dir ~step:1 html else "" in
     (match compare_renders_with_regions ~figma_png ~html_png:external_png with
      | Ok result ->
        let hssim = calculate_human_ssim result.ssim result.delta_e in
+       report ~current:total ~total
+         ~message:(sprintf "verify_visual done (ssim=%.4f, human_ssim=%.4f)" result.ssim hssim);
        let step = { step_num = 1; step_ssim = result.ssim;
                     step_delta_e = result.delta_e; step_human_ssim = hssim;
                     step_html_path = saved_html; step_png_path = saved_png;
@@ -689,12 +705,14 @@ let verify_visual
          evolution_history = [step];
          evolution_dir = evo_dir }
      | Error _e ->
+       report ~current:total ~total ~message:"verify_visual failed (compare error)";
        { ssim = 0.0; delta_e = 0.0; human_ssim = 0.0; passed = false; iterations = 0;
          figma_png; html_png = external_png; corrections_applied = [];
          final_html = Some html;
          evolution_history = [];
          evolution_dir = evo_dir })
   | Some _missing_png ->
+    report ~current:total ~total ~message:"verify_visual failed (provided HTML PNG missing)";
     { ssim = 0.0; delta_e = 0.0; human_ssim = 0.0; passed = false; iterations = 0;
       figma_png; html_png = ""; corrections_applied = [];
       final_html = Some html;
@@ -712,6 +730,8 @@ let verify_visual
         (match compare_renders_with_regions ~figma_png ~html_png with
         | Ok result ->
           let hssim = calculate_human_ssim result.ssim result.delta_e in
+          report ~current:total ~total
+            ~message:(sprintf "verify_visual final (ssim=%.4f, human_ssim=%.4f)" result.ssim hssim);
           let step = { step_num = iteration; step_ssim = result.ssim;
                        step_delta_e = result.delta_e; step_human_ssim = hssim;
                        step_html_path = saved_html; step_png_path = saved_png;
@@ -723,12 +743,14 @@ let verify_visual
             evolution_history = List.rev (step :: history);
             evolution_dir = evo_dir }
         | Error _ ->
+          report ~current:total ~total ~message:"verify_visual failed (final compare error)";
           { ssim = 0.0; delta_e = 0.0; human_ssim = 0.0; passed = false; iterations = iteration - 1;
             figma_png; html_png = ""; corrections_applied = corrections;
             final_html = Some current_html;
             evolution_history = List.rev history;
             evolution_dir = evo_dir })
       | Error _ ->
+        report ~current:total ~total ~message:"verify_visual failed (final render error)";
         { ssim = 0.0; delta_e = 0.0; human_ssim = 0.0; passed = false; iterations = iteration - 1;
           figma_png; html_png = ""; corrections_applied = corrections;
           final_html = Some current_html;
@@ -737,6 +759,9 @@ let verify_visual
     else
       match render_html_to_png ~width ~height current_html with
       | Error _e ->
+        report ~current:(min iteration total) ~total
+          ~message:(sprintf "verify_visual failed (render error at iter %d)" iteration);
+        report ~current:total ~total ~message:"verify_visual aborted";
         { ssim = 0.0; delta_e = 0.0; human_ssim = 0.0; passed = false; iterations = iteration;
           figma_png; html_png = ""; corrections_applied = corrections;
           final_html = None;
@@ -747,6 +772,9 @@ let verify_visual
         let saved_html = if save_evolution then save_html ~dir:evo_dir ~step:iteration current_html else "" in
         match compare_renders_with_regions ~figma_png ~html_png with
         | Error _ ->
+          report ~current:(min iteration total) ~total
+            ~message:(sprintf "verify_visual failed (compare error at iter %d)" iteration);
+          report ~current:total ~total ~message:"verify_visual aborted";
           { ssim = 0.0; delta_e = 0.0; human_ssim = 0.0; passed = false; iterations = iteration;
             figma_png; html_png = saved_png; corrections_applied = corrections;
             final_html = Some current_html;
@@ -758,14 +786,19 @@ let verify_visual
                        step_delta_e = result.delta_e; step_human_ssim = hssim;
                        step_html_path = saved_html; step_png_path = saved_png;
                        corrections_this_step = [] } in
+          report ~current:(min iteration total) ~total
+            ~message:(sprintf "verify_visual iter %d: ssim=%.4f, human_ssim=%.4f" iteration result.ssim hssim);
           if hssim >= target_ssim then
             (* 목표 달성! *)
+            (report ~current:total ~total
+               ~message:(sprintf "verify_visual target reached at iter %d" iteration);
             { ssim = result.ssim; delta_e = result.delta_e; human_ssim = hssim;
               passed = true; iterations = iteration;
               figma_png; html_png = saved_png; corrections_applied = corrections;
               final_html = Some current_html;
               evolution_history = List.rev (step :: history);
               evolution_dir = evo_dir }
+            )
           else
             (* 조정 힌트 생성 및 적용 - 영역별 diff 분석 활용 *)
             let hints = suggest_corrections ~ssim:result.ssim ~diff_regions:result.regions in

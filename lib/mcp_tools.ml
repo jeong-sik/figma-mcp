@@ -290,7 +290,7 @@ let tool_figma_image_similarity : tool_def = {
 (** Visual Feedback Loop - 코드 생성 및 시각적 검증 *)
 let tool_figma_verify_visual : tool_def = {
   name = "figma_verify_visual";
-  description = "✅ VERIFY: HTML을 Figma 렌더와 SSIM 비교. target_ssim=0.95 기본. 미달 시 CSS 자동 조정 (max 3회). html_screenshot으로 Chrome MCP 연동 가능. 반환: ssim_score, text_match, overall_passed, evolution_dir.";
+  description = "✅ VERIFY: HTML을 Figma 렌더와 SSIM 비교. target_ssim=0.95 기본. 미달 시 CSS 자동 조정 (max 3회). html_screenshot으로 Chrome MCP 연동 가능. SSE 사용 시 notifications/progress emit. 반환: progress_token, overall_passed, visual_verification, text_verification.";
   input_schema = object_schema [
     ("file_key", string_prop "Figma 파일 키");
     ("node_id", string_prop "노드 ID (예: 123:456)");
@@ -3710,6 +3710,15 @@ let handle_verify_visual args : (Yojson.Safe.t, string) result =
   let width = get_int_positive "width" 375 args in
   let height = get_int_positive "height" 812 args in
   let version = get_string "version" args in
+  let progress_token = Mcp_progress.make_progress_token () in
+  let on_progress ~current ~total ~message =
+    (* Avoid flooding clients/logs with giant messages. *)
+    let msg =
+      if String.length message > 200 then String.sub message 0 200 ^ "..."
+      else message
+    in
+    Mcp_progress.update_progress ~token:progress_token ~current ~total ~message:msg ()
+  in
 
   match (file_key, node_id, token) with
   | (Some file_key, Some node_id, Some token) ->
@@ -3759,6 +3768,7 @@ let handle_verify_visual args : (Yojson.Safe.t, string) result =
                      (* 3. Visual Feedback Loop 실행 (SSIM) *)
                      let result = Visual_verifier.verify_visual
                        ~target_ssim ~max_iterations ~width ~height
+                       ~on_progress
                        ?html_png_provided:html_screenshot
                        ~figma_png:saved_figma_png html_code
                      in
@@ -3783,6 +3793,7 @@ let handle_verify_visual args : (Yojson.Safe.t, string) result =
                      let full_result = `Assoc [
                        ("file_key", `String file_key);
                        ("node_id", `String node_id);
+                       ("progress_token", `String progress_token);
                        ("overall_passed", `Bool overall_passed);
                        ("visual_verification", result_json);
                        ("text_verification", text_verification_json);
