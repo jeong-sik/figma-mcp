@@ -65,6 +65,7 @@ let object_schema props required : Yojson.Safe.t =
 (** ============== 캐시 헬퍼 ============== *)
 
 let variables_cache_node_id = "__variables__"
+let search_cache_node_id_prefix = "__search__"
 
 let fetch_variables_cached ~file_key ~token =
   let cached_json =
@@ -77,6 +78,21 @@ let fetch_variables_cached ~file_key ~token =
       (match Figma_effects.Perform.get_variables ~token ~file_key with
        | Ok json ->
            Figma_cache.set ~file_key ~node_id:variables_cache_node_id json;
+           Ok (json, `String "rest")
+       | Error err -> Error err)
+
+let fetch_file_for_search_cached ~file_key ~token =
+  let node_id = search_cache_node_id_prefix in
+  let cached_json =
+    Figma_cache.get ~file_key ~node_id
+      ~ttl_hours:Figma_cache.Config.ttl_search_hours ()
+  in
+  match cached_json with
+  | Some json -> Ok (json, `String "cache")
+  | None ->
+      (match Figma_effects.Perform.get_file ~token ~file_key ~depth:4 () with
+       | Ok json ->
+           Figma_cache.set ~file_key ~node_id json;
            Ok (json, `String "rest")
        | Error err -> Error err)
 
@@ -7195,8 +7211,8 @@ let handle_search args : (Yojson.Safe.t, string) result =
 
   match (file_key, token, query) with
   | (Some file_key, Some token, Some query) ->
-      (match Figma_effects.Perform.get_file ~token ~file_key () with
-       | Ok json ->
+      (match fetch_file_for_search_cached ~file_key ~token with
+       | Ok (json, _source) ->
            (match Figma_api.extract_document json with
             | Some doc_json ->
                 let doc_str = Yojson.Safe.to_string doc_json in
