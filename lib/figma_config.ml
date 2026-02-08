@@ -60,6 +60,10 @@ module Cache = struct
   let ttl_variables_hours =
     get_float ~default:1.0 "FIGMA_MCP_CACHE_TTL_VARIABLES_HOURS"
 
+  (** TTL for search result cache entries (hours) *)
+  let ttl_search_hours =
+    get_float ~default:0.5 "FIGMA_MCP_CACHE_TTL_SEARCH_HOURS"
+
   (** Maximum L1 (memory) cache entries *)
   let l1_max =
     get_int ~default:100 "FIGMA_MCP_CACHE_L1_MAX"

@@ -11,6 +11,7 @@ module Config = struct
   let cache_dir = Figma_config.Cache.dir
   let ttl_hours = Figma_config.Cache.ttl_hours
   let ttl_variables_hours = Figma_config.Cache.ttl_variables_hours
+  let ttl_search_hours = Figma_config.Cache.ttl_search_hours
   let max_l1_entries = Figma_config.Cache.l1_max
   let l2_max_mb = Figma_config.Cache.l2_max_mb
   let l2_max_bytes = l2_max_mb * 1024 * 1024
