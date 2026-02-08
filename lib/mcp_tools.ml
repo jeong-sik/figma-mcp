@@ -1398,20 +1398,26 @@ let get_bool_or key default json =
     Supports: "env:FIGMA_TOKEN" syntax to read from environment.
     Priority: 1) explicit "token" (with env: expansion) 2) FIGMA_TOKEN env var *)
 let resolve_token args =
-  match get_string "token" args with
-  | Some t when String.length t > 0 ->
-    (* Handle "env:VAR_NAME" syntax *)
-    if String.length t > 4 && String.sub t 0 4 = "env:" then
-      let var_name = String.sub t 4 (String.length t - 4) |> String.trim in
-      (* Do NOT allow arbitrary env var reads from tool args.
-         Only support the documented "env:FIGMA_TOKEN". *)
-      if var_name = "FIGMA_TOKEN" then
-        Sys.getenv_opt "FIGMA_TOKEN"
+  (* Security hardening: if FIGMA_TOKEN is set on the server, do NOT allow
+     request-provided tokens to override it. This avoids accidental/abusive
+     secret injection via tool args (e.g., MCP clients or logs). *)
+  match Sys.getenv_opt "FIGMA_TOKEN" with
+  | Some t when String.length t > 0 -> Some t
+  | _ ->
+    match get_string "token" args with
+    | Some t when String.length t > 0 ->
+      (* Handle "env:VAR_NAME" syntax *)
+      if String.length t > 4 && String.sub t 0 4 = "env:" then
+        let var_name = String.sub t 4 (String.length t - 4) |> String.trim in
+        (* Do NOT allow arbitrary env var reads from tool args.
+           Only support the documented "env:FIGMA_TOKEN". *)
+        if var_name = "FIGMA_TOKEN" then
+          Sys.getenv_opt "FIGMA_TOKEN"
+        else
+          None
       else
-        None
-    else
-      Some t
-  | _ -> Sys.getenv_opt "FIGMA_TOKEN"
+        Some t
+    | _ -> None
 
 (** ============== Node selection helpers ============== *)
 
@@ -7220,37 +7226,117 @@ let handle_search args : (Yojson.Safe.t, string) result =
                  | Some root ->
                      (* 모든 노드 수집 *)
                      let all_nodes = Figma_query.collect_nodes ~max_depth:None root in
-                     let query_lower = String.lowercase_ascii query in
+                     let query_lower = String.lowercase_ascii query |> String.trim in
+                     if query_lower = "" then
+                       Ok (make_text_content "[]")
+                     else
+                       let tokens =
+                         query_lower
+                         |> Str.split (Str.regexp "[ \t\r\n]+")
+                         |> List.filter (fun s -> s <> "")
+                       in
+                       let tokens = if tokens = [] then [query_lower] else tokens in
 
-                     (* 검색 함수 *)
-                     let matches_name node =
-                       let name_lower = String.lowercase_ascii node.Figma_types.name in
-                       try
-                         let _ = Str.search_forward (Str.regexp_string query_lower) name_lower 0 in
-                         true
-                       with Not_found -> false
-                     in
-                     let matches_text node =
-                       match node.Figma_types.characters with
-                       | Some chars ->
-                           let chars_lower = String.lowercase_ascii chars in
-                           (try
-                              let _ = Str.search_forward (Str.regexp_string query_lower) chars_lower 0 in
-                              true
-                            with Not_found -> false)
-                       | None -> false
-                     in
-                     let matches node = match search_in with
-                       | "name" -> matches_name node
-                       | "text" -> matches_text node
-                       | _ -> matches_name node || matches_text node
-                     in
+                       let contains hay needle =
+                         try
+                           let _ = Str.search_forward (Str.regexp_string needle) hay 0 in
+                           true
+                         with Not_found -> false
+                       in
 
-                     (* 필터링 *)
-                     let results = List.filter matches all_nodes in
-                     let results = List.filteri (fun i _ -> i < limit) results in
-                     let result_str = Figma_query.results_to_string results in
-                     Ok (make_text_content result_str)
+                       let score_node node =
+                         let name_lower = String.lowercase_ascii node.Figma_types.name in
+                         let chars_lower =
+                           match node.Figma_types.characters with
+                           | Some chars -> Some (String.lowercase_ascii chars)
+                           | None -> None
+                         in
+
+                         let token_in_name tok = contains name_lower tok in
+                         let token_in_text tok =
+                           match chars_lower with
+                           | Some t -> contains t tok
+                           | None -> false
+                         in
+
+                         let matched_name = List.exists token_in_name tokens in
+                         let matched_text = List.exists token_in_text tokens in
+                         let matches =
+                           match search_in with
+                           | "name" -> matched_name
+                           | "text" -> matched_text
+                           | _ -> matched_name || matched_text
+                         in
+                         if not matches then
+                           None
+                         else
+                           let base_score =
+                             List.fold_left
+                               (fun acc tok ->
+                                 acc
+                                 +. (if token_in_name tok then 3.0 else 0.0)
+                                 +. (if token_in_text tok then 1.0 else 0.0))
+                               0.0
+                               tokens
+                           in
+                           let exact_bonus =
+                             if query_lower <> "" && name_lower = query_lower then 100.0 else 0.0
+                           in
+                           let prefix_bonus =
+                             if query_lower <> ""
+                                && String.length name_lower >= String.length query_lower
+                                && String.sub name_lower 0 (String.length query_lower) = query_lower
+                             then 10.0
+                             else 0.0
+                           in
+                           let matched_in =
+                             match (matched_name, matched_text) with
+                             | (true, true) -> "both"
+                             | (true, false) -> "name"
+                             | (false, true) -> "text"
+                             | _ -> "both"
+                           in
+                           Some (base_score +. exact_bonus +. prefix_bonus, matched_in, node)
+                       in
+
+                       let scored =
+                         all_nodes
+                         |> List.filter_map score_node
+                         |> List.sort (fun (sa, _, a) (sb, _, b) ->
+                              let c = compare sb sa in
+                              if c <> 0 then c
+                              else
+                                let an = String.lowercase_ascii a.Figma_types.name in
+                                let bn = String.lowercase_ascii b.Figma_types.name in
+                                let cn = String.compare an bn in
+                                if cn <> 0 then cn
+                                else String.compare a.Figma_types.id b.Figma_types.id)
+                         |> List.filteri (fun i _ -> i < limit)
+                       in
+
+                       (* Return JSON array in text content for robust client parsing.
+                          Each item: {id,name,type,characters,score,matched_in}. *)
+                       let items_json =
+                         scored
+                         |> List.map (fun (score, matched_in, node) ->
+                              let type_str =
+                                Figma_query.node_type_to_string node.Figma_types.node_type
+                              in
+                              let chars =
+                                match node.Figma_types.characters with
+                                | Some c -> truncate_string ~max_len:200 c
+                                | None -> ""
+                              in
+                              `Assoc [
+                                ("id", `String node.Figma_types.id);
+                                ("name", `String node.Figma_types.name);
+                                ("type", `String type_str);
+                                ("characters", `String chars);
+                                ("score", `Float score);
+                                ("matched_in", `String matched_in);
+                              ])
+                       in
+                       Ok (make_text_content (Yojson.Safe.to_string (`List items_json)))
                  | None -> Error "Failed to parse document")
             | None -> Error "Document not found")
        | Error err -> Error err)
