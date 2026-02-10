@@ -100,7 +100,9 @@ let hex_of_bytes (b : bytes) =
 let random_bytes len =
   let fd = Unix.openfile "/dev/urandom" [Unix.O_RDONLY] 0 in
   Fun.protect
-    ~finally:(fun () -> try Unix.close fd with _ -> ())
+    ~finally:(fun () ->
+      try Unix.close fd
+      with exn -> eprintf "[mcp_protocol] Warning: /dev/urandom fd close failed: %s\n%!" (Printexc.to_string exn))
     (fun () ->
       let buf = Bytes.create len in
       let rec loop off =
@@ -652,7 +654,8 @@ module Request = struct
     let stop () =
       if not !stopped then begin
         stopped := true;
-        (try Httpun.Body.Reader.close body with _ -> ())
+        (try Httpun.Body.Reader.close body
+         with exn -> eprintf "[mcp_protocol] Warning: body reader close failed: %s\n%!" (Printexc.to_string exn))
       end
     in
     match content_length with
@@ -826,7 +829,9 @@ let broadcast_sse_shutdown reason =
     if client.connected then
       try
         send_sse_event client ~event:"notification" ~data
-      with _ -> ()
+      with exn ->
+        eprintf "[mcp_protocol] SSE broadcast failed for client, marking disconnected: %s\n%!" (Printexc.to_string exn);
+        client.connected <- false
   ) sse_clients
 
 (** Close all SSE connections gracefully - for shutdown *)
@@ -837,7 +842,8 @@ let close_all_sse_connections () =
      | Some client ->
          let was_connected = client.connected in
          client.connected <- false;
-         (try Httpun.Body.Writer.close client.body with _ -> ())
+         (try Httpun.Body.Writer.close client.body
+          with exn -> eprintf "[mcp_protocol] Warning: SSE writer close failed: %s\n%!" (Printexc.to_string exn))
          ; if was_connected then Server_metrics.sse_close ()
      | None -> ());
     Hashtbl.remove sse_clients id
@@ -1066,7 +1072,8 @@ let wait_for_commands ~clock ~channel_id ~max ~timeout_ms =
     let promise, resolver = Eio.Promise.create () in
     let waiter_id =
       Figma_plugin_bridge.register_waiter ~channel_id ~notify:(fun () ->
-        try Eio.Promise.resolve resolver () with _ -> ())
+        try Eio.Promise.resolve resolver ()
+        with exn -> eprintf "[mcp_protocol] Warning: promise double-resolve: %s\n%!" (Printexc.to_string exn))
     in
     let commands_after = Figma_plugin_bridge.poll_commands ~channel_id ~max in
     if commands_after <> [] then begin
@@ -1179,6 +1186,29 @@ let plugin_result_handler _request reqd =
              Response.json (Yojson.Safe.to_string body) reqd
          | _ ->
              json_error "Missing channel_id or command_id" reqd))
+
+let plugin_event_handler _request reqd =
+  Request.read_body_async reqd (fun body_str ->
+    plugin_cleanup ();
+    match parse_json body_str with
+    | Error msg -> json_error msg reqd
+    | Ok json ->
+        let channel_id = get_string_field "channel_id" json in
+        let event_type = get_string_field "event_type" json in
+        let payload =
+          match get_payload_field "payload" json with
+          | Some p -> p
+          | None -> `Null
+        in
+        (match (channel_id, event_type) with
+         | (Some channel_id, Some event_type) ->
+             Figma_plugin_bridge.publish_event ~channel_id ~event_type ~payload;
+             eprintf "[Plugin] event channel=%s type=%s\n%!"
+               channel_id event_type;
+             let body = `Assoc [("status", `String "ok")] in
+             Response.json (Yojson.Safe.to_string body) reqd
+         | _ ->
+             json_error "Missing channel_id or event_type" reqd))
 
 let plugin_status_handler _request reqd =
   plugin_cleanup ();
@@ -3523,6 +3553,9 @@ let route_request ~clock ~domain_mgr ~sw ~eio_ctx server request reqd =
 
       | `POST, "/plugin/result" ->
           plugin_result_handler request reqd
+
+      | `POST, "/plugin/event" ->
+          plugin_event_handler request reqd
 
       | `POST, "/plugin/codegen" ->
           plugin_codegen_handler ~sw ~eio_ctx request reqd

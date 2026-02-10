@@ -1488,6 +1488,23 @@
         if (msg.type === "tokens_update") {
           updateTokens(msg.tokens);
         }
+
+        if (msg.type === "document_change") {
+          addLog("docchange", "Document changed (" + msg.changes.total + " changes)", true);
+          if (serverUrl && channelId) {
+            fetch(serverUrl + "/plugin/event", {
+              method: "POST",
+              headers: buildHeaders({ "Content-Type": "application/json" }),
+              body: JSON.stringify({
+                channel_id: channelId,
+                event_type: "document_change",
+                changes: msg.changes
+              })
+            }).catch(function(err) {
+              addLog("docchange", "Failed to send: " + err.message, false);
+            });
+          }
+        }
       };
 
       // Event handlers

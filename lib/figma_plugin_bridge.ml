@@ -19,12 +19,21 @@ type waiter = {
   notify: unit -> unit;
 }
 
+type event = {
+  event_type: string;       (** "selection_change" | "document_change" | "page_change" | "disconnect" *)
+  channel_id: string;
+  payload: Yojson.Safe.t;
+  timestamp: float;
+}
+
 type session = {
   mutable last_seen: float;
   commands: command Queue.t;
   results: (string, result) Hashtbl.t;
   mutable results_order: string Queue.t;
   mutable waiters: waiter list;
+  events: event Queue.t;
+  mutable event_waiters: waiter list;
 }
 
 let channels : (string, session) Hashtbl.t = Hashtbl.create 32
@@ -64,6 +73,26 @@ let cleanup_inactive_unlocked ~ttl_seconds =
   Hashtbl.iter (fun channel_id (session:session) ->
     if session.last_seen < cutoff then stale := channel_id :: !stale
   ) channels;
+  (* Publish disconnect events to any remaining event waiters before removal *)
+  List.iter (fun channel_id ->
+    match Hashtbl.find_opt channels channel_id with
+    | None -> ()
+    | Some session ->
+        let disconnect_event = {
+          event_type = "disconnect";
+          channel_id;
+          payload = `Assoc [("reason", `String "session_timeout")];
+          timestamp = now ();
+        } in
+        Queue.add disconnect_event session.events;
+        let waiters = session.event_waiters in
+        session.event_waiters <- [];
+        List.iter (fun waiter ->
+          try waiter.notify ()
+          with exn ->
+            Printf.eprintf "[plugin_bridge] Warning: disconnect event waiter notify failed (id=%d): %s\n%!" waiter.id (Printexc.to_string exn)
+        ) waiters
+  ) !stale;
   List.iter (Hashtbl.remove channels) !stale
 
 let compact_results_order (session:session) =
@@ -118,6 +147,8 @@ let ensure_session channel_id =
         results = Hashtbl.create 32;
         results_order = Queue.create ();
         waiters = [];
+        events = Queue.create ();
+        event_waiters = [];
       } in
       Hashtbl.add channels channel_id session;
       session
@@ -218,7 +249,9 @@ let enqueue_command ~channel_id ~name ~payload =
     id)
   in
   List.iter (fun waiter ->
-    try waiter.notify () with _ -> ()
+    try waiter.notify ()
+    with exn ->
+      Printf.eprintf "[plugin_bridge] Warning: waiter notify failed (id=%d): %s\n%!" waiter.id (Printexc.to_string exn)
   ) !pending_waiters;
   id
 
@@ -231,7 +264,9 @@ let register_waiter ~channel_id ~notify =
     session.waiters <- { id; notify } :: session.waiters;
     let dropped = trim_waiters session in
     List.iter (fun waiter ->
-      try waiter.notify () with _ -> ()
+      try waiter.notify ()
+      with exn ->
+        Printf.eprintf "[plugin_bridge] Warning: dropped waiter notify failed (id=%d): %s\n%!" waiter.id (Printexc.to_string exn)
     ) dropped;
     id)
 
@@ -310,6 +345,62 @@ let wait_for_result ~channel_id ~command_id ~timeout_ms =
     ~channel_id
     ~command_id
     ~timeout_ms
+
+(** Publish an event from plugin to subscribers *)
+let publish_event ~channel_id ~event_type ~payload =
+  let pending_waiters = ref [] in
+  with_lock (fun () ->
+    match Hashtbl.find_opt channels channel_id with
+    | None -> ()
+    | Some session ->
+        session.last_seen <- now ();
+        let event = { event_type; channel_id; payload; timestamp = now () } in
+        Queue.add event session.events;
+        (* Trim events buffer to max 200 *)
+        while Queue.length session.events > 200 do
+          ignore (Queue.pop session.events)
+        done;
+        let waiters = session.event_waiters in
+        session.event_waiters <- [];
+        pending_waiters := waiters);
+  List.iter (fun waiter ->
+    try waiter.notify ()
+    with exn ->
+      Printf.eprintf "[plugin_bridge] Warning: event waiter notify failed (id=%d): %s\n%!" waiter.id (Printexc.to_string exn)
+  ) !pending_waiters
+
+(** Poll buffered events *)
+let poll_events ~channel_id ~max =
+  with_lock (fun () ->
+    match Hashtbl.find_opt channels channel_id with
+    | None -> []
+    | Some session ->
+        session.last_seen <- now ();
+        let events = ref [] in
+        let count = ref 0 in
+        while not (Queue.is_empty session.events) && !count < max do
+          events := Queue.pop session.events :: !events;
+          incr count
+        done;
+        List.rev !events)
+
+(** Register event waiter (for long-poll) *)
+let register_event_waiter ~channel_id ~notify =
+  with_lock (fun () ->
+    let session = ensure_session channel_id in
+    session.last_seen <- now ();
+    incr next_waiter_id;
+    let id = !next_waiter_id in
+    session.event_waiters <- { id; notify } :: session.event_waiters;
+    id)
+
+(** Unregister event waiter *)
+let unregister_event_waiter ~channel_id ~waiter_id =
+  with_lock (fun () ->
+    match Hashtbl.find_opt channels channel_id with
+    | None -> ()
+    | Some (session:session) ->
+        session.event_waiters <- List.filter (fun (waiter:waiter) -> waiter.id <> waiter_id) session.event_waiters)
 
 let cleanup_inactive ~ttl_seconds =
   with_lock (fun () ->

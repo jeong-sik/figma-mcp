@@ -112,7 +112,9 @@ let get_http_error_recovery code body retry_after =
                | `Int n -> float_of_int n
                | `Float f -> f
                | _ -> 60.0
-             with _ -> 60.0)
+             with exn ->
+               eprintf "[figma_api] Warning: retry_after parse failed: %s, defaulting to 60s\n%!" (Printexc.to_string exn);
+               60.0)
       in
       {
         message = "Rate limited";
@@ -383,7 +385,9 @@ let with_raw_pool (client : client) f =
   Eio.Mutex.use_rw ~protect:true client.raw_pool_lock f
 
 let close_raw_conn conn =
-  try Eio.Flow.close conn.flow with _ -> ()
+  try Eio.Flow.close conn.flow
+  with exn ->
+    eprintf "[figma_api] Warning: connection close failed: %s\n%!" (Printexc.to_string exn)
 
 let raw_pool_ttl = 30.0
 let raw_pool_max = 4
@@ -461,7 +465,10 @@ let read_chunked_body br =
       | hd :: _ -> String.trim hd
     in
     let size =
-      try int_of_string ("0x" ^ size_str) with _ -> 0
+      try int_of_string ("0x" ^ size_str)
+      with _ ->
+        eprintf "[figma_api] Warning: malformed chunk size '%s', treating as end of stream\n%!" size_str;
+        0
     in
     if size = 0 then begin
       let rec skip_trailers () =
@@ -486,8 +493,12 @@ let read_http_response_from_flow br =
       let parts = String.split_on_char ' ' status_line in
       match parts with
       | _ :: code :: _ -> int_of_string code
-      | _ -> 500
-    with _ -> 500
+      | _ ->
+        eprintf "[figma_api] Warning: malformed status line: %s\n%!" status_line;
+        500
+    with exn ->
+      eprintf "[figma_api] Warning: status line parse error: %s (line: %s)\n%!" (Printexc.to_string exn) status_line;
+      500
   in
   let headers = read_headers br in
   let connection_close =
@@ -520,7 +531,9 @@ let ipaddr_of_string ip =
     let ipaddr = Ipaddr.of_string_exn ip in
     let raw = Ipaddr.to_octets ipaddr in
     Some (Eio.Net.Ipaddr.of_raw raw)
-  with _ -> None
+  with exn ->
+    eprintf "[figma_api] Warning: IP address parse failed for '%s': %s\n%!" ip (Printexc.to_string exn);
+    None
 
 let resolve_via_doh ~sw ~net ~tls_config hostname =
   match ipaddr_of_string "1.1.1.1" with

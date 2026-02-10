@@ -631,10 +631,75 @@ let tool_figma_plugin_apply_ops : tool_def = {
   ] ["ops"];
 }
 
+let tool_figma_plugin_edit_node : tool_def = {
+  name = "figma_plugin_edit_node";
+  description = "🔌 PLUGIN WRITE: 기존 노드 속성 수정. fill/stroke/opacity/text/effects/layout/visibility 등.";
+  input_schema = object_schema [
+    ("channel_id", string_prop "채널 ID (옵션, 기본 채널 사용)");
+    ("node_id", string_prop "수정할 노드 ID");
+    ("properties", object_prop "수정할 속성 딕셔너리. 가능한 키: fill (hex color), stroke (hex color), stroke_weight (number), opacity (0-1), corner_radius (number), effects (array), blend_mode (string), visible (bool), locked (bool), name (string), text (string), font_size (number), text_case (ORIGINAL|UPPER|LOWER|TITLE), auto_layout (HORIZONTAL|VERTICAL|NONE), padding (number), spacing (number), constraints (object)");
+    ("timeout_ms", number_prop "응답 대기 시간 (기본값: 10000)");
+  ] ["node_id"; "properties"];
+}
+
+let tool_figma_plugin_create_node : tool_def = {
+  name = "figma_plugin_create_node";
+  description = "🔌 PLUGIN WRITE: 새 노드 생성. Frame/Rectangle/Ellipse/Text/Line/Component 등.";
+  input_schema = object_schema [
+    ("channel_id", string_prop "채널 ID (옵션)");
+    ("type", enum_prop [
+      "frame"; "rectangle"; "ellipse"; "text"; "line";
+      "polygon"; "star"; "vector"; "component"; "component_set"; "slice"
+    ] "생성할 노드 타입");
+    ("parent_id", string_prop "부모 노드 ID (옵션, 기본값: 현재 페이지)");
+    ("x", number_prop "X 좌표");
+    ("y", number_prop "Y 좌표");
+    ("width", number_prop "너비");
+    ("height", number_prop "높이");
+    ("name", string_prop "노드 이름 (옵션)");
+    ("fill", string_prop "채우기 색상 hex (옵션, 예: #FF0000)");
+    ("text", string_prop "텍스트 내용 (type=text일 때)");
+    ("font_size", number_prop "폰트 크기 (type=text일 때)");
+    ("timeout_ms", number_prop "응답 대기 시간 (기본값: 10000)");
+  ] ["type"];
+}
+
+let tool_figma_plugin_delete_nodes : tool_def = {
+  name = "figma_plugin_delete_nodes";
+  description = "🔌 PLUGIN WRITE: 노드 삭제. 단일 또는 다수 노드 제거.";
+  input_schema = object_schema [
+    ("channel_id", string_prop "채널 ID (옵션)");
+    ("node_ids", array_prop "삭제할 노드 ID 배열");
+    ("timeout_ms", number_prop "응답 대기 시간 (기본값: 10000)");
+  ] ["node_ids"];
+}
+
+let tool_figma_plugin_batch : tool_def = {
+  name = "figma_plugin_batch";
+  description = "🔌 PLUGIN WRITE: 여러 작업을 순차 실행. 각 작업은 {action, ...params} 형태.";
+  input_schema = object_schema [
+    ("channel_id", string_prop "채널 ID (옵션)");
+    ("actions", array_prop "실행할 작업 배열. 각 항목: {\"action\": \"set_fill\"|\"move\"|\"resize\"|..., \"node_id\": \"...\", ...params}");
+    ("stop_on_error", bool_prop "에러 시 중단 여부 (기본값: true)");
+    ("timeout_ms", number_prop "전체 대기 시간 (기본값: 30000)");
+  ] ["actions"];
+}
+
+let tool_figma_plugin_subscribe_events : tool_def = {
+  name = "figma_plugin_subscribe_events";
+  description = "🔌 PLUGIN EVENTS: Figma 문서 변경/선택 변경 이벤트 구독. poll로 이벤트 수신.";
+  input_schema = object_schema [
+    ("channel_id", string_prop "채널 ID (옵션)");
+    ("event_types", array_prop "구독할 이벤트 타입 (옵션, 기본: 전체). 가능: selection_change, document_change, page_change, disconnect");
+    ("timeout_ms", number_prop "long-poll 대기 시간 (기본값: 30000)");
+    ("max_events", number_prop "최대 반환 이벤트 수 (기본값: 50)");
+  ] [];
+}
+
 (* STRAP 통합: plugin 도구 통합 (8→14 actions) *)
 let tool_figma_plugin : tool_def = {
   name = "figma_plugin";
-  description = "🔌 PLUGIN: Figma Desktop 앱과 실시간 연동. action으로 세부 동작 선택. 63개 action 지원.";
+  description = "🔌 PLUGIN: Figma Desktop 앱과 실시간 연동. action으로 세부 동작 선택. 100개 action 지원. 전용 WRITE 도구도 있음: figma_plugin_edit_node, figma_plugin_create_node, figma_plugin_delete_nodes, figma_plugin_batch.";
   input_schema = object_schema [
     ("action", enum_prop [
       "connect"; "use_channel"; "status";
@@ -1085,7 +1150,12 @@ let all_detailed_tools = [
   tool_figma_get_component;
   tool_figma_get_component_set;
   tool_figma_get_style;
-  (* STRAP 통합: 8개 plugin 도구 → 1개 *)
+  (* STRAP 통합: 8개 plugin 도구 → 1개 + 4개 전용 mutation 도구 *)
+  tool_figma_plugin_edit_node;
+  tool_figma_plugin_create_node;
+  tool_figma_plugin_delete_nodes;
+  tool_figma_plugin_batch;
+  tool_figma_plugin_subscribe_events;
   tool_figma_plugin;
   (* Phase 1: 탐색 도구 *)
   tool_figma_parse_url;
@@ -5077,6 +5147,256 @@ let handle_plugin_apply_ops args : (Yojson.Safe.t, string) result =
             ] in
            Ok (make_text_content (Yojson.Safe.pretty_to_string response)))
 
+(** Edit node properties - dispatches to appropriate plugin commands *)
+let handle_plugin_edit_node args : (Yojson.Safe.t, string) result =
+  match (get_string "node_id" args, get_json "properties" args, resolve_channel_id args) with
+  | (None, _, _) -> Error "Missing required parameter: node_id"
+  | (_, None, _) -> Error "Missing required parameter: properties"
+  | (_, _, Error msg) -> Error msg
+  | (Some node_id, Some props, Ok channel_id) ->
+      let timeout_ms = get_int "timeout_ms" args |> Option.value ~default:10000 in
+      let results = ref [] in
+      let errors = ref [] in
+      let dispatch name payload =
+        let command_id = Figma_plugin_bridge.enqueue_command ~channel_id ~name ~payload in
+        match plugin_wait ~channel_id ~command_id ~timeout_ms with
+        | Error err -> errors := (name, err) :: !errors
+        | Ok result ->
+            if result.ok then results := (name, result.payload) :: !results
+            else errors := (name, Yojson.Safe.to_string result.payload) :: !errors
+      in
+      let assoc = match props with `Assoc a -> a | _ -> [] in
+      List.iter (fun (key, value) ->
+        match key with
+        | "fill" ->
+            let color = match value with `String s -> s | _ -> Yojson.Safe.to_string value in
+            dispatch "set_fill" (`Assoc [("node_id", `String node_id); ("color", `String color)])
+        | "stroke" ->
+            let color = match value with `String s -> s | _ -> Yojson.Safe.to_string value in
+            dispatch "set_stroke" (`Assoc [("node_id", `String node_id); ("color", `String color)])
+        | "stroke_weight" ->
+            dispatch "set_stroke_weight" (`Assoc [("node_id", `String node_id); ("weight", value)])
+        | "opacity" ->
+            dispatch "set_opacity" (`Assoc [("node_id", `String node_id); ("opacity", value)])
+        | "corner_radius" ->
+            dispatch "set_corner_radius" (`Assoc [("node_id", `String node_id); ("radius", value)])
+        | "effects" ->
+            dispatch "set_effects" (`Assoc [("node_id", `String node_id); ("effects", value)])
+        | "blend_mode" ->
+            let mode = match value with `String s -> s | _ -> "NORMAL" in
+            dispatch "set_blend_mode" (`Assoc [("node_id", `String node_id); ("blendMode", `String mode)])
+        | "visible" ->
+            dispatch "set_visible" (`Assoc [("node_id", `String node_id); ("visible", value)])
+        | "locked" ->
+            dispatch "set_locked" (`Assoc [("node_id", `String node_id); ("locked", value)])
+        | "name" ->
+            let n = match value with `String s -> s | _ -> Yojson.Safe.to_string value in
+            dispatch "rename" (`Assoc [("node_id", `String node_id); ("name", `String n)])
+        | "text" ->
+            let t = match value with `String s -> s | _ -> Yojson.Safe.to_string value in
+            dispatch "set_text" (`Assoc [("node_id", `String node_id); ("characters", `String t)])
+        | "font_size" ->
+            dispatch "set_range_font_size" (`Assoc [("node_id", `String node_id); ("fontSize", value)])
+        | "text_case" ->
+            let tc = match value with `String s -> s | _ -> "ORIGINAL" in
+            dispatch "set_text_case" (`Assoc [("node_id", `String node_id); ("textCase", `String tc)])
+        | "auto_layout" ->
+            (match value with
+             | `String "NONE" ->
+                 dispatch "remove_auto_layout" (`Assoc [("node_id", `String node_id)])
+             | _ ->
+                 let mode = match value with `String s -> s | _ -> "VERTICAL" in
+                 dispatch "set_auto_layout" (`Assoc [("node_id", `String node_id); ("mode", `String mode)]))
+        | "padding" ->
+            dispatch "set_auto_layout" (`Assoc [("node_id", `String node_id); ("padding", value)])
+        | "spacing" ->
+            dispatch "set_auto_layout" (`Assoc [("node_id", `String node_id); ("itemSpacing", value)])
+        | "constraints" ->
+            dispatch "set_constraints" (`Assoc [("node_id", `String node_id); ("constraints", value)])
+        | _ ->
+            errors := (key, sprintf "Unknown property: %s" key) :: !errors
+      ) assoc;
+      let response = `Assoc [
+        ("node_id", `String node_id);
+        ("applied", `Int (List.length !results));
+        ("errors", `List (List.map (fun (k, e) -> `Assoc [("property", `String k); ("error", `String e)]) !errors));
+        ("results", `Assoc (List.rev !results));
+      ] in
+      Ok (make_text_content (Yojson.Safe.pretty_to_string response))
+
+(** Create a new node *)
+let handle_plugin_create_node args : (Yojson.Safe.t, string) result =
+  match (get_string "type" args, resolve_channel_id args) with
+  | (None, _) -> Error "Missing required parameter: type"
+  | (_, Error msg) -> Error msg
+  | (Some node_type, Ok channel_id) ->
+      let timeout_ms = get_int "timeout_ms" args |> Option.value ~default:10000 in
+      let command_name = "create_" ^ node_type in
+      let payload_fields = ref [("type", `String node_type)] in
+      let add_opt key extract =
+        match extract key args with
+        | Some v -> payload_fields := (key, v) :: !payload_fields
+        | None -> ()
+      in
+      add_opt "parent_id" (fun k a -> get_string k a |> Option.map (fun s -> `String s));
+      add_opt "x" (fun k a -> get_json k a);
+      add_opt "y" (fun k a -> get_json k a);
+      add_opt "width" (fun k a -> get_json k a);
+      add_opt "height" (fun k a -> get_json k a);
+      add_opt "name" (fun k a -> get_string k a |> Option.map (fun s -> `String s));
+      add_opt "fill" (fun k a -> get_string k a |> Option.map (fun s -> `String s));
+      add_opt "text" (fun k a -> get_string k a |> Option.map (fun s -> `String s));
+      add_opt "font_size" (fun k a -> get_json k a);
+      let payload = `Assoc (List.rev !payload_fields) in
+      let command_id = Figma_plugin_bridge.enqueue_command ~channel_id ~name:command_name ~payload in
+      (match plugin_wait ~channel_id ~command_id ~timeout_ms with
+       | Error err -> Error err
+       | Ok result ->
+           let response = `Assoc [
+             ("command", `String command_name);
+             ("ok", `Bool result.ok);
+             ("payload", result.payload);
+           ] in
+           Ok (make_text_content (Yojson.Safe.pretty_to_string response)))
+
+(** Delete one or more nodes *)
+let handle_plugin_delete_nodes args : (Yojson.Safe.t, string) result =
+  match (get_json "node_ids" args, resolve_channel_id args) with
+  | (None, _) -> Error "Missing required parameter: node_ids"
+  | (_, Error msg) -> Error msg
+  | (Some node_ids_json, Ok channel_id) ->
+      let timeout_ms = get_int "timeout_ms" args |> Option.value ~default:10000 in
+      let ids = match node_ids_json with
+        | `List items -> List.filter_map (function `String s -> Some s | _ -> None) items
+        | _ -> []
+      in
+      if ids = [] then Error "node_ids must be a non-empty array of strings"
+      else begin
+        let results = ref [] in
+        List.iter (fun node_id ->
+          let payload = `Assoc [("node_id", `String node_id)] in
+          let command_id = Figma_plugin_bridge.enqueue_command ~channel_id ~name:"delete_node" ~payload in
+          match plugin_wait ~channel_id ~command_id ~timeout_ms with
+          | Error err -> results := `Assoc [("node_id", `String node_id); ("ok", `Bool false); ("error", `String err)] :: !results
+          | Ok result -> results := `Assoc [("node_id", `String node_id); ("ok", `Bool result.ok); ("payload", result.payload)] :: !results
+        ) ids;
+        let response = `Assoc [
+          ("deleted", `Int (List.length ids));
+          ("results", `List (List.rev !results));
+        ] in
+        Ok (make_text_content (Yojson.Safe.pretty_to_string response))
+      end
+
+(** Batch execute multiple plugin actions sequentially *)
+let handle_plugin_batch args : (Yojson.Safe.t, string) result =
+  match (get_json "actions" args, resolve_channel_id args) with
+  | (None, _) -> Error "Missing required parameter: actions"
+  | (_, Error msg) -> Error msg
+  | (Some actions_json, Ok channel_id) ->
+      let timeout_ms = get_int "timeout_ms" args |> Option.value ~default:30000 in
+      let stop_on_error = get_bool "stop_on_error" args |> Option.value ~default:true in
+      let actions = match actions_json with `List items -> items | _ -> [] in
+      if actions = [] then Error "actions must be a non-empty array"
+      else begin
+        let results = ref [] in
+        let stopped = ref false in
+        List.iteri (fun i action_json ->
+          if !stopped then ()
+          else begin
+            let action_name = match action_json with
+              | `Assoc assoc -> (match List.assoc_opt "action" assoc with Some (`String s) -> Some s | _ -> None)
+              | _ -> None
+            in
+            match action_name with
+            | None ->
+                results := `Assoc [("index", `Int i); ("ok", `Bool false); ("error", `String "Missing action field")] :: !results;
+                if stop_on_error then stopped := true
+            | Some name ->
+                let payload = action_json in
+                let command_id = Figma_plugin_bridge.enqueue_command ~channel_id ~name ~payload in
+                (match plugin_wait ~channel_id ~command_id ~timeout_ms with
+                 | Error err ->
+                     results := `Assoc [("index", `Int i); ("action", `String name); ("ok", `Bool false); ("error", `String err)] :: !results;
+                     if stop_on_error then stopped := true
+                 | Ok result ->
+                     results := `Assoc [("index", `Int i); ("action", `String name); ("ok", `Bool result.ok); ("payload", result.payload)] :: !results;
+                     if (not result.ok) && stop_on_error then stopped := true)
+          end
+        ) actions;
+        let response = `Assoc [
+          ("total", `Int (List.length actions));
+          ("executed", `Int (List.length !results));
+          ("stopped_early", `Bool !stopped);
+          ("results", `List (List.rev !results));
+        ] in
+        Ok (make_text_content (Yojson.Safe.pretty_to_string response))
+      end
+
+(** Subscribe to plugin events via long-poll *)
+let handle_plugin_subscribe_events args : (Yojson.Safe.t, string) result =
+  match resolve_channel_id args with
+  | Error msg -> Error msg
+  | Ok channel_id ->
+      let timeout_ms = get_int "timeout_ms" args |> Option.value ~default:30000 in
+      let max_events = get_int "max_events" args |> Option.value ~default:50 in
+      let event_types = match get_json "event_types" args with
+        | Some (`List items) -> List.filter_map (function `String s -> Some s | _ -> None) items
+        | _ -> []
+      in
+      let filter_events evts =
+        if event_types = [] then evts
+        else List.filter (fun (e : Figma_plugin_bridge.event) -> List.mem e.event_type event_types) evts
+      in
+      let events_to_json evts =
+        let json_events = List.map (fun (e : Figma_plugin_bridge.event) ->
+          `Assoc [
+            ("event_type", `String e.event_type);
+            ("channel_id", `String e.channel_id);
+            ("payload", e.payload);
+            ("timestamp", `Float e.timestamp);
+          ]
+        ) evts in
+        make_text_content (Yojson.Safe.pretty_to_string (`Assoc [
+          ("events", `List json_events);
+          ("count", `Int (List.length json_events));
+        ]))
+      in
+      (* First check for buffered events *)
+      let events = Figma_plugin_bridge.poll_events ~channel_id ~max:max_events in
+      let filtered = filter_events events in
+      if filtered <> [] then
+        Ok (events_to_json filtered)
+      else if timeout_ms <= 0 then
+        Ok (events_to_json [])
+      else begin
+        (* Long-poll: wait for events *)
+        match get_eio_context () with
+        | None ->
+            (* No Eio context, return empty immediately *)
+            Ok (events_to_json [])
+        | Some ctx ->
+            let (Clock clock) = ctx.clock in
+            let promise, resolver = Eio.Promise.create () in
+            let waiter_id =
+              Figma_plugin_bridge.register_event_waiter ~channel_id ~notify:(fun () ->
+                try Eio.Promise.resolve resolver ()
+                with exn ->
+                  Printf.eprintf "[mcp_tools] Warning: event waiter promise resolve failed: %s\n%!" (Printexc.to_string exn))
+            in
+            let wait_s = float_of_int timeout_ms /. 1000.0 in
+            let _result =
+              match Eio.Time.with_timeout clock wait_s (fun () ->
+                Eio.Promise.await promise;
+                Ok `Woke) with
+              | Ok `Woke -> `Woke
+              | Error `Timeout -> `Timeout
+            in
+            Figma_plugin_bridge.unregister_event_waiter ~channel_id ~waiter_id;
+            let events_after = Figma_plugin_bridge.poll_events ~channel_id ~max:max_events in
+            let filtered_after = filter_events events_after in
+            Ok (events_to_json filtered_after)
+      end
+
 (* list_pages 핸들러 *)
 let handle_plugin_list_pages args : (Yojson.Safe.t, string) result =
   plugin_simple ~name:"list_pages" ~build_payload:(fun _ -> `Null) args
@@ -6561,6 +6881,18 @@ let handle_figma_plugin args : (Yojson.Safe.t, string) result =
       | "get_stroke_details" -> handle_plugin_get_stroke_details args
       | "set_stroke_weight" -> handle_plugin_set_stroke_weight args
       | "collapse_layer" -> handle_plugin_collapse_layer args
+      | "execute_dsl" -> handle_plugin_apply_ops args
+      | "export_tokens" ->
+          (match resolve_channel_id args with
+           | Error msg -> Error msg
+           | Ok channel_id ->
+               let timeout_ms = get_int "timeout_ms" args |> Option.value ~default:10000 in
+               let payload = `Assoc [] in
+               let command_id = Figma_plugin_bridge.enqueue_command ~channel_id ~name:"export_tokens" ~payload in
+               (match plugin_wait ~channel_id ~command_id ~timeout_ms with
+                | Error err -> Error err
+                | Ok result ->
+                    Ok (make_text_content (Yojson.Safe.pretty_to_string result.payload))))
       | _ -> Error (sprintf "Unknown action: %s. 100 actions available." action)
 
 (** ============== LLM Bridge 핸들러 ============== *)
@@ -8069,8 +8401,13 @@ let all_handlers_sync : (string * tool_handler_sync) list = [
   ("figma_get_component", wrap_sync_pure handle_get_component);
   ("figma_get_component_set", wrap_sync_pure handle_get_component_set);
   ("figma_get_style", wrap_sync_pure handle_get_style);
-  (* STRAP 통합: 8개 plugin 핸들러 → 1개 라우터 *)
+  (* STRAP 통합: 8개 plugin 핸들러 → 1개 라우터 + 4개 전용 mutation 핸들러 *)
   ("figma_plugin", wrap_sync_pure handle_figma_plugin);
+  ("figma_plugin_edit_node", wrap_sync_pure handle_plugin_edit_node);
+  ("figma_plugin_create_node", wrap_sync_pure handle_plugin_create_node);
+  ("figma_plugin_delete_nodes", wrap_sync_pure handle_plugin_delete_nodes);
+  ("figma_plugin_batch", wrap_sync_pure handle_plugin_batch);
+  ("figma_plugin_subscribe_events", wrap_sync_pure handle_plugin_subscribe_events);
   (* Phase 1: 탐색 도구 *)
   ("figma_parse_url", wrap_sync_pure handle_parse_url);
   ("figma_get_me", wrap_sync_pure handle_get_me);

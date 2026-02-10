@@ -1331,6 +1331,32 @@ figma.on("selectionchange", function() {
   figma.ui.postMessage({ type: "selection_update", nonce: sessionNonce, selection: getSelectionData() });
 });
 
+// Document change listener (requires loadAllPagesAsync in dynamic-page mode)
+figma.loadAllPagesAsync().then(function() {
+  figma.on("documentchange", function(event) {
+    // Summarize changes to avoid huge payloads
+    var summary = {
+      changes: event.documentChanges.slice(0, 50).map(function(c) {
+        return {
+          type: c.type,
+          id: c.id,
+          origin: c.origin
+        };
+      }),
+      total: event.documentChanges.length,
+      truncated: event.documentChanges.length > 50
+    };
+
+    figma.ui.postMessage({
+      type: "document_change",
+      nonce: sessionNonce,
+      changes: summary
+    });
+  });
+}).catch(function(err) {
+  console.warn("[figma-mcp] documentchange listener skipped: " + err.message);
+});
+
 figma.ui.onmessage = async (msg) => {
   // Allow the UI to request the nonce in case the initial init message was missed.
   if (msg && msg.type === "hello") {
