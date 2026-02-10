@@ -466,8 +466,8 @@ let read_chunked_body br =
     in
     let size =
       try int_of_string ("0x" ^ size_str)
-      with _ ->
-        eprintf "[figma_api] Warning: malformed chunk size '%s', treating as end of stream\n%!" size_str;
+      with exn ->
+        eprintf "[figma_api] Warning: malformed chunk size '%s' (%s), response may be truncated\n%!" size_str (Printexc.to_string exn);
         0
     in
     if size = 0 then begin
@@ -568,7 +568,9 @@ let resolve_via_doh ~sw ~net ~tls_config hostname =
                 | hd :: _ -> Some hd
                 | [] -> None)
            | _ -> None
-         with _ -> None)
+         with exn ->
+           eprintf "[figma_api] Warning: DoH JSON parse failed: %s\n%!" (Printexc.to_string exn);
+           None)
 
 let resolve_host_with_fallback ~sw ~net ~tls_config ~hostname ~port =
   match Eio.Net.getaddrinfo_stream net hostname with
@@ -580,7 +582,8 @@ let resolve_host_with_fallback ~sw ~net ~tls_config ~hostname ~port =
             | Some ipaddr -> Some (`Tcp (ipaddr, port))
             | None -> None)
        | None -> None)
-  | exception _ ->
+  | exception exn ->
+      eprintf "[figma_api] Warning: DNS resolution failed for '%s': %s, trying DoH\n%!" hostname (Printexc.to_string exn);
       (match resolve_via_doh ~sw ~net ~tls_config hostname with
        | Some ip ->
            (match ipaddr_of_string ip with

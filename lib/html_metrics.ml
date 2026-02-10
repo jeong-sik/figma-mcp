@@ -58,7 +58,7 @@ let rgba_of_hex s =
   let s = String.trim s in
   let s = if starts_with ~prefix:"#" s then String.sub s 1 (String.length s - 1) else s in
   let hex_to_int h =
-    try int_of_string ("0x" ^ h) with _ -> 0
+    try int_of_string ("0x" ^ h) with _exn -> 0  (* malformed color value, default to 0 *)
   in
   match String.length s with
   | 6 ->
@@ -93,10 +93,10 @@ let rgba_of_css s =
       |> List.map (fun p -> String.trim p)
     in
     let to_int p =
-      try int_of_string p with _ -> 0
+      try int_of_string p with _exn -> 0  (* malformed color value, default to 0 *)
     in
     let to_float p =
-      try float_of_string p with _ -> 0.0
+      try float_of_string p with _exn -> 0.0  (* unparseable numeric CSS value *)
     in
     match parts with
     | [r; g; b] ->
@@ -120,12 +120,12 @@ let float_of_px s =
   if n = 0 then None
   else
     let num = String.sub s 0 n in
-    try Some (float_of_string num) with _ -> None
+    try Some (float_of_string num) with _exn -> None  (* unparseable CSS value *)
 
 let int_of_string_opt s =
   let s = String.trim s in
   if s = "" then None else
-  try Some (int_of_string s) with _ -> None
+  try Some (int_of_string s) with _exn -> None  (* unparseable CSS value *)
 
 let metrics_script_path =
   match Sys.getenv_opt "FIGMA_MCP_HTML_METRICS_SCRIPT" with

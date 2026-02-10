@@ -72,7 +72,7 @@ let calculate_text_density (dsl: Yojson.Safe.t) : float =
     | _ -> ());
     let children =
       try Some (Yojson.Safe.Util.(member "children" node |> to_list))
-      with _ -> None
+      with _exn -> None  (* Non-TEXT nodes may lack children — expected *)
     in
     Option.iter (List.iter count) children
   in
