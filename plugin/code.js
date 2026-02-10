@@ -177,21 +177,27 @@ const H = {
 // === Document Change Observation (Feedback Loop) ===
 const _changeBuffer = [];
 const MAX_CHANGE_BUFFER = 200;
-figma.on('documentchange', (event) => {
-  for (const change of event.documentChanges) {
-    const entry = {
-      type: change.type,
-      id: change.id,
-      origin: change.origin,
-      ts: Date.now(),
-    };
-    if (change.type === 'PROPERTY_CHANGE') {
-      entry.properties = change.properties;
+let _watcherActive = false;
+
+function _registerDocumentChangeWatcher() {
+  if (_watcherActive) return;
+  _watcherActive = true;
+  figma.on('documentchange', (event) => {
+    for (const change of event.documentChanges) {
+      const entry = {
+        type: change.type,
+        id: change.id,
+        origin: change.origin,
+        ts: Date.now(),
+      };
+      if (change.type === 'PROPERTY_CHANGE') {
+        entry.properties = change.properties;
+      }
+      _changeBuffer.push(entry);
+      if (_changeBuffer.length > MAX_CHANGE_BUFFER) _changeBuffer.shift();
     }
-    _changeBuffer.push(entry);
-    if (_changeBuffer.length > MAX_CHANGE_BUFFER) _changeBuffer.shift();
-  }
-});
+  });
+}
 
 // ============== Handler Table ==============
 
@@ -1221,9 +1227,25 @@ const handlers = {
       count: changes.length,
       changes: changes.slice(-limit),
       buffer_size: _changeBuffer.length,
+      watcher_active: _watcherActive,
     };
     if (p.clear) _changeBuffer.length = 0;
     return result;
+  }),
+
+  watch_start: H.simple(async () => {
+    if (_watcherActive) return { already_active: true };
+    await figma.loadAllPagesAsync();
+    _registerDocumentChangeWatcher();
+    return { active: true, message: "documentchange watcher started" };
+  }),
+
+  watch_stop: H.simple(() => {
+    if (!_watcherActive) return { already_stopped: true };
+    figma.off('documentchange');
+    _watcherActive = false;
+    _changeBuffer.length = 0;
+    return { active: false, message: "documentchange watcher stopped" };
   }),
 };
 

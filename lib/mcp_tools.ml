@@ -731,7 +731,7 @@ let tool_figma_plugin : tool_def = {
       "bring_to_front"; "send_to_back"; "set_grid"; "get_layer_list";
       "scroll_and_zoom"; "get_paint_styles"; "set_text_case";
       "get_stroke_details"; "set_stroke_weight"; "collapse_layer";
-      "export_viewport"; "export_selection"; "get_changes";
+      "export_viewport"; "export_selection"; "get_changes"; "watch_start"; "watch_stop";
     ] "🎉 100개 action: 연결(3), 페이지(4), 문서(1), 생성(11), 조회(20), 편집(9), 변형(7), 불리언(4), 정렬(2), 스타일(21), 텍스트(5), 레이아웃(4), 컴포넌트(4), 내보내기(2), 프로토타입(2), 레이어(4)");
     ("channel_id", string_prop "채널 ID");
     ("node_id", string_prop "노드 ID");
