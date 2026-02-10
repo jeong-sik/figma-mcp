@@ -76,7 +76,9 @@ let calculate_text_density (dsl: Yojson.Safe.t) : float =
     in
     Option.iter (List.iter count) children
   in
-  (try count dsl with _ -> ());
+  (try count dsl
+   with exn ->
+     Printf.eprintf "[early_stop] Warning: DSL text density count failed: %s\n%!" (Printexc.to_string exn));
   if !total > 0 then float !text_nodes /. float !total else 0.0
 
 (** 종료 조건 체크 *)

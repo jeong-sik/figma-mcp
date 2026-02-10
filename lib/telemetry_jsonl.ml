@@ -28,7 +28,9 @@ let rec ensure_dir path =
 
 let ensure_parent_dir path =
   let dir = Filename.dirname path in
-  try ensure_dir dir with _ -> ()
+  try ensure_dir dir
+  with exn ->
+    Printf.eprintf "[telemetry] Warning: failed to create dir %s: %s\n%!" dir (Printexc.to_string exn)
 
 let write_mutex = Mutex.create ()
 
@@ -52,7 +54,8 @@ let append_json (json : Yojson.Safe.t) =
             output_string oc (Yojson.Safe.to_string json);
             output_char oc '\n';
             flush oc)
-      with _ -> ())
+      with exn ->
+        Printf.eprintf "[telemetry] Warning: failed to write telemetry: %s\n%!" (Printexc.to_string exn))
 
 let log_tool_called ~tool_name ~duration_ms ~success ~error =
   let error_json = match error with Some e -> `String e | None -> `Null in
