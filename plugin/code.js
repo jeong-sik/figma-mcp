@@ -100,6 +100,20 @@ function parseColor(c) {
   return { r: c.r || 0, g: c.g || 0, b: c.b || 0 };
 }
 
+// Apply fill from hex string, parent_id reparenting, and corner_radius in one call
+async function applyCreateProps(node, p) {
+  if (p.fill && "fills" in node) {
+    node.fills = [{ type: "SOLID", color: parseColor(p.fill), opacity: 1 }];
+  }
+  if (p.corner_radius && node.cornerRadius !== undefined) {
+    node.cornerRadius = p.corner_radius;
+  }
+  if (p.parent_id) {
+    const parent = await getNodeById(p.parent_id);
+    if (parent && "children" in parent) parent.appendChild(node);
+  }
+}
+
 function serializeNode(node, depth = 1, maxDepth = 6) {
   if (!node || depth > maxDepth) return null;
   const base = { id: node.id, name: node.name, type: node.type };
@@ -508,31 +522,33 @@ const handlers = {
   }),
 
   // === Create (11) ===
-  create_frame: H.simple((p) => {
+  create_frame: H.simple(async (p) => {
     const frame = figma.createFrame();
     frame.name = p.name || "Frame";
     frame.resize(p.width || 100, p.height || 100);
     if (p.x !== undefined) frame.x = p.x;
     if (p.y !== undefined) frame.y = p.y;
+    await applyCreateProps(frame, p);
     return { node_id: frame.id, name: frame.name };
   }),
 
-  create_rectangle: H.simple((p) => {
+  create_rectangle: H.simple(async (p) => {
     const rect = figma.createRectangle();
     rect.name = p.name || "Rectangle";
     rect.resize(p.width || 100, p.height || 100);
     if (p.x !== undefined) rect.x = p.x;
     if (p.y !== undefined) rect.y = p.y;
-    if (p.corner_radius) rect.cornerRadius = p.corner_radius;
+    await applyCreateProps(rect, p);
     return { node_id: rect.id, name: rect.name };
   }),
 
-  create_ellipse: H.simple((p) => {
+  create_ellipse: H.simple(async (p) => {
     const ellipse = figma.createEllipse();
     ellipse.name = p.name || "Ellipse";
     ellipse.resize(p.width || 100, p.height || 100);
     if (p.x !== undefined) ellipse.x = p.x;
     if (p.y !== undefined) ellipse.y = p.y;
+    await applyCreateProps(ellipse, p);
     return { node_id: ellipse.id, name: ellipse.name };
   }),
 
@@ -544,38 +560,43 @@ const handlers = {
     if (p.x !== undefined) text.x = p.x;
     if (p.y !== undefined) text.y = p.y;
     if (p.font_size) text.fontSize = p.font_size;
+    await applyCreateProps(text, p);
     return { node_id: text.id, name: text.name };
   }),
 
-  create_line: H.simple((p) => {
+  create_line: H.simple(async (p) => {
     const line = figma.createLine();
     line.name = p.name || "Line";
     if (p.length) line.resize(p.length, 0);
     if (p.x !== undefined) line.x = p.x;
     if (p.y !== undefined) line.y = p.y;
+    await applyCreateProps(line, p);
     return { node_id: line.id, name: line.name };
   }),
 
-  create_polygon: H.simple((p) => {
+  create_polygon: H.simple(async (p) => {
     const polygon = figma.createPolygon();
     polygon.name = p.name || "Polygon";
     polygon.pointCount = p.point_count || p.sides || 3;
     polygon.resize(p.width || 100, p.height || 100);
+    await applyCreateProps(polygon, p);
     return { node_id: polygon.id, name: polygon.name };
   }),
 
-  create_star: H.simple((p) => {
+  create_star: H.simple(async (p) => {
     const star = figma.createStar();
     star.name = p.name || "Star";
     star.pointCount = p.point_count || 5;
     star.resize(p.width || 100, p.height || 100);
+    await applyCreateProps(star, p);
     return { node_id: star.id, name: star.name };
   }),
 
-  create_vector: H.simple((p) => {
+  create_vector: H.simple(async (p) => {
     const vector = figma.createVector();
     vector.name = p.name || "Vector";
     if (p.width && p.height) vector.resize(p.width, p.height);
+    await applyCreateProps(vector, p);
     return { node_id: vector.id, name: vector.name };
   }),
 
@@ -598,12 +619,13 @@ const handlers = {
     return { component_set_id: set.id, name: set.name };
   }),
 
-  create_slice: H.simple((p) => {
+  create_slice: H.simple(async (p) => {
     const slice = figma.createSlice();
     slice.name = p.name || "Slice";
     if (p.width && p.height) slice.resize(p.width, p.height);
     if (p.x !== undefined) slice.x = p.x;
     if (p.y !== undefined) slice.y = p.y;
+    await applyCreateProps(slice, p);
     return { node_id: slice.id, name: slice.name };
   }),
 
