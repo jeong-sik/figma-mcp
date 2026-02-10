@@ -6902,7 +6902,39 @@ let handle_figma_plugin args : (Yojson.Safe.t, string) result =
                 | Error err -> Error err
                 | Ok result ->
                     Ok (make_text_content (Yojson.Safe.pretty_to_string result.payload))))
-      | _ -> Error (sprintf "Unknown action: %s. 100 actions available." action)
+      (* Feedback Loop actions *)
+      | "export_viewport" ->
+          plugin_simple ~name:"export_viewport" ~default_timeout:20000
+            ~build_payload:(fun a ->
+              let max_nodes = get_int "max_nodes" a |> Option.value ~default:5 in
+              `Assoc [("max_nodes", `Int max_nodes)]) args
+      | "export_selection" ->
+          plugin_simple ~name:"export_selection" ~default_timeout:20000
+            ~build_payload:(fun _a -> `Assoc []) args
+      | "watch_start" ->
+          plugin_simple ~name:"watch_start" ~default_timeout:30000
+            ~build_payload:(fun _a -> `Assoc []) args
+      | "watch_stop" ->
+          plugin_simple ~name:"watch_stop" ~default_timeout:10000
+            ~build_payload:(fun _a -> `Assoc []) args
+      | "get_changes" ->
+          plugin_simple ~name:"get_changes" ~default_timeout:10000
+            ~build_payload:(fun a ->
+              let pairs = ref [] in
+              (match get_int "since" a with Some v -> pairs := ("since", `Int v) :: !pairs | None -> ());
+              (match get_int "limit" a with Some v -> pairs := ("limit", `Int v) :: !pairs | None -> ());
+              (match get_bool "clear" a with Some v -> pairs := ("clear", `Bool v) :: !pairs | None -> ());
+              `Assoc !pairs) args
+      | "create_instance" ->
+          plugin_simple ~name:"create_instance" ~default_timeout:15000
+            ~build_payload:(fun a ->
+              let pairs = ref [] in
+              (match get_string "component_key" a with Some v -> pairs := ("component_key", `String v) :: !pairs | None -> ());
+              (match get_string "name" a with Some v -> pairs := ("name", `String v) :: !pairs | None -> ());
+              (match get_int "x" a with Some v -> pairs := ("x", `Int v) :: !pairs | None -> ());
+              (match get_int "y" a with Some v -> pairs := ("y", `Int v) :: !pairs | None -> ());
+              `Assoc !pairs) args
+      | _ -> Error (sprintf "Unknown action: %s. 105 actions available." action)
 
 (** ============== LLM Bridge 핸들러 ============== *)
 
