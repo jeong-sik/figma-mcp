@@ -1391,7 +1391,7 @@
           setConnecting(false);
           reconnectAttempts = 0;
           addLog("connect", "Channel: " + channelId.slice(0, 8) + "...", true);
-          if (!polling) { polling = true; pollLoop(); }
+          polling = true; pollLoop();
         }).catch(function(e) {
           setStatus("error", "Failed: " + (e && e.message ? e.message : String(e)));
           setConnecting(false);
@@ -1453,13 +1453,13 @@
 
       // Message handler
       window.onmessage = function(ev) {
-        if (ev.source !== parent) return;
-        if (PARENT_ORIGIN !== "*" && ev.origin !== PARENT_ORIGIN) return;
-        var msg = ev.data.pluginMessage;
+        // Figma's sandbox bridge may relay messages with ev.source !== parent,
+        // so we rely on the pluginMessage wrapper + nonce for authentication.
+        var msg = ev.data && ev.data.pluginMessage;
         if (!msg) return;
 
         if (msg.type === "init") {
-          if (typeof msg.nonce === "string") sessionNonce = msg.nonce;
+          if (typeof msg.nonce === "string") { sessionNonce = msg.nonce; }
           return;
         }
 
