@@ -3311,7 +3311,10 @@ let normalize_dir_prefix path =
   let p = trim path in
   if p = "" then None
   else
-    let rp = try Unix.realpath p with _ -> p in
+    let rp = try Unix.realpath p with exn ->
+      Printf.eprintf "[mcp_protocol] Warning: realpath failed for '%s': %s, using original\n%!" p (Printexc.to_string exn);
+      p
+    in
     if rp = "/" then Some rp
     else if has_suffix ~suffix:"/" rp then Some rp
     else Some (rp ^ "/")
