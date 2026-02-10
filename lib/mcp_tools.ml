@@ -1090,11 +1090,7 @@ let tool_categories = [
     description = "시각 검증 (SSIM, 비교)";
     (* NOTE: compare_elements, compare_regions, evolution_report는 DEPRECATED → figma_compare(mode=...)로 통합 *)
     tools = ["verify_semantic"; "verify_visual"; "image_similarity"; "compare"; "fidelity_loop"; "fidelity_review"] };
-  { name = "plugin";
-    description = "Figma 플러그인 브릿지";
-    tools = ["plugin"; "plugin_connect"; "plugin_use_channel"; "plugin_status";
-             "plugin_read_selection"; "plugin_get_node"; "plugin_export_node_image";
-             "plugin_get_variables"; "plugin_apply_ops"] };
+  (* plugin: monolithic tool로 직접 노출 (sub-handlers 미등록으로 category 라우팅 불가) *)
   { name = "team";
     description = "팀/프로젝트 관리";
     tools = ["list_projects"; "list_files"; "crawl_team"; "team_tree"; "export_team";
@@ -1115,7 +1111,7 @@ let find_tool_in_category category_name tool_name =
   |> Option.value ~default:false
 
 (** 최상위 유지 도구 (자주 사용) *)
-let featured_tool_names = ["codegen"; "doctor"; "stats"; "cache_stats"; "cache_invalidate"; "read_large_result"; "code_connect"; "error_troubleshoot"; "post_comment"; "get_file_comments"]
+let featured_tool_names = ["codegen"; "doctor"; "stats"; "cache_stats"; "cache_invalidate"; "read_large_result"; "code_connect"; "error_troubleshoot"; "post_comment"; "get_file_comments"; "plugin"; "plugin_edit_node"; "plugin_create_node"; "plugin_delete_nodes"; "plugin_batch"; "plugin_subscribe_events"]
 
 (** ============== 모든 도구 목록 (내부용) ============== *)
 
@@ -8441,7 +8437,9 @@ let all_handlers_sync : (string * tool_handler_sync) list = [
   (* 카테고리 도구 핸들러 *)
   ("figma_core", wrap_sync_pure (handle_category "core"));
   ("figma_visual", wrap_sync_pure (handle_category "visual"));
-  ("figma_plugin", wrap_sync_pure (handle_category "plugin"));
+  (* figma_plugin: monolithic handler (line ~8408)가 List.assoc_opt에서 먼저 발견됨.
+     category handler 등록 시 MCP dispatch는 List.assoc_opt (first-match)를 쓰므로
+     monolithic handler가 우선됨. sub-handler 미등록으로 category 라우팅 불가하여 제거. *)
   ("figma_team", wrap_sync_pure (handle_category "team"));
   ("figma_export", wrap_sync_pure (handle_category "export"));
   ("figma_components", wrap_sync_pure (handle_category "components"));
