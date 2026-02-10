@@ -730,7 +730,8 @@ let tool_figma_plugin : tool_def = {
       "get_styles_by_type"; "apply_style"; "get_overrides"; "reset_overrides";
       "bring_to_front"; "send_to_back"; "set_grid"; "get_layer_list";
       "scroll_and_zoom"; "get_paint_styles"; "set_text_case";
-      "get_stroke_details"; "set_stroke_weight"; "collapse_layer"
+      "get_stroke_details"; "set_stroke_weight"; "collapse_layer";
+      "export_viewport"; "export_selection"; "get_changes";
     ] "🎉 100개 action: 연결(3), 페이지(4), 문서(1), 생성(11), 조회(20), 편집(9), 변형(7), 불리언(4), 정렬(2), 스타일(21), 텍스트(5), 레이아웃(4), 컴포넌트(4), 내보내기(2), 프로토타입(2), 레이어(4)");
     ("channel_id", string_prop "채널 ID");
     ("node_id", string_prop "노드 ID");
@@ -812,6 +813,10 @@ let tool_figma_plugin : tool_def = {
     ("namespace", string_prop "공유 플러그인 데이터 네임스페이스 (get/set_shared_plugin_data)");
     ("component_id", string_prop "교체할 컴포넌트 ID (swap_component)");
     ("component_key", string_prop "외부 라이브러리 컴포넌트 키 (create_instance)");
+    ("max_nodes", number_prop "뷰포트 내보내기 시 최대 노드 수 (export_viewport, default 5)");
+    ("since", number_prop "이 타임스탬프 이후 변경사항만 반환 (get_changes)");
+    ("clear", bool_prop "버퍼 비우기 (get_changes)");
+    ("limit", number_prop "반환할 최대 변경사항 수 (get_changes, default 50)");
     ("axis", enum_prop ["horizontal"; "vertical"; "both"] "리사이즈 방향 (resize_to_fit)");
     ("padding", number_prop "패딩 (resize_to_fit)");
     ("start", number_prop "텍스트 범위 시작 인덱스 (set_range_fills/set_range_font_size)");

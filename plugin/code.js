@@ -174,6 +174,25 @@ const H = {
   },
 };
 
+// === Document Change Observation (Feedback Loop) ===
+const _changeBuffer = [];
+const MAX_CHANGE_BUFFER = 200;
+figma.on('documentchange', (event) => {
+  for (const change of event.documentChanges) {
+    const entry = {
+      type: change.type,
+      id: change.id,
+      origin: change.origin,
+      ts: Date.now(),
+    };
+    if (change.type === 'PROPERTY_CHANGE') {
+      entry.properties = change.properties;
+    }
+    _changeBuffer.push(entry);
+    if (_changeBuffer.length > MAX_CHANGE_BUFFER) _changeBuffer.shift();
+  }
+});
+
 // ============== Handler Table ==============
 
 const handlers = {
@@ -1127,6 +1146,84 @@ const handlers = {
   notify: H.simple((p) => {
     figma.notify(p.message || "Notification", { timeout: p.timeout || 2000 });
     return { notified: true };
+  }),
+
+  // === Observation & Feedback Loop ===
+
+  export_viewport: H.simple(async (p) => {
+    const vp = figma.viewport;
+    const bounds = vp.bounds;
+    const scale = p.scale || 1;
+    const format = (p.format || "PNG").toUpperCase();
+    const maxNodes = p.max_nodes || 5;
+
+    // Get top-level children visible in viewport
+    const children = figma.currentPage.children.filter(child => {
+      if (!child.visible) return false;
+      return child.x < bounds.x + bounds.width &&
+             child.x + child.width > bounds.x &&
+             child.y < bounds.y + bounds.height &&
+             child.y + child.height > bounds.y;
+    });
+
+    const results = [];
+    for (const child of children.slice(0, maxNodes)) {
+      try {
+        const bytes = await child.exportAsync({ format, constraint: { type: "SCALE", value: scale } });
+        let binary = "";
+        for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+        results.push({
+          node_id: child.id, name: child.name, type: child.type,
+          base64: btoa(binary), width: child.width, height: child.height,
+        });
+      } catch (e) {
+        results.push({ node_id: child.id, name: child.name, error: String(e) });
+      }
+    }
+
+    return {
+      viewport: { x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height, zoom: vp.zoom },
+      nodes: results,
+      total_visible: children.length,
+    };
+  }),
+
+  export_selection: H.simple(async (p) => {
+    const selection = figma.currentPage.selection;
+    if (selection.length === 0) return { error: "Nothing selected" };
+
+    const scale = p.scale || 2;
+    const format = (p.format || "PNG").toUpperCase();
+    const results = [];
+
+    for (const node of selection.slice(0, 10)) {
+      try {
+        const bytes = await node.exportAsync({ format, constraint: { type: "SCALE", value: scale } });
+        let binary = "";
+        for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+        results.push({
+          node_id: node.id, name: node.name, type: node.type,
+          base64: btoa(binary), width: node.width, height: node.height,
+        });
+      } catch (e) {
+        results.push({ node_id: node.id, name: node.name, error: String(e) });
+      }
+    }
+
+    return { count: results.length, nodes: results };
+  }),
+
+  get_changes: H.simple((p) => {
+    const since = p.since || 0;
+    const limit = p.limit || 50;
+    const changes = _changeBuffer.filter(c => c.ts > since);
+    const result = {
+      count: changes.length,
+      changes: changes.slice(-limit),
+      buffer_size: _changeBuffer.length,
+    };
+    if (p.clear) _changeBuffer.length = 0;
+    return result;
   }),
 };
 
