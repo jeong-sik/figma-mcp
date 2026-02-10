@@ -255,7 +255,9 @@ let parse_diff_regions json =
           edge_right = edges |> member "right" |> to_float;
         };
       }
-  with _ -> empty_diff_regions
+  with exn ->
+    Printf.eprintf "[visual_verifier] Warning: diff regions parse failed: %s\n%!" (Printexc.to_string exn);
+    empty_diff_regions
 
 (** Node.js ssim-compare.js로 비교 (영역 정보 포함) *)
 let compare_renders_with_regions ~figma_png ~html_png : (comparison_with_regions, string) result =

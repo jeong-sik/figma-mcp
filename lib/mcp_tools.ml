@@ -2461,7 +2461,9 @@ let handle_get_node_bundle args : (Yojson.Safe.t, string) result =
                 in
                 let dsl_json =
                   try Yojson.Safe.from_string dsl_str
-                  with _ -> `Null
+                  with exn ->
+                    Printf.eprintf "[mcp_tools] Warning: DSL JSON parse failed for node %s: %s\n%!" node_id (Printexc.to_string exn);
+                    `Null
                 in
                 let (image_url, image_download) =
                   match Figma_effects.Perform.get_images
@@ -4062,7 +4064,10 @@ let handle_compare_regions args : (Yojson.Safe.t, string) result =
       let p = trim path in
       if p = "" then None
       else
-        let rp = try Unix.realpath p with _ -> p in
+        let rp = try Unix.realpath p with exn ->
+          Printf.eprintf "[mcp_tools] Warning: realpath failed for '%s': %s, using original\n%!" p (Printexc.to_string exn);
+          p
+        in
         if rp = "/" then Some rp
         else if String.ends_with ~suffix:"/" rp then Some rp
         else Some (rp ^ "/")
@@ -4155,12 +4160,12 @@ let handle_compare_regions args : (Yojson.Safe.t, string) result =
                                   Error (Printf.sprintf "Invalid region bounds for %s" name)
                                 else
                                   loop ((name, x, y, width, height) :: acc) rest
-                              with _ ->
-                                Error "Invalid regions JSON format. Expected: [{name, x, y, width, height}, ...]"
+                              with exn ->
+                                Error (Printf.sprintf "Region field extraction failed: %s. Expected: {name:string, x:int, y:int, width:int, height:int}" (Printexc.to_string exn))
                         in
                         loop [] items
-                    | _ -> Error "Invalid regions JSON format. Expected: [{name, x, y, width, height}, ...]"
-                  with _ -> Error "Invalid regions JSON format. Expected: [{name, x, y, width, height}, ...]"
+                    | _ -> Error "Invalid regions JSON: expected array of objects [{name, x, y, width, height}, ...]"
+                  with exn -> Error (Printf.sprintf "Regions JSON parse error: %s" (Printexc.to_string exn))
                 in
 
                 (match regions_result with
@@ -4203,7 +4208,9 @@ let handle_compare_regions args : (Yojson.Safe.t, string) result =
                               match parts with
                               | first :: _ -> float_of_string first *. 100.0
                               | _ -> 0.0
-                          with _ -> 0.0
+                          with exn ->
+                            Printf.eprintf "[mcp_tools] Warning: SSIM parse failed for output '%s': %s\n%!" output (Printexc.to_string exn);
+                            0.0
                         in
 
                         (* 차이 이미지 생성 *)

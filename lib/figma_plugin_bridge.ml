@@ -268,6 +268,10 @@ let register_waiter ~channel_id ~notify =
       with exn ->
         Printf.eprintf "[plugin_bridge] Warning: dropped waiter notify failed (id=%d): %s\n%!" waiter.id (Printexc.to_string exn)
     ) dropped;
+    (* Log if waiter count is unusually high — possible leak *)
+    let waiter_count = List.length session.waiters in
+    if waiter_count > 50 then
+      Printf.eprintf "[plugin_bridge] Warning: channel %s has %d waiters, possible leak\n%!" channel_id waiter_count;
     id)
 
 let unregister_waiter ~channel_id ~waiter_id =
@@ -363,11 +367,20 @@ let publish_event ~channel_id ~event_type ~payload =
         let waiters = session.event_waiters in
         session.event_waiters <- [];
         pending_waiters := waiters);
+  let failed_waiters = ref [] in
   List.iter (fun waiter ->
     try waiter.notify ()
     with exn ->
-      Printf.eprintf "[plugin_bridge] Warning: event waiter notify failed (id=%d): %s\n%!" waiter.id (Printexc.to_string exn)
-  ) !pending_waiters
+      Printf.eprintf "[plugin_bridge] Warning: event waiter notify failed (id=%d): %s, re-registering\n%!" waiter.id (Printexc.to_string exn);
+      failed_waiters := waiter :: !failed_waiters
+  ) !pending_waiters;
+  (* Re-register failed waiters so events are not lost *)
+  if !failed_waiters <> [] then
+    with_lock (fun () ->
+      match Hashtbl.find_opt channels channel_id with
+      | Some session ->
+          session.event_waiters <- !failed_waiters @ session.event_waiters
+      | None -> ())
 
 (** Poll buffered events *)
 let poll_events ~channel_id ~max =

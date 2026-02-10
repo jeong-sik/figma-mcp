@@ -1603,7 +1603,7 @@ let plugin_codegen_handler ~sw ~eio_ctx _request reqd =
         let anthropic_key = Sys.getenv_opt "ANTHROPIC_API_KEY" in
         (match anthropic_key with
         | Some key when String.length key > 10 ->
-            printf "[Codegen] Trying Claude API (key: %d chars)...\n%!" (String.length key);
+            printf "[Codegen] Trying Claude API...\n%!";
             (try
               let cohttp = Figma_api_eio.get_cohttp_client eio_ctx.Mcp_tools.client in
               let claude_body = `Assoc [
@@ -1649,7 +1649,9 @@ let plugin_codegen_handler ~sw ~eio_ctx _request reqd =
               try_ollama ())
         | _ ->
             (* No Claude key, use Ollama *)
-            (try try_ollama () with _ -> send_template ()))
+            (try try_ollama () with exn ->
+              Printf.eprintf "[Codegen] Ollama fallback: %s, using template\n%!" (Printexc.to_string exn);
+              send_template ()))
   )
 
 (** Plugin analyze handler - analyzes node structure with LLM insights *)
@@ -3802,7 +3804,8 @@ let run ~sw ~net ~clock ~domain_mgr config server =
          Figma_plugin_bridge.cleanup_inactive ~ttl_seconds:300.0 (* 5 min TTL *)
        with exn ->
          if is_cancelled exn then raise exn;
-         eprintf "[Plugin] cleanup loop error: %s\n%!" (Printexc.to_string exn));
+         eprintf "[Plugin] cleanup loop error: %s\n%!" (Printexc.to_string exn);
+         Eio.Time.sleep clock 5.0);  (* backoff before retry *)
       cleanup_loop ()
     in
     try cleanup_loop () with exn ->
