@@ -5105,16 +5105,41 @@ let handle_plugin_export_node_image args : (Yojson.Safe.t, string) result =
         ("format", `String format);
         ("scale", `Float scale);
       ] in
-      let command_id = Figma_plugin_bridge.enqueue_command ~channel_id ~name:"export_node_image" ~payload in
+      let command_id = Figma_plugin_bridge.enqueue_command ~channel_id ~name:"export_image" ~payload in
       (match plugin_wait ~channel_id ~command_id ~timeout_ms with
        | Error err -> Error err
        | Ok result ->
-           let response = `Assoc [
-             ("channel_id", `String channel_id);
-             ("command_id", `String command_id);
-             ("ok", `Bool result.ok);
-             ("payload", result.payload);
-           ] in
+           (* Save base64 PNG to file to avoid token waste in MCP response *)
+           let save_path =
+             if result.ok then
+               (try
+                  (match Yojson.Safe.Util.member "base64" result.payload with
+                   | `String b64 ->
+                       let tmp_dir = Filename.get_temp_dir_name () in
+                       let filename = Printf.sprintf "figma-export-%s.png" (String.map (fun c -> if c = ':' then '-' else c) node_id) in
+                       let path = Filename.concat tmp_dir filename in
+                       let decoded = Base64.decode_exn b64 in
+                       let oc = open_out_bin path in
+                       output_string oc decoded;
+                       close_out oc;
+                       Some path
+                   | _ -> None)
+                with _ -> None)
+             else None
+           in
+           let response = `Assoc (
+             [
+               ("channel_id", `String channel_id);
+               ("command_id", `String command_id);
+               ("ok", `Bool result.ok);
+             ] @
+             (match save_path with
+              | Some path ->
+                  [("saved_to", `String path);
+                   ("message", `String "PNG saved to file. Use timg or open to view.")]
+              | None ->
+                  [("payload", result.payload)])
+           ) in
            Ok (make_text_content (Yojson.Safe.pretty_to_string response)))
 
 (** figma_plugin_get_variables 핸들러 *)
