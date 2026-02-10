@@ -1212,7 +1212,6 @@ let plugin_event_handler _request reqd =
 
 let plugin_status_handler _request reqd =
   plugin_cleanup ();
-  let channels = Figma_plugin_bridge.list_channels () in
   let stats = Figma_plugin_bridge.list_channel_stats () in
   let default_channel = Figma_plugin_bridge.get_default_channel () in
   let stats_json =
@@ -1233,8 +1232,20 @@ let plugin_status_handler _request reqd =
     ("cleanup_interval_seconds", `Float Figma_config.Plugin.cleanup_interval_seconds);
     ("poll_max_ms", `Int Figma_config.Plugin.poll_max_ms);
   ] in
+  let channels_json =
+    `List (List.map (fun (s : Figma_plugin_bridge.channel_stats) ->
+      let age = Unix.gettimeofday () -. s.last_seen in
+      `Assoc [
+        ("channel_id", `String s.id);
+        ("active", `Bool (age < 120.0));
+        ("age_seconds", `Float (Float.round age));
+        ("commands", `Int s.commands);
+        ("results", `Int s.results);
+        ("waiters", `Int s.waiters);
+      ]) stats)
+  in
   let body = `Assoc [
-    ("channels", `List (List.map (fun id -> `String id) channels));
+    ("channels", channels_json);
     ("stats", stats_json);
     ("limits", limits);
     ("default_channel", match default_channel with Some id -> `String id | None -> `Null);

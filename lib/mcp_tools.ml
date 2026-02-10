@@ -712,7 +712,7 @@ let tool_figma_plugin : tool_def = {
       "set_auto_layout"; "get_viewport"; "set_viewport"; "rename";
       "resize"; "move"; "set_opacity"; "set_corner_radius";
       "set_fill"; "set_stroke"; "set_effects";
-      "create_component"; "detach_instance"; "set_text"; "find_all"; "notify";
+      "create_component"; "create_instance"; "detach_instance"; "set_text"; "find_all"; "notify";
       "create_frame"; "create_rectangle"; "create_ellipse"; "create_text";
       "create_line"; "create_polygon"; "create_star";
       "delete_node"; "duplicate"; "align"; "distribute";
@@ -811,6 +811,7 @@ let tool_figma_plugin : tool_def = {
     ("preserve_scroll", bool_prop "스크롤 위치 유지 (set_reactions)");
     ("namespace", string_prop "공유 플러그인 데이터 네임스페이스 (get/set_shared_plugin_data)");
     ("component_id", string_prop "교체할 컴포넌트 ID (swap_component)");
+    ("component_key", string_prop "외부 라이브러리 컴포넌트 키 (create_instance)");
     ("axis", enum_prop ["horizontal"; "vertical"; "both"] "리사이즈 방향 (resize_to_fit)");
     ("padding", number_prop "패딩 (resize_to_fit)");
     ("start", number_prop "텍스트 범위 시작 인덱스 (set_range_fills/set_range_font_size)");

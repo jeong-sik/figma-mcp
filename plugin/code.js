@@ -1037,6 +1037,25 @@ const handlers = {
     return { node_id: node.id, new_component_id: compId };
   }, { type: "INSTANCE" }),
 
+  create_instance: H.simple(async (p) => {
+    const componentKey = p.component_key || p.componentKey;
+    if (!componentKey) return { error: "component_key required" };
+    const comp = await figma.importComponentByKeyAsync(componentKey);
+    const instance = comp.createInstance();
+    if (p.x != null) instance.x = p.x;
+    if (p.y != null) instance.y = p.y;
+    if (p.name) instance.name = p.name;
+    await applyCreateProps(instance, p);
+    return {
+      node_id: instance.id,
+      name: instance.name,
+      component_name: comp.name,
+      component_key: componentKey,
+      width: instance.width,
+      height: instance.height,
+    };
+  }),
+
   reset_overrides: H.node((node) => {
     node.resetOverrides();
     return { node_id: node.id, reset: true };
