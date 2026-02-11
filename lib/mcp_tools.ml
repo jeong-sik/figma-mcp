@@ -1646,20 +1646,29 @@ let resolve_channel_id args =
        | None -> Error "Missing channel_id. Run figma_plugin_connect or figma_plugin_use_channel.")
 
 let plugin_wait ~channel_id ~command_id ~timeout_ms =
-  match get_eio_context () with
-  | Some ctx ->
-      let (Clock clock) = ctx.clock in
-      (match Figma_plugin_bridge.wait_for_result_with_sleep
-               ~sleep:(Eio.Time.sleep clock)
-               ~channel_id
-               ~command_id
-               ~timeout_ms with
-       | Some result -> Ok result
-       | None -> Error "Plugin timeout waiting for response")
-  | None ->
-      (match Figma_plugin_bridge.wait_for_result ~channel_id ~command_id ~timeout_ms with
-       | Some result -> Ok result
-       | None -> Error "Plugin timeout waiting for response")
+  (* Pre-check: verify channel exists and plugin is connected *)
+  let channel_exists =
+    List.exists (fun (s : Figma_plugin_bridge.channel_stats) -> s.id = channel_id)
+      (Figma_plugin_bridge.list_channel_stats ())
+  in
+  if not channel_exists then
+    Error (Printf.sprintf "Channel %s not found. Plugin may be disconnected — reopen it in Figma." channel_id)
+  else
+    let wait_fn =
+      match get_eio_context () with
+      | Some ctx ->
+          let (Clock clock) = ctx.clock in
+          Figma_plugin_bridge.wait_for_result_with_sleep
+            ~sleep:(Eio.Time.sleep clock)
+      | None ->
+          Figma_plugin_bridge.wait_for_result
+    in
+    match wait_fn ~channel_id ~command_id ~timeout_ms with
+    | Some result -> Ok result
+    | None ->
+        Error (Printf.sprintf
+          "Plugin timeout after %dms (channel: %s, cmd: %s). Check: 1) Plugin window open in Figma 2) Server URL correct 3) Increase timeout_ms"
+          timeout_ms channel_id command_id)
 
 let assoc_or_empty json =
   match json with
@@ -6809,10 +6818,65 @@ let handle_plugin_collapse_layer args : (Yojson.Safe.t, string) result =
        | Error err -> Error err
        | Ok result -> Ok (make_text_content (Yojson.Safe.pretty_to_string result.payload)))
 
+(* Known plugin actions for typo suggestion *)
+let known_plugin_actions = [
+  "connect"; "use_channel"; "status"; "read_selection"; "get_node";
+  "export_image"; "get_variables"; "apply_ops"; "list_pages"; "switch_page";
+  "list_components"; "clone"; "group"; "ungroup"; "set_selection"; "zoom_to";
+  "reorder"; "set_locked"; "set_visible"; "flatten"; "set_auto_layout";
+  "get_viewport"; "set_viewport"; "rename"; "resize"; "move"; "set_opacity";
+  "set_corner_radius"; "set_fill"; "set_stroke"; "set_effects";
+  "create_component"; "create_instance"; "detach_instance"; "set_text";
+  "find_all"; "notify"; "create_frame"; "create_rectangle"; "create_ellipse";
+  "create_text"; "create_line"; "create_polygon"; "create_star"; "delete_node";
+  "duplicate"; "align"; "distribute"; "boolean_union"; "boolean_subtract";
+  "boolean_intersect"; "boolean_exclude"; "get_local_styles"; "set_constraints";
+  "create_page"; "delete_page"; "rotate"; "flip"; "outline_stroke";
+  "set_blend_mode"; "get_selection_colors"; "swap_fill_stroke"; "copy_style";
+  "get_fonts"; "set_parent"; "create_vector"; "set_image_fill";
+  "get_plugin_data"; "set_plugin_data"; "get_doc_info"; "get_absolute_bounds";
+  "create_component_set"; "remove_auto_layout"; "create_slice";
+  "set_export_settings"; "get_reactions"; "set_reactions"; "rasterize";
+  "get_shared_plugin_data"; "set_shared_plugin_data"; "swap_component";
+  "resize_to_fit"; "get_characters"; "set_range_fills"; "set_range_font_size";
+  "insert_child"; "get_all_local_variables"; "get_styles_by_type"; "apply_style";
+  "get_overrides"; "reset_overrides"; "bring_to_front"; "send_to_back";
+  "set_grid"; "get_layer_list"; "scroll_and_zoom"; "get_paint_styles";
+  "set_text_case"; "get_stroke_details"; "set_stroke_weight"; "collapse_layer";
+  "execute_dsl"; "export_tokens"; "export_viewport"; "export_selection";
+  "watch_start"; "watch_stop"; "get_changes";
+]
+
+let suggest_action unknown =
+  let edit_distance a b =
+    let la = String.length a and lb = String.length b in
+    if la = 0 then lb else if lb = 0 then la
+    else
+      let prev = Array.init (lb + 1) (fun i -> i) in
+      let curr = Array.make (lb + 1) 0 in
+      for i = 1 to la do
+        curr.(0) <- i;
+        for j = 1 to lb do
+          let cost = if Char.equal (String.get a (i-1)) (String.get b (j-1)) then 0 else 1 in
+          curr.(j) <- min (min (prev.(j) + 1) (curr.(j-1) + 1)) (prev.(j-1) + cost)
+        done;
+        Array.blit curr 0 prev 0 (lb + 1)
+      done;
+      prev.(lb)
+  in
+  let scored = List.filter_map (fun action ->
+    let d = edit_distance unknown action in
+    if d <= 3 then Some (d, action) else None
+  ) known_plugin_actions in
+  let sorted = List.sort (fun (d1, _) (d2, _) -> compare d1 d2) scored in
+  match sorted with
+  | (_, suggestion) :: _ -> Printf.sprintf " Did you mean '%s'?" suggestion
+  | [] -> ""
+
 (* STRAP 통합 핸들러: action으로 라우팅, 기존 핸들러 재사용 *)
 let handle_figma_plugin args : (Yojson.Safe.t, string) result =
   match get_string "action" args with
-  | None -> Error "Missing required parameter: action"
+  | None -> Error "Missing required parameter: action. Use figma_plugin with action='connect' to start."
   | Some action ->
       match action with
       | "connect" -> handle_plugin_connect args
@@ -6959,7 +7023,9 @@ let handle_figma_plugin args : (Yojson.Safe.t, string) result =
               (match get_int "x" a with Some v -> pairs := ("x", `Int v) :: !pairs | None -> ());
               (match get_int "y" a with Some v -> pairs := ("y", `Int v) :: !pairs | None -> ());
               `Assoc !pairs) args
-      | _ -> Error (sprintf "Unknown action: %s. 105 actions available." action)
+      | _ ->
+          let suggestion = suggest_action action in
+          Error (sprintf "Unknown action: '%s'.%s %d actions available." action suggestion (List.length known_plugin_actions))
 
 (** ============== LLM Bridge 핸들러 ============== *)
 
@@ -7402,8 +7468,7 @@ let handle_list_files args : (Yojson.Safe.t, string) result =
        | Error err -> Error err)
   | _ -> Error "Missing required parameters: project_id, token"
 
-(** figma_crawl_team 핸들러 - 팀 전체 크롤링 + Neo4j 저장 *)
-(* TODO: Effects 통합 후 실제 구현 활성화 *)
+(** figma_crawl_team 핸들러 - 팀 전체 크롤링 + Neo4j 저장 (Effects 기반) *)
 let handle_crawl_team args : (Yojson.Safe.t, string) result =
   let team_id = get_string "team_id" args in
   let team_name = get_string_or "team_name" "Unknown Team" args in
