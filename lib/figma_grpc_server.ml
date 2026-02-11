@@ -138,7 +138,7 @@ module Streamer = struct
         | "raw" -> Yojson.Safe.to_string node
         | "fidelity" | "html" ->
             (* Use existing Fidelity DSL converter *)
-            (match Mcp_tools.process_json_string ~format (Yojson.Safe.to_string node) with
+            (match Mcp_helpers.process_json_string ~format (Yojson.Safe.to_string node) with
              | Ok result -> result
              | Error _ -> Yojson.Safe.to_string node)
         | _ -> Yojson.Safe.to_string node
@@ -655,7 +655,7 @@ module Handlers = struct
                    let dsl = match req.format with
                      | "raw" -> Yojson.Safe.to_string dsl_source
                      | "fidelity" | "html" ->
-                         (match Mcp_tools.process_json_string ~format:req.format (Yojson.Safe.to_string dsl_source) with
+                         (match Mcp_helpers.process_json_string ~format:req.format (Yojson.Safe.to_string dsl_source) with
                           | Ok result -> result
                           | Error _ -> Yojson.Safe.to_string dsl_source)
                      | _ -> Yojson.Safe.to_string dsl_source

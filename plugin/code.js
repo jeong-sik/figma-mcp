@@ -5,6 +5,23 @@
 
 figma.showUI(__html__, { width: 360, height: 600 });
 
+// Base64 encoder for Uint8Array (btoa is not available in Figma plugin sandbox)
+const _b64chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+function uint8ToBase64(bytes) {
+  let result = "";
+  const len = bytes.length;
+  for (let i = 0; i < len; i += 3) {
+    const b0 = bytes[i];
+    const b1 = i + 1 < len ? bytes[i + 1] : 0;
+    const b2 = i + 2 < len ? bytes[i + 2] : 0;
+    result += _b64chars[b0 >> 2];
+    result += _b64chars[((b0 & 3) << 4) | (b1 >> 4)];
+    result += i + 1 < len ? _b64chars[((b1 & 15) << 2) | (b2 >> 6)] : "=";
+    result += i + 2 < len ? _b64chars[b2 & 63] : "=";
+  }
+  return result;
+}
+
 // UI<->plugin message hardening: a per-session nonce that must be echoed back
 // in every UI->plugin message (and included in plugin->UI messages).
 const sessionNonce = Math.random().toString(16).slice(2) + Date.now().toString(16);
@@ -1091,18 +1108,14 @@ const handlers = {
     const format = (p.format || "PNG").toUpperCase();
     const scale = p.scale || 1;
     const bytes = await node.exportAsync({ format, constraint: { type: "SCALE", value: scale } });
-    let binary = "";
-    for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
-    return { node_id: node.id, format, size: bytes.length, base64: btoa(binary) };
+    return { node_id: node.id, format, size: bytes.length, base64: uint8ToBase64(bytes) };
   }),
 
   rasterize: H.node(async (node, p) => {
     const format = (p.format || "PNG").toUpperCase();
     const scale = p.scale || 1;
     const bytes = await node.exportAsync({ format, constraint: { type: "SCALE", value: scale } });
-    let binary = "";
-    for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
-    return { node_id: node.id, format, scale, size: bytes.length, base64: btoa(binary) };
+    return { node_id: node.id, format, scale, size: bytes.length, base64: uint8ToBase64(bytes) };
   }),
 
   set_export_settings: H.node((node, p) => {
@@ -1176,11 +1189,9 @@ const handlers = {
     for (const child of children.slice(0, maxNodes)) {
       try {
         const bytes = await child.exportAsync({ format, constraint: { type: "SCALE", value: scale } });
-        let binary = "";
-        for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
         results.push({
           node_id: child.id, name: child.name, type: child.type,
-          base64: btoa(binary), width: child.width, height: child.height,
+          base64: uint8ToBase64(bytes), width: child.width, height: child.height,
         });
       } catch (e) {
         results.push({ node_id: child.id, name: child.name, error: String(e) });
@@ -1205,11 +1216,9 @@ const handlers = {
     for (const node of selection.slice(0, 10)) {
       try {
         const bytes = await node.exportAsync({ format, constraint: { type: "SCALE", value: scale } });
-        let binary = "";
-        for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
         results.push({
           node_id: node.id, name: node.name, type: node.type,
-          base64: btoa(binary), width: node.width, height: node.height,
+          base64: uint8ToBase64(bytes), width: node.width, height: node.height,
         });
       } catch (e) {
         results.push({ node_id: node.id, name: node.name, error: String(e) });

@@ -784,6 +784,37 @@ let random_sse_client_id () =
   in
   loop ()
 
+let string_contains s sub =
+  let len_s = String.length s in
+  let len_sub = String.length sub in
+  if len_sub = 0 then true
+  else if len_sub > len_s then false
+  else
+    let found = ref false in
+    for i = 0 to len_s - len_sub do
+      if not !found then
+        let match_at_i = ref true in
+        for j = 0 to len_sub - 1 do
+          if Char.lowercase_ascii s.[i + j] <> Char.lowercase_ascii sub.[j] then
+            match_at_i := false
+        done;
+        if !match_at_i then found := true
+    done;
+    !found
+
+let is_network_error exn =
+  match exn with
+  | Unix.Unix_error (Unix.EPIPE, _, _)
+  | Unix.Unix_error (Unix.ECONNRESET, _, _)
+  | Unix.Unix_error (Unix.ETIMEDOUT, _, _) -> true
+  | _ ->
+      let s = Printexc.to_string exn in
+      string_contains s "broken pipe" ||
+      string_contains s "connection reset" ||
+      string_contains s "connection timed out" ||
+      string_contains s "econnreset" ||
+      string_contains s "epipe"
+
 let format_sse_data data =
   if data = "" then
     "data: "
@@ -813,12 +844,21 @@ let unregister_sse_client id =
 
 (** Send SSE event and flush immediately *)
 let send_sse_event client ~event ~data =
-  let data_lines = format_sse_data data in
-  let msg = sprintf "event: %s\n%s\n\n" event data_lines in
-  Eio.Mutex.use_rw ~protect:true client.mutex (fun () ->
-    Httpun.Body.Writer.write_string client.body msg;
-    Httpun.Body.Writer.flush client.body ignore
-  )
+  if not client.connected then ()
+  else
+    let data_lines = format_sse_data data in
+    let msg = sprintf "event: %s\n%s\n\n" event data_lines in
+    try
+      Eio.Mutex.use_rw ~protect:true client.mutex (fun () ->
+        Httpun.Body.Writer.write_string client.body msg;
+        Httpun.Body.Writer.flush client.body ignore
+      )
+    with exn ->
+      client.connected <- false;
+      if is_network_error exn then
+        eprintf "[sse] client disconnected: %s\n%!" (Printexc.to_string exn)
+      else
+        eprintf "[sse] send error: %s\n%!" (Printexc.to_string exn)
 
 let broadcast_sse_shutdown reason =
   let data = sprintf
@@ -888,7 +928,7 @@ let health_handler _request reqd =
 (** MCP POST handler - async body reading with callback-based response *)
 let run_mcp_request ~domain_mgr ~eio_ctx server body_str =
   let run () =
-    Mcp_tools.install_eio_context eio_ctx;
+    Mcp_helpers.install_eio_context eio_ctx;
     process_mcp_request_sync server body_str
   in
   match domain_mgr with
@@ -1593,7 +1633,7 @@ let plugin_codegen_handler ~sw ~eio_ctx _request reqd =
             ("prompt", `String full_prompt);
             ("stream", `Bool false);
           ] in
-          let cohttp = Figma_api_eio.get_cohttp_client eio_ctx.Mcp_tools.client in
+          let cohttp = Figma_api_eio.get_cohttp_client eio_ctx.Mcp_helpers.client in
           let headers = Cohttp.Header.of_list [("Content-Type", "application/json")] in
           let req_body = Cohttp_eio.Body.of_string (Yojson.Safe.to_string ollama_body) in
           let uri = Uri.of_string ollama_url in
@@ -1616,7 +1656,7 @@ let plugin_codegen_handler ~sw ~eio_ctx _request reqd =
         | Some key when String.length key > 10 ->
             printf "[Codegen] Trying Claude API...\n%!";
             (try
-              let cohttp = Figma_api_eio.get_cohttp_client eio_ctx.Mcp_tools.client in
+              let cohttp = Figma_api_eio.get_cohttp_client eio_ctx.Mcp_helpers.client in
               let claude_body = `Assoc [
                 ("model", `String "claude-sonnet-4-20250514");  (* Claude 4 Sonnet *)
                 ("max_tokens", `Int 4096);
@@ -3265,7 +3305,7 @@ Output ONLY valid JSON array, no explanation. Example:
           in
 
           (try
-            let cohttp = Figma_api_eio.get_cohttp_client eio_ctx.Mcp_tools.client in
+            let cohttp = Figma_api_eio.get_cohttp_client eio_ctx.Mcp_helpers.client in
             let ollama_url = "http://127.0.0.1:11434/api/generate" in
             let ollama_body = `Assoc [
               ("model", `String "qwen3-coder:30b");
@@ -3674,7 +3714,10 @@ let error_handler _client_addr ?request error start_response =
   let msg =
     match error with
     | `Exn exn ->
-        eprintf "[http] error handler exception: %s\n%!" (Printexc.to_string exn);
+        if is_network_error exn then
+          eprintf "[http] client disconnected: %s\n%!" (Printexc.to_string exn)
+        else
+          eprintf "[http] error handler exception: %s\n%!" (Printexc.to_string exn);
         "Internal Server Error"
     | `Bad_request -> "Bad Request"
     | `Bad_gateway -> "Bad Gateway"
@@ -3702,7 +3745,7 @@ let error_handler _client_addr ?request error start_response =
 let run ~sw ~net ~clock ~domain_mgr config server =
   (* Set Eio context for pure Eio handlers (Lwt-free path) *)
   let eio_client = Figma_api_eio.make_client net in
-  let eio_ctx = Mcp_tools.set_eio_context ~sw ~net ~clock ~client:eio_client in
+  let eio_ctx = Mcp_helpers.set_eio_context ~sw ~net ~clock ~client:eio_client in
   let request_handler = make_request_handler ~clock ~domain_mgr ~sw ~eio_ctx server in
   let resolve_listen_ips host =
     match String.lowercase_ascii host with
@@ -3887,7 +3930,7 @@ let start_server ?(config = default_config) server =
 let run_stdio ~sw ~env ~net ~clock server =
   (* Set Eio context for pure Eio handlers *)
   let eio_client = Figma_api_eio.make_client net in
-  ignore (Mcp_tools.set_eio_context ~sw ~net ~clock ~client:eio_client);
+  ignore (Mcp_helpers.set_eio_context ~sw ~net ~clock ~client:eio_client);
 
   eprintf "[%s] MCP Server started (protocol: %s, mode: stdio/Eio)\n%!"
     Mcp_protocol.server_name Mcp_protocol.protocol_version;
