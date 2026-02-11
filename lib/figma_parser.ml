@@ -304,6 +304,8 @@ let rec parse_node ?(depth=0) ?(max_depth=20) json =
       primary_axis_align; counter_axis_align;
       layout_sizing_h; layout_sizing_v;
       characters; typography; component_id;
+      component_properties = [];
+      dev_resources = [];
       children;
     }
 

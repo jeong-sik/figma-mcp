@@ -85,6 +85,44 @@
       @keyframes spin { to { transform: rotate(360deg); } }
       .status-text { font-size: 10px; color: var(--text-muted); margin-left: 4px; }
 
+      .tabs {
+        display: flex;
+        gap: 2px;
+        padding: 2px;
+        background: var(--bg-tertiary);
+        border-radius: 6px;
+        margin-bottom: 8px;
+      }
+      .tab {
+        flex: 1;
+        padding: 6px;
+        text-align: center;
+        border-radius: 4px;
+        cursor: pointer;
+        font-weight: 500;
+        color: var(--text-muted);
+        transition: all 0.2s;
+      }
+      .tab.active {
+        background: var(--bg);
+        color: var(--text);
+        box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+      }
+      .tab-content { display: none; }
+      .tab-content.active { display: flex; flex-direction: column; gap: 10px; }
+
+      .kbd {
+        font-size: 9px;
+        padding: 1px 4px;
+        background: var(--bg-tertiary);
+        border-radius: 3px;
+        border: 1px solid var(--border);
+        color: var(--text-muted);
+      }
+      
+      .direct-llm-row { display: flex; flex-direction: column; gap: 8px; }
+      #llmPrompt { width: 100%; height: 60px; resize: none; border-radius: 6px; }
+      
       label {
         display: block;
         font-weight: 500;
@@ -430,22 +468,91 @@
         color: var(--text-muted);
       }
 
-      .tabs { display: flex; gap: 2px; margin-bottom: 6px; }
-      .tab {
-        padding: 4px 8px;
-        font-size: 9px;
+      .tabs {
+        display: flex;
+        gap: 2px;
+        padding: 4px;
         background: var(--bg-secondary);
-        border: none;
-        border-radius: 4px 4px 0 0;
-        color: var(--text-muted);
-        cursor: pointer;
+        border-bottom: 1px solid var(--border);
+        position: sticky;
+        top: 0;
+        z-index: 10;
       }
-      .tab.active { background: var(--accent); color: #fff; }
-      .tab-content { display: none; }
-      .tab-content.active { display: block; }
+      .tab {
+        flex: 1;
+        padding: 6px 4px;
+        text-align: center;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 10px;
+        font-weight: 500;
+        color: var(--text-muted);
+        transition: all 0.15s;
+      }
+      .tab:hover { background: var(--bg-tertiary); color: var(--text); }
+      .tab.active {
+        background: var(--bg);
+        color: var(--accent);
+        box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+      }
+      .tab-content { display: none; padding: 12px; flex-direction: column; gap: 12px; }
+      .tab-content.active { display: flex; }
+
+      .section-card {
+        background: var(--bg);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 10px;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+      .section-title {
+        font-size: 10px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        color: var(--text-muted);
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+      }
+      
+      textarea {
+        width: 100%;
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: 8px;
+        color: var(--text);
+        font-size: 11px;
+        font-family: inherit;
+        min-height: 60px;
+      }
+      textarea:focus { border-color: var(--accent); outline: none; }
+
+      .stat-grid {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 4px;
+      }
+      .stat-item {
+        background: var(--bg-secondary);
+        padding: 6px;
+        border-radius: 6px;
+        text-align: center;
+      }
+      .stat-v { font-size: 12px; font-weight: 600; display: block; }
+      .stat-l { font-size: 8px; color: var(--text-muted); text-transform: uppercase; }
     </style>
   </head>
   <body>
+    <div class="tabs">
+      <div class="tab active" data-tab="bridge">Bridge</div>
+      <div class="tab" data-tab="tools">Tools</div>
+      <div class="tab" data-tab="llm">Direct AI</div>
+      <div class="tab" data-tab="settings">Settings</div>
+    </div>
     <div class="container">
       <div class="header">
         <h1>
@@ -455,7 +562,7 @@
         </h1>
         <div class="header-right">
           <span class="ping" id="pingDisplay" style="display:none;">--ms</span>
-          <span class="version">v0.3.18</span>
+          <span class="version">v0.7.1</span>
         </div>
       </div>
 
@@ -754,6 +861,19 @@
       <script>
       // DOM refs
       var $ = function(id) { return document.getElementById(id); };
+
+      // Tab switching
+      var tabs = document.querySelectorAll(".tab");
+      var tabContents = document.querySelectorAll(".tab-content");
+      tabs.forEach(function(tab) {
+        tab.onclick = function() {
+          var targetTab = this.getAttribute("data-tab");
+          tabs.forEach(function(t) { t.classList.remove("active"); });
+          tabContents.forEach(function(c) { c.classList.remove("active"); });
+          this.classList.add("active");
+          $("tab-" + targetTab).classList.add("active");
+        };
+      });
       var serverInput = $("server"), channelInput = $("channel"), apiKeyInput = $("apiKey"), rememberApiKeyToggle = $("rememberApiKey"), copyChannelBtn = $("copyChannel");
       var connectBtn = $("connect"), connectText = $("connectText"), connectSpinner = $("connectSpinner");
       var disconnectBtn = $("disconnect"), selfTestBtn = $("selfTest");
@@ -1945,6 +2065,40 @@
       };
 
       // ============== END NEW FEATURES ==============
+
+      // Direct AI Execution
+      $("llmRun").onclick = function() {
+        var prompt = $("llmPrompt").value.trim();
+        var provider = $("llmProvider").value;
+        var key = $("llmApiKey").value.trim();
+        
+        if (!prompt) { alert("Please enter a prompt"); return; }
+        if (!key) { alert("Please enter an AI API Key in Settings"); return; }
+        
+        $("llmProgress").style.display = "block";
+        $("llmResult").style.display = "none";
+        
+        // Example: Simple OpenAI call (Can be expanded to other providers)
+        var url = provider === "openai" ? "https://api.openai.com/v1/chat/completions" : "";
+        var body = provider === "openai" ? JSON.stringify({
+          model: "gpt-4o",
+          messages: [{role: "user", content: prompt + "\n\nContext: Selected Figma layers metadata: " + JSON.stringify(lastSelection)}]
+        }) : "";
+
+        fetch(url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "Authorization": "Bearer " + key },
+          body: body
+        }).then(r => r.json()).then(data => {
+          $("llmProgress").style.display = "none";
+          $("llmResult").style.display = "block";
+          $("llmResult").textContent = data.choices[0].message.content;
+          addLog("ai", "Direct AI action completed", true);
+        }).catch(e => {
+          $("llmProgress").style.display = "none";
+          addLog("ai", "AI Error: " + e.message, false);
+        });
+      };
 
       // Load saved state and auto-connect
       var state = loadState();

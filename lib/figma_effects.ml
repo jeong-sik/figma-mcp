@@ -103,6 +103,26 @@ type _ Effect.t +=
       message: string;
       client_meta: Yojson.Safe.t;
     } -> figma_result Effect.t
+  | Figma_get_dev_resources : {
+      token: string;
+      file_key: string;
+      node_id: string;
+    } -> figma_result Effect.t
+  | Figma_add_dev_resource : {
+      token: string;
+      file_key: string;
+      node_id: string;
+      name: string;
+      url: string;
+    } -> figma_result Effect.t
+  | Figma_create_webhook : {
+      token: string;
+      team_id: string;
+      file_key: string;
+      endpoint: string;
+      passcode: string;
+    } -> figma_result Effect.t
+
   | Figma_download_url : { url: string; path: string } -> file_result Effect.t
   | Figma_get_me : { token: string } -> figma_result Effect.t
   | Figma_get_team_projects : { token: string; team_id: string } -> figma_result Effect.t
@@ -203,6 +223,16 @@ module Perform = struct
   (** Post a file comment *)
   let post_file_comment ~token ~file_key ~message ~client_meta =
     Effect.perform (Figma_post_file_comment { token; file_key; message; client_meta })
+
+
+  let get_dev_resources ~token ~file_key ~node_id =
+    Effect.perform (Figma_get_dev_resources { token; file_key; node_id })
+
+  let add_dev_resource ~token ~file_key ~node_id ~name ~url =
+    Effect.perform (Figma_add_dev_resource { token; file_key; node_id; name; url })
+
+  let create_webhook ~token ~team_id ~file_key ~endpoint ~passcode =
+    Effect.perform (Figma_create_webhook { token; team_id; file_key; endpoint; passcode })
 
   (** Download asset by URL *)
   let download_url ~url ~path =
@@ -639,6 +669,24 @@ let run_with_pure_eio_api ~sw ~net ~clock ~client computation =
               let result =
                 Figma_api_eio.post_file_comment ~sw ~net ~clock ~client ~token ~file_key ~message ~client_meta
               in
+              let result' = Result.map_error Figma_api_eio.api_error_to_friendly_string result in
+              Effect.Deep.continue k result')
+
+        | Figma_get_dev_resources { token; file_key; node_id } ->
+            Some (fun (k : (a, _) Effect.Deep.continuation) ->
+              let result = Figma_api_eio.get_dev_resources ~sw ~net ~clock ~client ~token ~file_key ~node_id in
+              let result' = Result.map_error Figma_api_eio.api_error_to_friendly_string result in
+              Effect.Deep.continue k result')
+
+        | Figma_add_dev_resource { token; file_key; node_id; name; url } ->
+            Some (fun (k : (a, _) Effect.Deep.continuation) ->
+              let result = Figma_api_eio.add_dev_resource ~sw ~net ~clock ~client ~token ~file_key ~node_id ~name ~url_link:url in
+              let result' = Result.map_error Figma_api_eio.api_error_to_friendly_string result in
+              Effect.Deep.continue k result')
+
+        | Figma_create_webhook { token; team_id; file_key; endpoint; passcode } ->
+            Some (fun (k : (a, _) Effect.Deep.continuation) ->
+              let result = Figma_api_eio.create_webhook ~sw ~net ~clock ~client ~token ~team_id ~file_key ~endpoint ~passcode in
               let result' = Result.map_error Figma_api_eio.api_error_to_friendly_string result in
               Effect.Deep.continue k result')
 

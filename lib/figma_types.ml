@@ -99,6 +99,22 @@ type text_decoration = NoDeco | Underline | Strikethrough
 
 type text_case = Original | Upper | Lower | Title | SmallCaps | SmallCapsForced
 
+
+(** ============== 컴포넌트 속성 및 개발 리소스 ============== *)
+type prop_type = Boolean | Text | InstanceSwap | Variant
+
+type component_property_def = {
+  prop_type: prop_type;
+  default_value: string;
+  variant_options: string list;  (** Variant 전용 *)
+}
+
+type dev_resource = {
+  id: string;
+  name: string;
+  url: string;
+}
+
 type typography = {
   font_family: string;
   font_size: float;
@@ -209,6 +225,9 @@ type ui_node = {
   typography: typography option;
   (* 컴포넌트 *)
   component_id: string option;
+  component_properties: (string * component_property_def) list;
+  dev_resources: dev_resource list;
+
   (* 자식 *)
   children: ui_node list;
 }
@@ -239,6 +258,8 @@ let default_node = {
   characters = None;
   typography = None;
   component_id = None;
+  component_properties = [];
+  dev_resources = [];
   children = [];
 }
 

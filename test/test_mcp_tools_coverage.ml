@@ -923,9 +923,31 @@ let server_tests = [
 
 (** ============== Main ============== *)
 
+let test_string_contains_basic () =
+  check bool "basic match" true (Mcp_tools.string_contains "Hello World" "world");
+  check bool "no match" false (Mcp_tools.string_contains "Hello" "bye");
+  check bool "empty sub" true (Mcp_tools.string_contains "Hello" "");
+  check bool "case insensitive" true (Mcp_tools.string_contains "BROKEN PIPE" "broken pipe")
+
+let test_is_network_error_structural () =
+  check bool "Unix EPIPE" true (Mcp_tools.is_network_error (Unix.Unix_error (Unix.EPIPE, "write", "")));
+  check bool "Unix ECONNRESET" true (Mcp_tools.is_network_error (Unix.Unix_error (Unix.ECONNRESET, "read", "")))
+
+let test_is_network_error_string () =
+  check bool "string broken pipe" true (Mcp_tools.is_network_error (Failure "Broken pipe"));
+  check bool "string connection reset" true (Mcp_tools.is_network_error (Failure "Connection reset by peer"));
+  check bool "generic error" false (Mcp_tools.is_network_error (Failure "Unknown internal error"))
+
+let network_util_tests = [
+  "string_contains basic", `Quick, test_string_contains_basic;
+  "is_network_error structural", `Quick, test_is_network_error_structural;
+  "is_network_error string", `Quick, test_is_network_error_string;
+]
+
 let () =
   run "Mcp_tools Coverage" [
     "Schema Helpers", schema_helper_tests;
+    "Network Utils", network_util_tests;
     "JSON Utilities", json_util_tests;
     "Node ID Handling", node_id_tests;
     "Error Handling", error_handling_tests;
