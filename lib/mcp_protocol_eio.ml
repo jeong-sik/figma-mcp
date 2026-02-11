@@ -3866,13 +3866,18 @@ let start_server ?(config = default_config) server =
       broadcast_sse_shutdown signal_name;
       eprintf "🎨 %s: Sent shutdown notification to %d SSE clients\n%!" Mcp_protocol.server_name (Hashtbl.length sse_clients);
 
-      (* Give clients 200ms to receive the notification *)
+      (* Give clients 200ms to receive the notification.
+         NOTE: Unix.sleepf is intentional here. This closure runs as a POSIX signal
+         handler (Sys.set_signal) which executes outside Eio fiber context, so
+         Eio.Time.sleep is not available. Blocking the OS thread is acceptable
+         during shutdown. *)
       Unix.sleepf 0.2;
 
       (* Gracefully close all SSE connections before Switch.fail *)
       close_all_sse_connections ();
 
-      (* Give connections 200ms to complete close handshake *)
+      (* Give connections 200ms to complete close handshake (same signal handler
+         context constraint as above) *)
       Unix.sleepf 0.2;
 
       match !switch_ref with

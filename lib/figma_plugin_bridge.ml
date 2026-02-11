@@ -343,9 +343,19 @@ let wait_for_result_with_sleep ~sleep ~channel_id ~command_id ~timeout_ms =
   in
   poll 0
 
+(** Convenience wrapper: uses Eio.Time.sleep when Eio context is available,
+    falls back to Unix.sleepf otherwise. Prefer calling wait_for_result_with_sleep
+    with an explicit ~sleep when the caller already has clock access. *)
 let wait_for_result ~channel_id ~command_id ~timeout_ms =
+  let sleep =
+    match Mcp_helpers.get_eio_context () with
+    | Some ctx ->
+        let (Mcp_helpers.Clock clock) = ctx.clock in
+        Eio.Time.sleep clock
+    | None -> Unix.sleepf
+  in
   wait_for_result_with_sleep
-    ~sleep:Unix.sleepf
+    ~sleep
     ~channel_id
     ~command_id
     ~timeout_ms
