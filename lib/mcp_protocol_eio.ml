@@ -784,6 +784,37 @@ let random_sse_client_id () =
   in
   loop ()
 
+let string_contains s sub =
+  let len_s = String.length s in
+  let len_sub = String.length sub in
+  if len_sub = 0 then true
+  else if len_sub > len_s then false
+  else
+    let found = ref false in
+    for i = 0 to len_s - len_sub do
+      if not !found then
+        let match_at_i = ref true in
+        for j = 0 to len_sub - 1 do
+          if Char.lowercase_ascii s.[i + j] <> Char.lowercase_ascii sub.[j] then
+            match_at_i := false
+        done;
+        if !match_at_i then found := true
+    done;
+    !found
+
+let is_network_error exn =
+  match exn with
+  | Unix.Unix_error (Unix.EPIPE, _, _)
+  | Unix.Unix_error (Unix.ECONNRESET, _, _)
+  | Unix.Unix_error (Unix.ETIMEDOUT, _, _) -> true
+  | _ ->
+      let s = Printexc.to_string exn in
+      string_contains s "broken pipe" ||
+      string_contains s "connection reset" ||
+      string_contains s "connection timed out" ||
+      string_contains s "econnreset" ||
+      string_contains s "epipe"
+
 let format_sse_data data =
   if data = "" then
     "data: "
@@ -813,12 +844,21 @@ let unregister_sse_client id =
 
 (** Send SSE event and flush immediately *)
 let send_sse_event client ~event ~data =
-  let data_lines = format_sse_data data in
-  let msg = sprintf "event: %s\n%s\n\n" event data_lines in
-  Eio.Mutex.use_rw ~protect:true client.mutex (fun () ->
-    Httpun.Body.Writer.write_string client.body msg;
-    Httpun.Body.Writer.flush client.body ignore
-  )
+  if not client.connected then ()
+  else
+    let data_lines = format_sse_data data in
+    let msg = sprintf "event: %s\n%s\n\n" event data_lines in
+    try
+      Eio.Mutex.use_rw ~protect:true client.mutex (fun () ->
+        Httpun.Body.Writer.write_string client.body msg;
+        Httpun.Body.Writer.flush client.body ignore
+      )
+    with exn ->
+      client.connected <- false;
+      if is_network_error exn then
+        eprintf "[sse] client disconnected: %s\n%!" (Printexc.to_string exn)
+      else
+        eprintf "[sse] send error: %s\n%!" (Printexc.to_string exn)
 
 let broadcast_sse_shutdown reason =
   let data = sprintf
@@ -3674,7 +3714,10 @@ let error_handler _client_addr ?request error start_response =
   let msg =
     match error with
     | `Exn exn ->
-        eprintf "[http] error handler exception: %s\n%!" (Printexc.to_string exn);
+        if is_network_error exn then
+          eprintf "[http] client disconnected: %s\n%!" (Printexc.to_string exn)
+        else
+          eprintf "[http] error handler exception: %s\n%!" (Printexc.to_string exn);
         "Internal Server Error"
     | `Bad_request -> "Bad Request"
     | `Bad_gateway -> "Bad Gateway"
