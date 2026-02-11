@@ -71,6 +71,7 @@ let now () = Unix.gettimeofday ()
 
 let with_lock f = Eio.Mutex.use_rw ~protect:true state_mutex f
 
+(* Pre-condition: caller holds state_mutex *)
 let record_rps buckets now_sec =
   let idx = now_sec mod Array.length buckets in
   let bucket = buckets.(idx) in
@@ -80,16 +81,19 @@ let record_rps buckets now_sec =
   end;
   bucket.count <- bucket.count + 1
 
+(* Pre-condition: caller holds state_mutex *)
 let sum_recent buckets now_sec window =
   Array.fold_left (fun acc b ->
     if now_sec - b.sec < window then acc + b.count else acc
   ) 0 buckets
 
+(* Pre-condition: caller holds state_mutex *)
 let record_latency ms =
   latency_ring.(!latency_index) <- ms;
   latency_index := (!latency_index + 1) mod ring_size;
   if !latency_count < ring_size then latency_count := !latency_count + 1
 
+(* Pre-condition: caller holds state_mutex *)
 let latency_snapshot () =
   let count = !latency_count in
   if count = 0 then

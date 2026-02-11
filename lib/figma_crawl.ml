@@ -83,10 +83,10 @@ let get_list key json =
   | `List l -> l
   | _ -> []
 
-(** Rate limiting *)
+(** Rate limiting (uses Eio_sleep effect — suspends fiber, does not block OS thread) *)
 let rate_limit ms =
   if ms > 0 then
-    Unix.sleepf (float_of_int ms /. 1000.0)
+    Figma_effects.Perform.eio_sleep (float_of_int ms /. 1000.0)
 
 (** Neo4j Cypher 실행 (Effects 사용) *)
 let run_cypher ~neo4j_cfg query params =

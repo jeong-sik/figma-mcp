@@ -135,6 +135,10 @@ type _ Effect.t +=
   | Log_info : string -> unit Effect.t
   | Log_error : string -> unit Effect.t
 
+(** Eio-compatible sleep effect (replaces Unix.sleepf in effectful computations) *)
+type _ Effect.t +=
+  | Eio_sleep : float -> unit Effect.t
+
 (** Neo4j effects - HTTP calls to Neo4j *)
 type neo4j_result = (Yojson.Safe.t, string) result
 
@@ -258,6 +262,9 @@ module Perform = struct
   let log_debug msg = Effect.perform (Log_debug msg)
   let log_info msg = Effect.perform (Log_info msg)
   let log_error msg = Effect.perform (Log_error msg)
+
+  (** Eio-compatible sleep (suspends fiber, does not block OS thread) *)
+  let eio_sleep seconds = Effect.perform (Eio_sleep seconds)
 
   (** Neo4j - Run single Cypher query *)
   let neo4j_run_cypher ~uri ~database ~auth_header ~query ~params =
@@ -454,6 +461,11 @@ let run_with_mock : 'a. mock_store -> (unit -> 'a) -> 'a = fun store computation
         | Log_error _ ->
             Some (fun (k : (a, _) Effect.Deep.continuation) ->
               (* Silent in tests *)
+              Effect.Deep.continue k ())
+
+        | Eio_sleep _ ->
+            Some (fun (k : (a, _) Effect.Deep.continuation) ->
+              (* No-op in mock: skip sleep for test speed *)
               Effect.Deep.continue k ())
 
         | _ -> None
@@ -753,6 +765,11 @@ let run_with_pure_eio_api ~sw ~net ~clock ~client computation =
                 ~uri ~database ~auth_header statements
               in
               Effect.Deep.continue k result)
+
+        | Eio_sleep seconds ->
+            Some (fun (k : (a, _) Effect.Deep.continuation) ->
+              Eio.Time.sleep clock seconds;
+              Effect.Deep.continue k ())
 
         | _ -> None
     }
