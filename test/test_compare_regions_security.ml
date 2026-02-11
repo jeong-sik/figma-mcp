@@ -36,7 +36,7 @@ let test_output_dir_outside_base_rejected () =
       ("regions", `String {|[{"name":"ok","x":0,"y":0,"width":1,"height":1}]|});
     ]
   in
-  match Mcp_tools.handle_compare_regions args with
+  match Mcp_visual_handlers.handle_compare_regions args with
   | Ok _ -> fail "expected error for output_dir outside allowed base"
   | Error msg ->
       check string "error" "output_dir must be under /tmp/figma-evolution" msg
@@ -54,7 +54,7 @@ let test_region_name_traversal_rejected () =
       ("regions", `String {|[{"name":"../pwn","x":0,"y":0,"width":1,"height":1}]|});
     ]
   in
-  match Mcp_tools.handle_compare_regions args with
+  match Mcp_visual_handlers.handle_compare_regions args with
   | Ok _ -> fail "expected error for unsafe region name"
   | Error msg ->
       check string "error" "Invalid region name: ../pwn" msg
@@ -70,7 +70,7 @@ let test_image_a_missing_rejected () =
       ("regions", `String {|[{"name":"ok","x":0,"y":0,"width":1,"height":1}]|});
     ]
   in
-  match Mcp_tools.handle_compare_regions args with
+  match Mcp_visual_handlers.handle_compare_regions args with
   | Ok _ -> fail "expected error for missing image_a"
   | Error msg ->
       check string "error" "image_a image not found" msg
@@ -88,7 +88,7 @@ let test_image_a_non_png_rejected () =
       ("regions", `String {|[{"name":"ok","x":0,"y":0,"width":1,"height":1}]|});
     ]
   in
-  match Mcp_tools.handle_compare_regions args with
+  match Mcp_visual_handlers.handle_compare_regions args with
   | Ok _ -> fail "expected error for non-png image_a"
   | Error msg ->
       check string "error" "image_a must be a .png file" msg
@@ -108,7 +108,7 @@ let test_image_root_restriction_enforced () =
           ("regions", `String {|[{"name":"ok","x":0,"y":0,"width":1,"height":1}]|});
         ]
       in
-      match Mcp_tools.handle_compare_regions args with
+      match Mcp_visual_handlers.handle_compare_regions args with
       | Ok _ -> fail "expected error for image_a outside allowed roots"
       | Error msg ->
           check string "error"

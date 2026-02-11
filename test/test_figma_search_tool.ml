@@ -42,7 +42,7 @@ let with_env name value f =
 let test_resolve_token_env_wins () =
   with_env "FIGMA_TOKEN" "envtok" (fun () ->
     let args = `Assoc [("token", `String "reqtok")] in
-    match Mcp_tools.resolve_token args with
+    match Mcp_helpers.resolve_token args with
     | Some t -> check string "env token wins" "envtok" t
     | None -> fail "expected Some token")
 

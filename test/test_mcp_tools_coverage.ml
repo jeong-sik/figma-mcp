@@ -3,11 +3,12 @@
     Framework: Alcotest *)
 
 open Alcotest
+open Mcp_helpers
 
 (** ============== JSON Schema Helpers ============== *)
 
 let test_string_prop () =
-  let result = Mcp_tools.string_prop "A description" in
+  let result = Mcp_helpers.string_prop "A description" in
   match result with
   | `Assoc fields ->
       check (option string) "type" (Some "string")
@@ -19,7 +20,7 @@ let test_string_prop () =
 (* Note: test_string_prop_with_required removed - ~required parameter was removed in v0.3.14 *)
 
 let test_number_prop () =
-  let result = Mcp_tools.number_prop "A number" in
+  let result = Mcp_helpers.number_prop "A number" in
   match result with
   | `Assoc fields ->
       check (option string) "type" (Some "number")
@@ -27,7 +28,7 @@ let test_number_prop () =
   | _ -> fail "Expected Assoc"
 
 let test_bool_prop () =
-  let result = Mcp_tools.bool_prop "A boolean" in
+  let result = Mcp_helpers.bool_prop "A boolean" in
   match result with
   | `Assoc fields ->
       check (option string) "type" (Some "boolean")
@@ -35,7 +36,7 @@ let test_bool_prop () =
   | _ -> fail "Expected Assoc"
 
 let test_enum_prop () =
-  let result = Mcp_tools.enum_prop ["a"; "b"; "c"] "Pick one" in
+  let result = Mcp_helpers.enum_prop ["a"; "b"; "c"] "Pick one" in
   match result with
   | `Assoc fields ->
       check (option string) "type" (Some "string")
@@ -48,7 +49,7 @@ let test_enum_prop () =
   | _ -> fail "Expected Assoc"
 
 let test_array_prop () =
-  let result = Mcp_tools.array_prop "An array" in
+  let result = Mcp_helpers.array_prop "An array" in
   match result with
   | `Assoc fields ->
       check (option string) "type" (Some "array")
@@ -56,7 +57,7 @@ let test_array_prop () =
   | _ -> fail "Expected Assoc"
 
 let test_object_prop () =
-  let result = Mcp_tools.object_prop "An object" in
+  let result = Mcp_helpers.object_prop "An object" in
   match result with
   | `Assoc fields ->
       check (option string) "type" (Some "object")
@@ -64,9 +65,9 @@ let test_object_prop () =
   | _ -> fail "Expected Assoc"
 
 let test_object_schema () =
-  let result = Mcp_tools.object_schema [
-    ("name", Mcp_tools.string_prop "Name");
-    ("age", Mcp_tools.number_prop "Age");
+  let result = Mcp_helpers.object_schema [
+    ("name", Mcp_helpers.string_prop "Name");
+    ("age", Mcp_helpers.number_prop "Age");
   ] ["name"] in
   match result with
   | `Assoc fields ->
@@ -80,7 +81,7 @@ let test_object_schema () =
   | _ -> fail "Expected Assoc"
 
 let test_object_schema_empty_required () =
-  let result = Mcp_tools.object_schema [] [] in
+  let result = Mcp_helpers.object_schema [] [] in
   match result with
   | `Assoc fields ->
       (match List.assoc_opt "required" fields with
@@ -103,74 +104,74 @@ let schema_helper_tests = [
 
 let test_member_exists () =
   let json = `Assoc [("key", `String "value")] in
-  match Mcp_tools.member "key" json with
+  match Mcp_helpers.member "key" json with
   | Some (`String v) -> check string "member value" "value" v
   | _ -> fail "Expected Some String"
 
 let test_member_missing () =
   let json = `Assoc [("other", `String "value")] in
-  match Mcp_tools.member "key" json with
+  match Mcp_helpers.member "key" json with
   | None -> ()
   | _ -> fail "Expected None"
 
 let test_member_not_assoc () =
   let json = `String "not an object" in
-  match Mcp_tools.member "key" json with
+  match Mcp_helpers.member "key" json with
   | None -> ()
   | _ -> fail "Expected None for non-assoc"
 
 let test_get_string_exists () =
   let json = `Assoc [("name", `String "Alice")] in
-  match Mcp_tools.get_string "name" json with
+  match Mcp_helpers.get_string "name" json with
   | Some v -> check string "get_string" "Alice" v
   | None -> fail "Expected Some"
 
 let test_get_string_missing () =
   let json = `Assoc [("other", `String "value")] in
-  match Mcp_tools.get_string "name" json with
+  match Mcp_helpers.get_string "name" json with
   | None -> ()
   | Some _ -> fail "Expected None"
 
 let test_get_string_not_string () =
   let json = `Assoc [("name", `Int 42)] in
-  match Mcp_tools.get_string "name" json with
+  match Mcp_helpers.get_string "name" json with
   | None -> ()
   | Some _ -> fail "Expected None for non-string"
 
 let test_get_string_list_from_list () =
   let json = `Assoc [("tags", `List [`String "a"; `String "b"; `String "c"])] in
-  match Mcp_tools.get_string_list "tags" json with
+  match Mcp_helpers.get_string_list "tags" json with
   | Some lst -> check (list string) "tags list" ["a"; "b"; "c"] lst
   | None -> fail "Expected Some list"
 
 let test_get_string_list_from_csv () =
   let json = `Assoc [("tags", `String "x, y, z")] in
-  match Mcp_tools.get_string_list "tags" json with
+  match Mcp_helpers.get_string_list "tags" json with
   | Some lst -> check (list string) "csv list" ["x"; "y"; "z"] lst
   | None -> fail "Expected Some list from CSV"
 
 let test_get_string_list_empty () =
   let json = `Assoc [("tags", `String "")] in
-  match Mcp_tools.get_string_list "tags" json with
+  match Mcp_helpers.get_string_list "tags" json with
   | None -> ()
   | Some _ -> fail "Expected None for empty"
 
 let test_get_string_list_missing () =
   let json = `Assoc [] in
-  match Mcp_tools.get_string_list "tags" json with
+  match Mcp_helpers.get_string_list "tags" json with
   | None -> ()
   | Some _ -> fail "Expected None for missing"
 
 let test_prefer_some_primary () =
-  let result = Mcp_tools.prefer_some (Some "primary") (Some "fallback") in
+  let result = Mcp_helpers.prefer_some (Some "primary") (Some "fallback") in
   check (option string) "prefer primary" (Some "primary") result
 
 let test_prefer_some_fallback () =
-  let result = Mcp_tools.prefer_some None (Some "fallback") in
+  let result = Mcp_helpers.prefer_some None (Some "fallback") in
   check (option string) "use fallback" (Some "fallback") result
 
 let test_prefer_some_both_none () =
-  let result = Mcp_tools.prefer_some None None in
+  let result = Mcp_helpers.prefer_some None None in
   check (option string) "both none" None result
 
 let json_util_tests = [
@@ -192,43 +193,43 @@ let json_util_tests = [
 (** ============== Node ID Handling ============== *)
 
 let test_normalize_node_id_hyphen () =
-  let result = Mcp_tools.normalize_node_id "100-200" in
+  let result = Mcp_helpers.normalize_node_id "100-200" in
   check string "hyphen to colon" "100:200" result
 
 let test_normalize_node_id_colon () =
-  let result = Mcp_tools.normalize_node_id "100:200" in
+  let result = Mcp_helpers.normalize_node_id "100:200" in
   check string "colon preserved" "100:200" result
 
 let test_normalize_node_id_simple () =
-  let result = Mcp_tools.normalize_node_id "simple" in
+  let result = Mcp_helpers.normalize_node_id "simple" in
   check string "no separator" "simple" result
 
 let test_normalize_node_id_key_node_id () =
-  let result = Mcp_tools.normalize_node_id_key "node_id" "123-456" in
+  let result = Mcp_helpers.normalize_node_id_key "node_id" "123-456" in
   check string "node_id key normalized" "123:456" result
 
 let test_normalize_node_id_key_node_a_id () =
-  let result = Mcp_tools.normalize_node_id_key "node_a_id" "789-012" in
+  let result = Mcp_helpers.normalize_node_id_key "node_a_id" "789-012" in
   check string "node_a_id key normalized" "789:012" result
 
 let test_normalize_node_id_key_node_b_id () =
-  let result = Mcp_tools.normalize_node_id_key "node_b_id" "111-222" in
+  let result = Mcp_helpers.normalize_node_id_key "node_b_id" "111-222" in
   check string "node_b_id key normalized" "111:222" result
 
 let test_normalize_node_id_key_other () =
-  let result = Mcp_tools.normalize_node_id_key "other_field" "333-444" in
+  let result = Mcp_helpers.normalize_node_id_key "other_field" "333-444" in
   check string "other key not normalized" "333-444" result
 
 let test_sanitize_node_id () =
-  let result = Mcp_tools.sanitize_node_id "100:200" in
+  let result = Mcp_helpers.sanitize_node_id "100:200" in
   check string "colon to underscore" "100_200" result
 
 let test_sanitize_node_id_no_colon () =
-  let result = Mcp_tools.sanitize_node_id "simple" in
+  let result = Mcp_helpers.sanitize_node_id "simple" in
   check string "no colon unchanged" "simple" result
 
 let test_sanitize_node_id_multiple_colons () =
-  let result = Mcp_tools.sanitize_node_id "a:b:c" in
+  let result = Mcp_helpers.sanitize_node_id "a:b:c" in
   check string "multiple colons" "a_b_c" result
 
 let node_id_tests = [
@@ -247,70 +248,70 @@ let node_id_tests = [
 (** ============== Error Handling ============== *)
 
 let test_error_to_string_network () =
-  let result = Mcp_tools.error_to_string (Mcp_tools.NetworkError "timeout") in
+  let result = Mcp_helpers.error_to_string (Mcp_helpers.NetworkError "timeout") in
   check bool "contains Network" true (String.length result > 0 && String.contains result 'N')
 
 let test_error_to_string_auth () =
-  let result = Mcp_tools.error_to_string (Mcp_tools.AuthError "invalid token") in
+  let result = Mcp_helpers.error_to_string (Mcp_helpers.AuthError "invalid token") in
   check bool "contains Auth" true (String.length result > 0)
 
 let test_error_to_string_not_found () =
-  let result = Mcp_tools.error_to_string (Mcp_tools.NotFound "file XYZ") in
+  let result = Mcp_helpers.error_to_string (Mcp_helpers.NotFound "file XYZ") in
   check bool "contains found" true (String.length result > 0)
 
 let test_error_to_string_rate_limited () =
-  let result = Mcp_tools.error_to_string (Mcp_tools.RateLimited 60.0) in
+  let result = Mcp_helpers.error_to_string (Mcp_helpers.RateLimited 60.0) in
   check bool "contains Rate" true (String.length result > 0)
 
 let test_error_to_string_server_error () =
-  let result = Mcp_tools.error_to_string (Mcp_tools.ServerError "500 Internal") in
+  let result = Mcp_helpers.error_to_string (Mcp_helpers.ServerError "500 Internal") in
   check bool "contains server" true (String.length result > 0)
 
 let test_error_to_string_parse_error () =
-  let result = Mcp_tools.error_to_string (Mcp_tools.ParseError "invalid json") in
+  let result = Mcp_helpers.error_to_string (Mcp_helpers.ParseError "invalid json") in
   check bool "contains Parse" true (String.length result > 0)
 
 let test_error_to_string_timeout () =
-  let result = Mcp_tools.error_to_string (Mcp_tools.TimeoutError 30.0) in
+  let result = Mcp_helpers.error_to_string (Mcp_helpers.TimeoutError 30.0) in
   check bool "contains Timeout" true (String.length result > 0)
 
 let test_error_to_string_unknown () =
-  let result = Mcp_tools.error_to_string (Mcp_tools.UnknownError "mystery") in
+  let result = Mcp_helpers.error_to_string (Mcp_helpers.UnknownError "mystery") in
   check bool "contains Unknown" true (String.length result > 0)
 
 let test_classify_http_error_401 () =
-  match Mcp_tools.classify_http_error ~status_code:401 ~body:"unauthorized" with
-  | Mcp_tools.AuthError _ -> ()
+  match Mcp_helpers.classify_http_error ~status_code:401 ~body:"unauthorized" with
+  | Mcp_helpers.AuthError _ -> ()
   | _ -> fail "Expected AuthError for 401"
 
 let test_classify_http_error_403 () =
-  match Mcp_tools.classify_http_error ~status_code:403 ~body:"forbidden" with
-  | Mcp_tools.AuthError _ -> ()
+  match Mcp_helpers.classify_http_error ~status_code:403 ~body:"forbidden" with
+  | Mcp_helpers.AuthError _ -> ()
   | _ -> fail "Expected AuthError for 403"
 
 let test_classify_http_error_404 () =
-  match Mcp_tools.classify_http_error ~status_code:404 ~body:"not found" with
-  | Mcp_tools.NotFound _ -> ()
+  match Mcp_helpers.classify_http_error ~status_code:404 ~body:"not found" with
+  | Mcp_helpers.NotFound _ -> ()
   | _ -> fail "Expected NotFound for 404"
 
 let test_classify_http_error_429 () =
-  match Mcp_tools.classify_http_error ~status_code:429 ~body:"retry after 120" with
-  | Mcp_tools.RateLimited secs -> check bool "retry seconds parsed" true (secs >= 60.0)
+  match Mcp_helpers.classify_http_error ~status_code:429 ~body:"retry after 120" with
+  | Mcp_helpers.RateLimited secs -> check bool "retry seconds parsed" true (secs >= 60.0)
   | _ -> fail "Expected RateLimited for 429"
 
 let test_classify_http_error_500 () =
-  match Mcp_tools.classify_http_error ~status_code:500 ~body:"internal error" with
-  | Mcp_tools.ServerError _ -> ()
+  match Mcp_helpers.classify_http_error ~status_code:500 ~body:"internal error" with
+  | Mcp_helpers.ServerError _ -> ()
   | _ -> fail "Expected ServerError for 500"
 
 let test_classify_http_error_503 () =
-  match Mcp_tools.classify_http_error ~status_code:503 ~body:"unavailable" with
-  | Mcp_tools.ServerError _ -> ()
+  match Mcp_helpers.classify_http_error ~status_code:503 ~body:"unavailable" with
+  | Mcp_helpers.ServerError _ -> ()
   | _ -> fail "Expected ServerError for 503"
 
 let test_classify_http_error_other () =
-  match Mcp_tools.classify_http_error ~status_code:418 ~body:"i'm a teapot" with
-  | Mcp_tools.UnknownError _ -> ()
+  match Mcp_helpers.classify_http_error ~status_code:418 ~body:"i'm a teapot" with
+  | Mcp_helpers.UnknownError _ -> ()
   | _ -> fail "Expected UnknownError for 418"
 
 let error_handling_tests = [
@@ -334,48 +335,48 @@ let error_handling_tests = [
 (** ============== URL Utilities ============== *)
 
 let test_strip_query_with_query () =
-  let result = Mcp_tools.strip_query "https://example.com/path?foo=bar&baz=qux" in
+  let result = Mcp_helpers.strip_query "https://example.com/path?foo=bar&baz=qux" in
   check string "strip query" "https://example.com/path" result
 
 let test_strip_query_no_query () =
-  let result = Mcp_tools.strip_query "https://example.com/path" in
+  let result = Mcp_helpers.strip_query "https://example.com/path" in
   check string "no query unchanged" "https://example.com/path" result
 
 let test_strip_query_empty () =
-  let result = Mcp_tools.strip_query "" in
+  let result = Mcp_helpers.strip_query "" in
   check string "empty string" "" result
 
 let test_is_http_url_http () =
-  check bool "http url" true (Mcp_tools.is_http_url "http://example.com")
+  check bool "http url" true (Mcp_helpers.is_http_url "http://example.com")
 
 let test_is_http_url_https () =
-  check bool "https url" true (Mcp_tools.is_http_url "https://example.com")
+  check bool "https url" true (Mcp_helpers.is_http_url "https://example.com")
 
 let test_is_http_url_httpx () =
-  check bool "httpx not http" false (Mcp_tools.is_http_url "httpx://example.com")
+  check bool "httpx not http" false (Mcp_helpers.is_http_url "httpx://example.com")
 
 let test_is_http_url_ftp () =
-  check bool "ftp not http" false (Mcp_tools.is_http_url "ftp://example.com")
+  check bool "ftp not http" false (Mcp_helpers.is_http_url "ftp://example.com")
 
 let test_is_http_url_path () =
-  check bool "path not http" false (Mcp_tools.is_http_url "/local/path")
+  check bool "path not http" false (Mcp_helpers.is_http_url "/local/path")
 
 let test_is_http_url_bare_http () =
-  check bool "bare http is not url" false (Mcp_tools.is_http_url "http")
+  check bool "bare http is not url" false (Mcp_helpers.is_http_url "http")
 
 let test_is_http_url_short () =
-  check bool "short string" false (Mcp_tools.is_http_url "hi")
+  check bool "short string" false (Mcp_helpers.is_http_url "hi")
 
 let test_file_ext_from_url_png () =
-  let result = Mcp_tools.file_ext_from_url "https://example.com/image.png?v=1" in
+  let result = Mcp_helpers.file_ext_from_url "https://example.com/image.png?v=1" in
   check string "png extension" ".png" result
 
 let test_file_ext_from_url_jpg () =
-  let result = Mcp_tools.file_ext_from_url "https://example.com/photo.jpg" in
+  let result = Mcp_helpers.file_ext_from_url "https://example.com/photo.jpg" in
   check string "jpg extension" ".jpg" result
 
 let test_file_ext_from_url_no_ext () =
-  let result = Mcp_tools.file_ext_from_url "https://example.com/noext" in
+  let result = Mcp_helpers.file_ext_from_url "https://example.com/noext" in
   check string "default extension" ".img" result
 
 let url_util_tests = [
@@ -397,7 +398,7 @@ let url_util_tests = [
 (** ============== Content Helpers ============== *)
 
 let test_make_text_content () =
-  let result = Mcp_tools.make_text_content "Hello World" in
+  let result = Mcp_helpers.make_text_content "Hello World" in
   match result with
   | `Assoc fields ->
       (match List.assoc_opt "content" fields with
@@ -410,7 +411,7 @@ let test_make_text_content () =
   | _ -> fail "Expected Assoc"
 
 let test_make_text_content_empty () =
-  let result = Mcp_tools.make_text_content "" in
+  let result = Mcp_helpers.make_text_content "" in
   match result with
   | `Assoc fields ->
       (match List.assoc_opt "content" fields with
@@ -421,7 +422,7 @@ let test_make_text_content_empty () =
   | _ -> fail "Expected Assoc"
 
 let test_make_error_content () =
-  let result = Mcp_tools.make_error_content "Something went wrong" in
+  let result = Mcp_helpers.make_error_content "Something went wrong" in
   match result with
   | `Assoc fields ->
       (match List.assoc_opt "content" fields with
@@ -714,14 +715,14 @@ let json_compaction_tests = [
 
 let test_register_and_call_handler () =
   let test_handler _args = Ok (`String "handler result") in
-  Mcp_tools.register_handler "test_handler" test_handler;
-  match Mcp_tools.call_handler "test_handler" (`Assoc []) with
+  Mcp_helpers.register_handler "test_handler" test_handler;
+  match Mcp_helpers.call_handler "test_handler" (`Assoc []) with
   | Ok (`String v) -> check string "handler result" "handler result" v
   | Ok _ -> fail "Expected String result"
   | Error e -> fail ("Handler error: " ^ e)
 
 let test_call_missing_handler () =
-  match Mcp_tools.call_handler "nonexistent_handler" (`Assoc []) with
+  match Mcp_helpers.call_handler "nonexistent_handler" (`Assoc []) with
   | Error msg -> check bool "error message" true (String.length msg > 0)
   | Ok _ -> fail "Expected Error"
 
@@ -733,28 +734,24 @@ let handler_registry_tests = [
 (** ============== Result Monadic Operators ============== *)
 
 let test_bind_ok () =
-  let open Mcp_tools in
   let result = Ok 5 >>= (fun x -> Ok (x * 2)) in
   match result with
   | Ok v -> check int "bind ok" 10 v
   | Error _ -> fail "Expected Ok"
 
 let test_bind_error () =
-  let open Mcp_tools in
   let result = (Error "failed") >>= (fun x -> Ok (x * 2)) in
   match result with
   | Error e -> check string "bind error" "failed" e
   | Ok _ -> fail "Expected Error"
 
 let test_map_ok () =
-  let open Mcp_tools in
   let result = Ok 5 >>| (fun x -> x * 2) in
   match result with
   | Ok v -> check int "map ok" 10 v
   | Error _ -> fail "Expected Ok"
 
 let test_map_error () =
-  let open Mcp_tools in
   let result = (Error "failed") >>| (fun x -> x * 2) in
   match result with
   | Error e -> check string "map error" "failed" e
@@ -868,7 +865,7 @@ let test_resolve_token_env_figma_token () =
   with_env "FIGMA_TOKEN" (Some "abc") (fun () ->
       let args = `Assoc [ ("token", `String "env:FIGMA_TOKEN") ] in
       check (option string) "env:FIGMA_TOKEN resolves" (Some "abc")
-        (Mcp_tools.resolve_token args))
+        (Mcp_helpers.resolve_token args))
 
 let test_resolve_token_env_other_denied () =
   (* Hermetic: FIGMA_TOKEN may be set in the parent environment when running
@@ -877,20 +874,20 @@ let test_resolve_token_env_other_denied () =
       with_env "AWS_SECRET_ACCESS_KEY" (Some "shh") (fun () ->
           let args = `Assoc [ ("token", `String "env:AWS_SECRET_ACCESS_KEY") ] in
           check (option string) "env:OTHER denied" None
-            (Mcp_tools.resolve_token args)))
+            (Mcp_helpers.resolve_token args)))
 
 let test_resolve_token_fallback_figma_token () =
   with_env "FIGMA_TOKEN" (Some "abc") (fun () ->
       let args = `Assoc [] in
       check (option string) "fallback FIGMA_TOKEN env" (Some "abc")
-        (Mcp_tools.resolve_token args))
+        (Mcp_helpers.resolve_token args))
 
 let test_resolve_token_literal () =
   (* Hermetic: ensure FIGMA_TOKEN does not override literal resolution. *)
   with_env "FIGMA_TOKEN" None (fun () ->
       let args = `Assoc [ ("token", `String "literal") ] in
       check (option string) "literal token" (Some "literal")
-        (Mcp_tools.resolve_token args))
+        (Mcp_helpers.resolve_token args))
 
 let token_resolution_tests = [
   "resolve env:FIGMA_TOKEN", `Quick, test_resolve_token_env_figma_token;
