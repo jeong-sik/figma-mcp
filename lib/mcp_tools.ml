@@ -1,3 +1,35 @@
+let string_contains s sub = 
+  let len_s = String.length s in 
+  let len_sub = String.length sub in 
+  if len_sub = 0 then true 
+  else if len_sub > len_s then false 
+  else 
+    let found = ref false in 
+    for i = 0 to len_s - len_sub do 
+      if not !found then 
+        let match_at_i = ref true in 
+        for j = 0 to len_sub - 1 do 
+          if Char.lowercase_ascii s.[i + j] <> Char.lowercase_ascii sub.[j] then 
+            match_at_i := false 
+        done; 
+        if !match_at_i then found := true 
+    done; 
+    !found 
+
+let is_network_error exn = 
+  match exn with 
+  | Unix.Unix_error (Unix.EPIPE, _, _) 
+  | Unix.Unix_error (Unix.ECONNRESET, _, _) 
+  | Unix.Unix_error (Unix.ETIMEDOUT, _, _) -> true 
+  | _ -> 
+      let s = Printexc.to_string exn in 
+      string_contains s "broken pipe" || 
+      string_contains s "connection reset" || 
+      string_contains s "connection timed out" || 
+      string_contains s "econnreset" || 
+      string_contains s "epipe" || 
+      string_contains s "etimedout" 
+
 (** Figma MCP Tools 정의 *)
 
 open Mcp_protocol
@@ -379,7 +411,7 @@ let tool_figma_post_comment : tool_def = {
     ("x", number_prop "캔버스 좌표 x (client_meta)");
     ("y", number_prop "캔버스 좌표 y (client_meta)");
     ("node_id", string_prop "연결할 노드 ID (옵션)");
-  ] ["file_key"; "token"; "message"; "x"; "y"];
+  ] ["file_key"; "message"; "x"; "y"];
 }
 
 let tool_figma_get_file_components : tool_def = {
@@ -1032,7 +1064,54 @@ let featured_tool_names = ["codegen"; "doctor"; "stats"; "cache_stats"; "cache_i
 
 (** ============== 모든 도구 목록 (내부용) ============== *)
 
+let tool_figma_get_dev_resources : tool_def = {
+  name = "figma_get_dev_resources";
+  description = "📋 DEV MODE: 노드에 연결된 외부 문서(Jira, Wiki, PR, Storybook 등) 조회. 기획 의도 파악에 필수.";
+  input_schema = object_schema [
+    ("file_key", string_prop "Figma 파일 키");
+    ("node_id", string_prop "노드 ID");
+  ] ["file_key"; "node_id"];
+}
+
+let tool_figma_add_dev_resource : tool_def = {
+  name = "figma_add_dev_resource";
+  description = "🔗 DEV MODE: 노드에 외부 링크(문서, PR 등) 추가. 디자인과 문서를 시맨틱하게 연결.";
+  input_schema = object_schema [
+    ("file_key", string_prop "Figma 파일 키");
+    ("node_id", string_prop "노드 ID");
+    ("name", string_prop "링크 이름 (예: 기획서)");
+    ("url", string_prop "연결할 URL (Jira, Wiki 등)");
+  ] ["file_key"; "node_id"; "name"; "url"];
+}
+
+let tool_figma_setup_webhook : tool_def = {
+  name = "figma_setup_webhook";
+  description = "🔔 SYNC: 실시간 디자인 변경 감지를 위한 Webhook 자동 설정. 디자인 수정 시 자동 알림 수신.";
+  input_schema = object_schema [
+    ("team_id", string_prop "팀 ID");
+    ("file_key", string_prop "대상 파일 키");
+    ("endpoint", string_prop "알림을 받을 서버 URL (기본값: 우리 MCP 서버)");
+    ("passcode", string_prop "Webhook 보안 패스코드 (기본값: 랜덤)");
+  ] ["team_id"; "file_key"];
+}
+
+let tool_figma_annotate : tool_def = {
+  name = "figma_annotate";
+  description = "✍️ AGENTIC: 피그마 캔버스 특정 위치에 AI 포스트잇 남기기. 디자이너와 협업/질문용.";
+  input_schema = object_schema [
+    ("channel_id", string_prop "플러그인 채널 ID");
+    ("node_id", string_prop "대상 노드 ID (이 노드 옆에 생성)");
+    ("message", string_prop "남길 메시지 내용");
+    ("color", enum_prop ["yellow"; "blue"; "green"; "red"] "포스트잇 색상 (기본값: yellow)");
+  ] ["node_id"; "message"];
+}
+
 let all_detailed_tools = [
+  (* New Honey Features *)
+  tool_figma_get_dev_resources;
+  tool_figma_add_dev_resource;
+  tool_figma_setup_webhook;
+  tool_figma_annotate;
   (* 기존 도구 *)
   tool_figma_codegen;
   tool_figma_get_file;
@@ -2608,7 +2687,8 @@ let all_handlers_sync : (string * tool_handler_sync) list = [
   ("figma_get_team_styles", wrap_sync_pure handle_get_team_styles);
   ("figma_get_component", wrap_sync_pure handle_get_component);
   ("figma_get_component_set", wrap_sync_pure handle_get_component_set);
-  ("figma_get_style", wrap_sync_pure handle_get_style);
+  (* handle_get_style: not yet implemented, removed from dispatch *)
+
   (* STRAP 통합: 8개 plugin 핸들러 → 1개 라우터 + 4개 전용 mutation 핸들러 *)
   ("figma_plugin", wrap_sync_pure handle_figma_plugin);
   ("figma_plugin_edit_node", wrap_sync_pure handle_plugin_edit_node);

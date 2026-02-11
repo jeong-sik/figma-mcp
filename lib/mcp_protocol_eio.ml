@@ -784,37 +784,6 @@ let random_sse_client_id () =
   in
   loop ()
 
-let string_contains s sub =
-  let len_s = String.length s in
-  let len_sub = String.length sub in
-  if len_sub = 0 then true
-  else if len_sub > len_s then false
-  else
-    let found = ref false in
-    for i = 0 to len_s - len_sub do
-      if not !found then
-        let match_at_i = ref true in
-        for j = 0 to len_sub - 1 do
-          if Char.lowercase_ascii s.[i + j] <> Char.lowercase_ascii sub.[j] then
-            match_at_i := false
-        done;
-        if !match_at_i then found := true
-    done;
-    !found
-
-let is_network_error exn =
-  match exn with
-  | Unix.Unix_error (Unix.EPIPE, _, _)
-  | Unix.Unix_error (Unix.ECONNRESET, _, _)
-  | Unix.Unix_error (Unix.ETIMEDOUT, _, _) -> true
-  | _ ->
-      let s = Printexc.to_string exn in
-      string_contains s "broken pipe" ||
-      string_contains s "connection reset" ||
-      string_contains s "connection timed out" ||
-      string_contains s "econnreset" ||
-      string_contains s "epipe"
-
 let format_sse_data data =
   if data = "" then
     "data: "
@@ -855,7 +824,7 @@ let send_sse_event client ~event ~data =
       )
     with exn ->
       client.connected <- false;
-      if is_network_error exn then
+      if Mcp_tools.is_network_error exn then
         eprintf "[sse] client disconnected: %s\n%!" (Printexc.to_string exn)
       else
         eprintf "[sse] send error: %s\n%!" (Printexc.to_string exn)
@@ -3714,7 +3683,7 @@ let error_handler _client_addr ?request error start_response =
   let msg =
     match error with
     | `Exn exn ->
-        if is_network_error exn then
+        if Mcp_tools.is_network_error exn then
           eprintf "[http] client disconnected: %s\n%!" (Printexc.to_string exn)
         else
           eprintf "[http] error handler exception: %s\n%!" (Printexc.to_string exn);
@@ -3837,7 +3806,7 @@ let run ~sw ~net ~clock ~domain_mgr config server =
         socket
   in
 
-  eprintf "🎨 %s MCP Server (Eio)\n" Mcp_protocol.server_name;
+  eprintf "🎨 %s MCP Server %s (Eio)\n" Mcp_protocol.server_name Mcp_protocol.server_version;
   eprintf "   Protocol: %s\n" Mcp_protocol.protocol_version;
   eprintf "   HTTP:     http://%s:%d\n" config.host config.port;
   eprintf "   MCP:      GET  /mcp -> SSE stream (streamable-http)\n";
