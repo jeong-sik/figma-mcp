@@ -992,6 +992,33 @@ let get_all_screens json =
 
 (** ============== Figma API Endpoints ============== *)
 
+(** Dev Resources 가져오기 *)
+let get_dev_resources ~sw ~net ~clock ~client ~token ~file_key ~node_id =
+  let url = Printf.sprintf "%s/files/%s/dev_resources?node_ids=%s" api_base file_key node_id in
+  get_json_with_retry ~sw ~net ~clock ~client ~token url
+
+(** Dev Resource 추가하기 *)
+let add_dev_resource ~sw ~net ~clock ~client ~token ~file_key ~node_id ~name ~url_link =
+  let url = Printf.sprintf "%s/files/%s/dev_resources" api_base file_key in
+  let payload = `Assoc [
+    ("node_id", `String node_id);
+    ("name", `String name);
+    ("url", `String url_link);
+  ] in
+  post_json_with_retry ~sw ~net ~clock ~client ~token url payload
+
+(** Webhook 생성하기 *)
+let create_webhook ~sw ~net ~clock ~client ~token ~team_id ~file_key ~endpoint ~passcode =
+  let url = Printf.sprintf "%s/webhooks" api_base in
+  let payload = `Assoc [
+    ("event_type", `String "FILE_UPDATE");
+    ("team_id", `String team_id);
+    ("file_key", `String file_key);
+    ("endpoint", `String endpoint);
+    ("passcode", `String passcode);
+  ] in
+  post_json_with_retry ~sw ~net ~clock ~client ~token url payload
+
 (** 파일 전체 가져오기 *)
 let get_file ~clock ?depth ?geometry ?plugin_data ?version ~sw ~net ~client ~token ~file_key ()
   : (Yojson.Safe.t, api_error) result =
