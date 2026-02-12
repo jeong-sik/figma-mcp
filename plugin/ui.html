@@ -553,7 +553,8 @@
       <div class="tab" data-tab="llm">Direct AI</div>
       <div class="tab" data-tab="settings">Settings</div>
     </div>
-    <div class="container">
+    <!-- Tab: Bridge (main view) -->
+    <div id="tab-bridge" class="tab-content active">
       <div class="header">
         <h1>
           <span class="status-dot" id="statusDot"></span>
@@ -580,11 +581,6 @@
         </div>
       </div>
 
-      <div class="toggle-row">
-        <span>Remember API key</span>
-        <div class="toggle" id="rememberApiKey"></div>
-      </div>
-
       <div>
         <label>Channel ID</label>
         <div class="input-row">
@@ -600,11 +596,6 @@
         </button>
         <button class="btn-danger" id="disconnect" style="display:none;">Disconnect</button>
         <button class="btn-secondary" id="selfTest" disabled>Test</button>
-      </div>
-
-      <div class="toggle-row">
-        <span>Auto-reconnect</span>
-        <div class="toggle on" id="autoReconnect"></div>
       </div>
 
       <div class="session-bar" id="sessionBar" style="display:none;">
@@ -723,7 +714,34 @@
           </div>
         </div>
       </div>
+      <!-- Activity Log -->
+      <div class="section">
+        <div class="section-header" id="logHeader">
+          <span class="section-left">
+            <span>📋 Log</span>
+            <span class="badge" id="logBadge">0</span>
+          </span>
+          <div class="section-actions">
+            <div class="filter-btns">
+              <button class="filter-btn active" data-filter="all">All</button>
+              <button class="filter-btn" data-filter="ok">OK</button>
+              <button class="filter-btn" data-filter="err">Err</button>
+            </div>
+            <span class="section-action" id="exportLogs" title="Export">↗</span>
+            <span class="section-action" id="logClear" title="Clear">✕</span>
+            <span class="section-action" id="toggleLog">▼</span>
+          </div>
+        </div>
+        <div class="section-content" id="logWrapper">
+          <div class="log-content" id="logContent">
+            <div class="empty-state">Waiting for connection...</div>
+          </div>
+        </div>
+      </div>
+    </div><!-- /tab-bridge -->
 
+    <!-- Tab: Tools -->
+    <div id="tab-tools" class="tab-content">
       <!-- Design Tokens -->
       <div class="section" id="tokensSection" style="display:none;">
         <div class="section-header" id="tokensHeader">
@@ -832,31 +850,48 @@
         </div>
       </div>
 
-      <!-- Activity Log -->
+    </div><!-- /tab-tools -->
+
+    <!-- Tab: Direct AI -->
+    <div id="tab-llm" class="tab-content">
       <div class="section">
-        <div class="section-header" id="logHeader">
-          <span class="section-left">
-            <span>📋 Log</span>
-            <span class="badge" id="logBadge">0</span>
-          </span>
-          <div class="section-actions">
-            <div class="filter-btns">
-              <button class="filter-btn active" data-filter="all">All</button>
-              <button class="filter-btn" data-filter="ok">OK</button>
-              <button class="filter-btn" data-filter="err">Err</button>
-            </div>
-            <span class="section-action" id="exportLogs" title="Export">↗</span>
-            <span class="section-action" id="logClear" title="Clear">✕</span>
-            <span class="section-action" id="toggleLog">▼</span>
-          </div>
-        </div>
-        <div class="section-content" id="logWrapper">
-          <div class="log-content" id="logContent">
-            <div class="empty-state">Waiting for connection...</div>
+        <div class="section-header"><span>🤖 Direct AI Prompt</span></div>
+        <div class="section-content" style="display:flex;">
+          <div style="padding: 8px; width: 100%;">
+            <label>Provider</label>
+            <select id="llmProvider" style="width:100%;">
+              <option value="openai">OpenAI</option>
+            </select>
+            <label style="margin-top:8px;">API Key</label>
+            <input type="password" id="llmApiKey" placeholder="sk-..." style="width:100%;">
+            <label style="margin-top:8px;">Prompt</label>
+            <textarea id="llmPrompt" rows="4" placeholder="Describe what to do with the selected Figma layers..." style="width:100%;"></textarea>
+            <button class="btn btn-primary" id="llmRun" style="width:100%;margin-top:8px;">▶ Run</button>
+            <div id="llmProgress" style="display:none;padding:8px 0;">Processing...</div>
+            <pre id="llmResult" style="display:none;max-height:200px;overflow:auto;margin-top:8px;padding:8px;background:var(--bg-secondary);border-radius:4px;font-size:11px;"></pre>
           </div>
         </div>
       </div>
-    </div>
+    </div><!-- /tab-llm -->
+
+    <!-- Tab: Settings -->
+    <div id="tab-settings" class="tab-content">
+      <div class="section">
+        <div class="section-header"><span>⚙️ Connection</span></div>
+        <div class="section-content" style="display:flex;">
+          <div style="padding: 8px; width: 100%;">
+            <div class="toggle-row">
+              <span>Remember API key</span>
+              <div class="toggle" id="rememberApiKey"></div>
+            </div>
+            <div class="toggle-row">
+              <span>Auto-reconnect</span>
+              <div class="toggle on" id="autoReconnect"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div><!-- /tab-settings -->
 
       <script>
       // DOM refs
@@ -871,7 +906,8 @@
           tabs.forEach(function(t) { t.classList.remove("active"); });
           tabContents.forEach(function(c) { c.classList.remove("active"); });
           this.classList.add("active");
-          $("tab-" + targetTab).classList.add("active");
+          var el = $("tab-" + targetTab);
+          if (el) el.classList.add("active");
         };
       });
       var serverInput = $("server"), channelInput = $("channel"), apiKeyInput = $("apiKey"), rememberApiKeyToggle = $("rememberApiKey"), copyChannelBtn = $("copyChannel");
