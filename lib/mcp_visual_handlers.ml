@@ -880,8 +880,12 @@ let handle_compare_regions args : (Yojson.Safe.t, string) result =
                         (* ImageMagick으로 영역 crop *)
                         let args_a = [| "magick"; image_a; "-crop"; Printf.sprintf "%dx%d+%d+%d" w h x y; "+repage"; crop_a |] in
                         let args_b = [| "magick"; image_b; "-crop"; Printf.sprintf "%dx%d+%d+%d" w h x y; "+repage"; crop_b |] in
-                        let _ = Safe_exec.run_stdout ~timeout_ms:20000 ~output_limit:(64 * 1024) "magick" args_a in
-                        let _ = Safe_exec.run_stdout ~timeout_ms:20000 ~output_limit:(64 * 1024) "magick" args_b in
+                        (match Safe_exec.run_stdout ~timeout_ms:20000 ~output_limit:(64 * 1024) "magick" args_a with
+                         | Error msg -> Printf.eprintf "[visual] magick crop A failed: %s\n%!" msg
+                         | Ok _ -> ());
+                        (match Safe_exec.run_stdout ~timeout_ms:20000 ~output_limit:(64 * 1024) "magick" args_b with
+                         | Error msg -> Printf.eprintf "[visual] magick crop B failed: %s\n%!" msg
+                         | Ok _ -> ());
 
                         (* SSIM 계산 *)
                         let args_ssim = [| "magick"; "compare"; "-metric"; "SSIM"; crop_a; crop_b; "null:" |] in
@@ -913,7 +917,9 @@ let handle_compare_regions args : (Yojson.Safe.t, string) result =
                           if generate_diff then begin
                             let diff_path = Filename.concat output_dir (Printf.sprintf "diff_%s.png" name) in
                             let args_diff = [| "magick"; "compare"; crop_a; crop_b; diff_path |] in
-                            let _ = Safe_exec.run_stdout ~timeout_ms:20000 ~output_limit:(64 * 1024) "magick" args_diff in
+                            (match Safe_exec.run_stdout ~timeout_ms:20000 ~output_limit:(64 * 1024) "magick" args_diff with
+                             | Error msg -> Printf.eprintf "[visual] magick compare failed: %s\n%!" msg
+                             | Ok _ -> ());
                             Some diff_path
                           end else None
                         in
@@ -1044,7 +1050,9 @@ let handle_evolution_report args : (Yojson.Safe.t, string) result =
             let output = Filename.concat dir "evolution_comparison.png" in
             if Sys.file_exists figma_png && Sys.file_exists last_png then
               let args = [| "montage"; figma_png; last_png; "-tile"; "2x1"; "-geometry"; "+5+5"; "-background"; "#1a1a1a"; output |] in
-              let _ = Safe_exec.run_stdout ~timeout_ms:20000 ~output_limit:(64 * 1024) "montage" args in
+              (match Safe_exec.run_stdout ~timeout_ms:20000 ~output_limit:(64 * 1024) "montage" args with
+               | Error msg -> Printf.eprintf "[visual] montage failed: %s\n%!" msg
+               | Ok _ -> ());
               if Sys.file_exists output then Some output else None
             else None
           else None

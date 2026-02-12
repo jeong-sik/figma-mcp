@@ -265,9 +265,12 @@ let crawl_file ~token ~neo4j_cfg ~progress ~options ~project_id ~file_key ~file_
   on_progress (sprintf "  📄 File: %s (%s)" file_name file_key);
 
   (* 파일 노드 생성 *)
-  let _ = create_figma_file ~neo4j_cfg
-    ~file_key ~name:file_name ~project_id ~last_modified
-  in
+  (match create_figma_file ~neo4j_cfg
+    ~file_key ~name:file_name ~project_id ~last_modified with
+   | Ok _ -> ()
+   | Error msg ->
+       on_progress (sprintf "  ⚠ create_figma_file(%s): %s" file_key msg);
+       progress.errors <- msg :: progress.errors);
   progress.files <- progress.files + 1;
 
   (* 파일 노드 트리 가져오기 *)
@@ -300,8 +303,9 @@ let crawl_file ~token ~neo4j_cfg ~progress ~options ~project_id ~file_key ~file_
             in
             match save_nodes_batch ~neo4j_cfg ~progress batch with
             | Ok () ->
-                let _ = save_node_relationships ~neo4j_cfg batch in
-                save_in_batches rest
+                (match save_node_relationships ~neo4j_cfg batch with
+                 | Ok () -> save_in_batches rest
+                 | Error _ as e -> e)
             | Error _ as e -> e
       in
       save_in_batches flat_nodes
@@ -316,9 +320,12 @@ let crawl_project ~token ~neo4j_cfg ~progress ~options ~team_id ~project_id ~pro
   on_progress (sprintf "📁 Project: %s (%s)" project_name project_id);
 
   (* 프로젝트 노드 생성 *)
-  let _ = create_figma_project ~neo4j_cfg
-    ~project_id ~name:project_name ~team_id
-  in
+  (match create_figma_project ~neo4j_cfg
+    ~project_id ~name:project_name ~team_id with
+   | Ok _ -> ()
+   | Error msg ->
+       on_progress (sprintf "  ⚠ create_figma_project(%s): %s" project_id msg);
+       progress.errors <- msg :: progress.errors);
   progress.projects <- progress.projects + 1;
 
   (* 파일 목록 가져오기 *)
@@ -334,8 +341,11 @@ let crawl_project ~token ~neo4j_cfg ~progress ~options ~team_id ~project_id ~pro
           crawl_file ~token ~neo4j_cfg ~progress ~options
             ~project_id ~file_key ~file_name ~last_modified ~on_progress
       ) files in
-      (* 에러가 있어도 계속 진행 *)
-      let _ = results in
+      (* 에러 수집 후 계속 진행 *)
+      List.iter (function
+        | Error msg -> progress.errors <- msg :: progress.errors
+        | Ok () -> ()
+      ) results;
       Ok ()
 
   | Error err ->
@@ -366,8 +376,12 @@ let crawl_team ~token ~team_id ~neo4j_cfg
        on_progress (sprintf "❌ Neo4j connection failed: %s" err);
        failwith err);
 
-  (* 팀 노드 생성 *)
-  let _ = create_figma_team ~neo4j_cfg ~team_id ~name:team_name in
+  (* 팀 노드 생성 — fatal: crawl cannot proceed without team *)
+  (match create_figma_team ~neo4j_cfg ~team_id ~name:team_name with
+   | Ok _ -> ()
+   | Error msg ->
+       on_progress (sprintf "❌ create_figma_team(%s) failed: %s" team_id msg);
+       failwith (sprintf "Team creation failed: %s" msg));
   progress.teams <- 1;
 
   (* 프로젝트 목록 가져오기 *)
@@ -377,12 +391,13 @@ let crawl_team ~token ~team_id ~neo4j_cfg
       on_progress (sprintf "Found %d projects" (List.length projects));
       on_progress "─────────────────────────────────────────";
 
-      (* 각 프로젝트 크롤링 *)
+      (* 각 프로젝트 크롤링 — per-project errors logged, crawl continues *)
       List.iter (fun (project_id, project_name) ->
-        let _ = crawl_project ~token ~neo4j_cfg ~progress ~options
-          ~team_id ~project_id ~project_name ~on_progress
-        in
-        ()
+        match crawl_project ~token ~neo4j_cfg ~progress ~options
+          ~team_id ~project_id ~project_name ~on_progress with
+        | Ok () -> ()
+        | Error msg ->
+            on_progress (sprintf "  ⚠ crawl_project(%s) failed: %s" project_id msg)
       ) projects;
 
       (* 결과 요약 *)

@@ -730,7 +730,7 @@ type mcp_message_kind =
 
 let classify_message body_str =
   match Yojson.Safe.from_string body_str with
-  | exception _ -> `Unknown
+  | exception (Yojson.Json_error _) -> `Unknown
   | `Assoc fields ->
       let has_method = List.mem_assoc "method" fields in
       let id = List.assoc_opt "id" fields in
@@ -1384,7 +1384,7 @@ let rec generate_code_template ?(depth=0) node platform =
   in
   let w = member "width" node |> to_number |> int_of_float in
   let h = member "height" node |> to_number |> int_of_float in
-  let node_type = member "type" node |> to_string_option |> Option.value ~default:"FRAME" in
+  let _node_type = member "type" node |> to_string_option |> Option.value ~default:"FRAME" in
 
   (* Extract background color from fills *)
   let bg_color = match member "fills" node with
@@ -1468,8 +1468,6 @@ let rec generate_code_template ?(depth=0) node platform =
       ) (if child_count > 5 then List.filteri (fun i _ -> i < 5) children else children) in
       if List.length sub_defs = 0 then "" else "\n" ^ String.concat "\n" sub_defs
   in
-
-  let _ = node_type in (* suppress unused warning *)
 
   (* Extract auto-layout info *)
   let layout_mode = match member "autoLayout" node with
@@ -1686,15 +1684,13 @@ let plugin_analyze_handler ~sw:_ ~eio_ctx:_ _request reqd =
 
         (* Build analysis from node info *)
         let node_info = Yojson.Safe.to_string node in
-        let full_prompt = if prompt = "" then
+        let _full_prompt = if prompt = "" then
           sprintf "Analyze this Figma node and provide insights:\n%s\n\nProvide: 1) Structure overview, 2) Design patterns used, 3) Accessibility considerations, 4) Implementation recommendations." node_info
         else
           prompt
         in
 
-        (* Try llm-mcp, fallback to local analysis *)
         (* Local analysis - fast and reliable, no LLM dependency *)
-        let _ = full_prompt in (* suppress unused warning *)
         let to_number json = match json with
           | `Float f -> f | `Int i -> float_of_int i | _ -> 0.0
         in
@@ -2623,7 +2619,7 @@ let extract_variants_handler ~sw:_ ~eio_ctx:_ _request reqd =
     | Ok json ->
         let open Yojson.Safe.Util in
         let node = member "node" json in
-        let to_num json = match json with `Float f -> f | `Int i -> float_of_int i | _ -> 0.0 in
+        let _to_num json = match json with `Float f -> f | `Int i -> float_of_int i | _ -> 0.0 in
 
         (* Extract variant properties from component set or variants *)
         let variants = ref [] in
@@ -2698,7 +2694,6 @@ type %sVariant = {
           ("variants", `List variant_list);
           ("typescript", `String ts_types);
         ] in
-        let _ = to_num in (* suppress warning *)
         Response.json (Yojson.Safe.to_string result) reqd
   )
 
