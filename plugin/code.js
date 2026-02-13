@@ -935,16 +935,21 @@ const handlers = {
     const sel = figma.currentPage.selection;
     if (sel.length < 2) return { error: "Select at least 2 nodes" };
     const dir = (p.direction || "LEFT").toUpperCase();
-    // Simplified alignment
+    const minX = Math.min.apply(null, sel.map(function(n) { return n.x; }));
+    const maxX = Math.max.apply(null, sel.map(function(n) { return n.x + n.width; }));
+    const minY = Math.min.apply(null, sel.map(function(n) { return n.y; }));
+    const maxY = Math.max.apply(null, sel.map(function(n) { return n.y + n.height; }));
     let target;
-    if (dir === "LEFT") target = Math.min.apply(null, sel.map(function(n) { return n.x; }));
-    else if (dir === "RIGHT") target = Math.max.apply(null, sel.map(function(n) { return n.x + n.width; }));
-    else if (dir === "TOP") target = Math.min.apply(null, sel.map(function(n) { return n.y; }));
-    else if (dir === "BOTTOM") target = Math.max.apply(null, sel.map(function(n) { return n.y + n.height; }));
-    else if (dir === "CENTER_H") target = sel.reduce((s, n) => s + n.x + n.width / 2, 0) / sel.length;
-    else if (dir === "CENTER_V") target = sel.reduce((s, n) => s + n.y + n.height / 2, 0) / sel.length;
 
-    for (const node of sel) {
+    if (dir === "LEFT") target = minX;
+    else if (dir === "RIGHT") target = maxX;
+    else if (dir === "TOP") target = minY;
+    else if (dir === "BOTTOM") target = maxY;
+    else if (dir === "CENTER_H") target = (minX + maxX) / 2;
+    else if (dir === "CENTER_V") target = (minY + maxY) / 2;
+
+    for (let i = 0; i < sel.length; i++) {
+      const node = sel[i];
       if (dir === "LEFT") node.x = target;
       else if (dir === "RIGHT") node.x = target - node.width;
       else if (dir === "TOP") node.y = target;
@@ -957,20 +962,28 @@ const handlers = {
 
   distribute: H.simple((p) => {
     const sel = figma.currentPage.selection;
-    if (sel.length < 3) return { error: "Select at least 3 nodes" };
+    if (sel.length < 2) return { error: "Select at least 2 nodes" };
     const axis = (p.axis || "horizontal").toLowerCase();
     const sorted = sel.slice().sort(function(a, b) { return axis === "horizontal" ? a.x - b.x : a.y - b.y; });
-    const first = sorted[0], last = sorted[sorted.length - 1];
-    const total = axis === "horizontal"
-      ? (last.x + last.width) - first.x - sorted.reduce((s, n) => s + n.width, 0)
-      : (last.y + last.height) - first.y - sorted.reduce((s, n) => s + n.height, 0);
-    const gap = total / (sorted.length - 1);
-    let pos = axis === "horizontal" ? first.x + first.width : first.y + first.height;
+    if (sorted.length < 2) return { error: "Select at least 2 nodes" };
+
+    const first = sorted[0];
+    const last = sorted[sorted.length - 1];
+    const sizeSum = sorted.reduce(function(sum, n) {
+      return sum + (axis === "horizontal" ? n.width : n.height);
+    }, 0);
+    const minPos = axis === "horizontal" ? first.x : first.y;
+    const maxPos = axis === "horizontal" ? (last.x + last.width) : (last.y + last.height);
+    const available = Math.max(0, maxPos - minPos);
+    const extra = Math.max(0, available - sizeSum);
+    const gap = extra / (sorted.length - 1);
+
+    let cursor = axis === "horizontal" ? first.x + first.width : first.y + first.height;
     for (let i = 1; i < sorted.length - 1; i++) {
-      pos += gap;
-      if (axis === "horizontal") sorted[i].x = pos;
-      else sorted[i].y = pos;
-      pos += axis === "horizontal" ? sorted[i].width : sorted[i].height;
+      cursor += gap;
+      if (axis === "horizontal") sorted[i].x = cursor;
+      else sorted[i].y = cursor;
+      cursor += axis === "horizontal" ? sorted[i].width : sorted[i].height;
     }
     return { distributed: sel.length, axis };
   }),
