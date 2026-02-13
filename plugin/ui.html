@@ -88,32 +88,6 @@
       @keyframes spin { to { transform: rotate(360deg); } }
       .status-text { font-size: 10px; color: var(--text-muted); margin-left: 4px; }
 
-      .tabs {
-        display: flex;
-        gap: 2px;
-        padding: 2px;
-        background: var(--bg-tertiary);
-        border-radius: 6px;
-        margin-bottom: 8px;
-      }
-      .tab {
-        flex: 1;
-        padding: 6px;
-        text-align: center;
-        border-radius: 4px;
-        cursor: pointer;
-        font-weight: 500;
-        color: var(--text-muted);
-        transition: all 0.2s;
-      }
-      .tab.active {
-        background: var(--bg);
-        color: var(--text);
-        box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-      }
-      .tab-content { display: none; }
-      .tab-content.active { display: flex; flex-direction: column; gap: 10px; }
-
       .kbd {
         font-size: 9px;
         padding: 1px 4px;
@@ -131,36 +105,43 @@
         font-weight: 500;
         color: var(--text-muted);
         font-size: 10px;
-        text-transform: uppercase;
-        letter-spacing: 0.5px;
         margin-bottom: 4px;
       }
       .input-row { display: flex; gap: 4px; }
       input, select {
         flex: 1;
-        padding: 7px 10px;
+        padding: 5px 8px;
         border: 1px solid var(--border);
-        border-radius: 6px;
+        border-radius: 4px;
         font-size: 11px;
         background: var(--bg-secondary);
         color: var(--text);
         outline: none;
       }
+      input[type="checkbox"] {
+        flex: none;
+        width: 14px;
+        height: 14px;
+        padding: 0;
+        margin: 0;
+        accent-color: var(--accent);
+        cursor: pointer;
+      }
       input:focus, select:focus { border-color: var(--accent); }
       input:disabled, select:disabled { opacity: 0.5; cursor: not-allowed; }
 
       .icon-btn {
-        padding: 7px;
+        padding: 5px;
         background: var(--bg-secondary);
         border: 1px solid var(--border);
-        border-radius: 6px;
+        border-radius: 4px;
         cursor: pointer;
         color: var(--text-muted);
         font-size: 11px;
         display: flex;
         align-items: center;
         justify-content: center;
-        min-width: 30px;
+        min-width: 26px;
       }
       .icon-btn:hover:not(:disabled) { background: var(--bg-tertiary); color: var(--text); }
       .icon-btn:disabled { opacity: 0.3; cursor: not-allowed; }
@@ -168,9 +149,9 @@
       .btn-row { display: flex; gap: 6px; }
       button {
         flex: 1;
-        padding: 7px 10px;
+        padding: 5px 8px;
         border: none;
-        border-radius: 6px;
+        border-radius: 4px;
         font-size: 11px;
         font-weight: 500;
         cursor: pointer;
@@ -193,24 +174,24 @@
       .stats {
         display: grid;
         grid-template-columns: repeat(4, 1fr);
-        gap: 6px;
-        padding: 8px;
+        gap: 4px;
+        padding: 6px;
         background: var(--bg-secondary);
-        border-radius: 6px;
+        border-radius: 4px;
       }
       .stat { text-align: center; }
-      .stat-value { font-size: 16px; font-weight: 600; color: var(--accent); }
+      .stat-value { font-size: 14px; font-weight: 600; color: var(--accent); }
       .stat-value.success { color: var(--success); }
       .stat-value.error { color: var(--error); }
       .stat-label { font-size: 8px; color: var(--text-muted); text-transform: uppercase; }
 
       .section {
         border: 1px solid var(--border);
-        border-radius: 6px;
+        border-radius: 4px;
         overflow: hidden;
       }
       .section-header {
-        padding: 6px 10px;
+        padding: 5px 8px;
         background: var(--bg-secondary);
         font-weight: 500;
         font-size: 10px;
@@ -225,7 +206,7 @@
       .section-actions { display: flex; gap: 6px; align-items: center; }
       .section-action { color: var(--text-muted); cursor: pointer; font-size: 10px; }
       .section-action:hover { color: var(--accent); }
-      .section-content { max-height: 120px; overflow-y: auto; transition: max-height 0.2s; }
+      .section-content { max-height: 200px; overflow-y: auto; transition: max-height 0.2s; }
       .section-content.collapsed { max-height: 0; overflow: hidden; }
 
       .log-content, .inspector-content, .history-content {
@@ -275,15 +256,15 @@
         display: flex;
         justify-content: space-between;
         align-items: center;
-        padding: 6px 10px;
+        padding: 4px 8px;
         background: var(--bg-secondary);
-        border-radius: 6px;
+        border-radius: 4px;
         font-size: 10px;
       }
       .toggle {
-        width: 32px; height: 18px;
+        width: 28px; height: 16px;
         background: var(--border);
-        border-radius: 9px;
+        border-radius: 8px;
         position: relative;
         cursor: pointer;
         transition: background 0.2s;
@@ -292,13 +273,13 @@
       .toggle::after {
         content: "";
         position: absolute;
-        width: 14px; height: 14px;
+        width: 12px; height: 12px;
         background: #fff;
         border-radius: 50%;
         top: 2px; left: 2px;
         transition: left 0.2s;
       }
-      .toggle.on::after { left: 16px; }
+      .toggle.on::after { left: 14px; }
 
       .inspector-row {
         display: flex;
@@ -426,11 +407,6 @@
         display: flex;
         gap: 6px;
       }
-      .btn-primary {
-        background: linear-gradient(135deg, #10b981 0%, #059669 100%) !important;
-        color: #fff !important;
-      }
-      .btn-primary:hover:not(:disabled) { filter: brightness(1.1); }
       .btn-primary:disabled { opacity: 0.5; }
       .insight-info { color: var(--accent); }
       .analyzing {
@@ -498,14 +474,14 @@
         color: var(--accent);
         box-shadow: 0 1px 2px rgba(0,0,0,0.1);
       }
-      .tab-content { display: none; padding: 8px; flex-direction: column; gap: 8px; overflow-y: auto; flex: 1; min-height: 0; }
+      .tab-content { display: none; padding: 6px; flex-direction: column; gap: 6px; overflow-y: auto; flex: 1; min-height: 0; }
       .tab-content.active { display: flex; }
 
       .section-card {
         background: var(--bg);
         border: 1px solid var(--border);
-        border-radius: 8px;
-        padding: 10px;
+        border-radius: 4px;
+        padding: 8px;
         display: flex;
         flex-direction: column;
         gap: 8px;
@@ -775,7 +751,7 @@
           </div>
         </div>
         <div class="section-content" id="multiPlatformContent" style="max-height:none;">
-          <div style="padding: 8px;">
+          <div style="padding: 6px;">
             <div style="display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 8px;">
               <label style="display: flex; align-items: center; gap: 4px; margin: 0;">
                 <input type="checkbox" id="mpReact" checked> React
@@ -808,7 +784,7 @@
           </div>
         </div>
         <div class="section-content" id="visionContent" style="max-height:none;">
-          <div style="padding: 8px;">
+          <div style="padding: 6px;">
             <div style="margin-bottom: 8px;">
               <label>Reference Image (Figma Export)</label>
               <input type="text" id="referenceImagePath" placeholder="/path/to/reference.png" style="width: 100%;">
@@ -835,7 +811,7 @@
           </div>
         </div>
         <div class="section-content" id="storybookContent" style="max-height:none;">
-          <div style="padding: 8px;">
+          <div style="padding: 6px;">
             <div style="margin-bottom: 8px;">
               <label>Figma URL</label>
               <input type="text" id="figmaUrlInput" placeholder="https://www.figma.com/design/..." style="width: 100%;">
@@ -860,7 +836,7 @@
       <div class="section">
         <div class="section-header"><span>🤖 Direct AI Prompt</span></div>
         <div class="section-content" style="display:flex;max-height:none;">
-          <div style="padding: 8px; width: 100%;">
+          <div style="padding: 6px; width: 100%;">
             <label>Provider</label>
             <select id="llmProvider" style="width:100%;">
               <option value="openai">OpenAI</option>
