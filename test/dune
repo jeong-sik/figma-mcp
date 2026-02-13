@@ -192,6 +192,12 @@
  (name test_server_metrics)
  (libraries figma_mcp alcotest eio_main))
 
+; API rate limiter: Eio.Semaphore concurrency bounds
+(test
+ (name test_api_rate_limiter)
+ (libraries figma_mcp alcotest eio_main)
+ (action (run %{test} --color=always)))
+
 ; Category tools: list/describe/call behavior
 (test
  (name test_category_tools)
