@@ -640,6 +640,24 @@ module Eio_tests = struct
     let result = Mcp_protocol_eio.format_sse_data "" in
     check string "empty data" "data: " result
 
+  let test_format_sse_data_json_compact () =
+    (* Pretty-printed JSON should be compacted to single line *)
+    let pretty_json = "{\n  \"result\": {\n    \"content\": []\n  }\n}" in
+    let result = Mcp_protocol_eio.format_sse_data pretty_json in
+    check string "json compact" "data: {\"result\":{\"content\":[]}}" result
+
+  let test_compact_json_string_valid () =
+    let result = Mcp_protocol_eio.compact_json_string "{\n  \"a\": 1\n}" in
+    check string "valid json" "{\"a\":1}" result
+
+  let test_compact_json_string_invalid () =
+    let result = Mcp_protocol_eio.compact_json_string "not json" in
+    check string "invalid json" "not json" result
+
+  let test_compact_json_string_already_compact () =
+    let result = Mcp_protocol_eio.compact_json_string "{\"b\":2}" in
+    check string "already compact" "{\"b\":2}" result
+
   (** --- Config --- *)
 
   let test_default_config () =
@@ -883,6 +901,10 @@ let eio_tests = [
   "format_sse_data single line", `Quick, Eio_tests.test_format_sse_data_single_line;
   "format_sse_data multiline", `Quick, Eio_tests.test_format_sse_data_multiline;
   "format_sse_data empty", `Quick, Eio_tests.test_format_sse_data_empty;
+  "format_sse_data json compact", `Quick, Eio_tests.test_format_sse_data_json_compact;
+  "compact_json_string valid", `Quick, Eio_tests.test_compact_json_string_valid;
+  "compact_json_string invalid", `Quick, Eio_tests.test_compact_json_string_invalid;
+  "compact_json_string already compact", `Quick, Eio_tests.test_compact_json_string_already_compact;
 
   (* Config *)
   "default_config", `Quick, Eio_tests.test_default_config;
