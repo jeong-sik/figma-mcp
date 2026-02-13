@@ -838,10 +838,17 @@
         <div class="section-content" style="display:flex;max-height:none;">
           <div style="padding: 6px; width: 100%;">
             <label>Provider</label>
-            <select id="llmProvider" style="width:100%;">
+            <select id="llmProvider" style="width:100%;" onchange="updateLlmUI()">
+              <option value="ollama">Ollama (Local)</option>
               <option value="openai">OpenAI</option>
+              <option value="anthropic">Anthropic</option>
+              <option value="custom">Custom Endpoint</option>
             </select>
-            <label style="margin-top:8px;display:block;">API Key</label>
+            <label style="margin-top:8px;display:block;">Model</label>
+            <input id="llmModel" placeholder="e.g. qwen3-coder:30b" style="width:100%;">
+            <label id="llmEndpointLabel" style="margin-top:8px;display:none;">Endpoint URL</label>
+            <input id="llmEndpoint" placeholder="http://localhost:8932" style="width:100%;display:none;">
+            <label id="llmApiKeyLabel" style="margin-top:8px;display:block;">API Key</label>
             <input type="password" id="llmApiKey" placeholder="sk-..." style="width:100%;">
             <label style="margin-top:8px;display:block;">Prompt</label>
             <textarea id="llmPrompt" rows="5" placeholder="Describe what to do with the selected Figma layers..." style="width:100%;resize:vertical;"></textarea>
@@ -1006,6 +1013,30 @@
           return "Invalid URL";
         }
         return "";
+      }
+      function updateLlmUI() {
+        var p = $("llmProvider").value;
+        var keyLabel = $("llmApiKeyLabel");
+        var keyInput = $("llmApiKey");
+        var endLabel = $("llmEndpointLabel");
+        var endInput = $("llmEndpoint");
+        var modelInput = $("llmModel");
+        // Show/hide API key
+        var needsKey = (p === "openai" || p === "anthropic");
+        keyLabel.style.display = needsKey ? "block" : "none";
+        keyInput.style.display = needsKey ? "block" : "none";
+        // Show/hide endpoint
+        var needsEndpoint = (p === "custom");
+        endLabel.style.display = needsEndpoint ? "block" : "none";
+        endInput.style.display = needsEndpoint ? "block" : "none";
+        // For custom, show key fields too (optional)
+        if (p === "custom") { keyLabel.style.display = "block"; keyInput.style.display = "block"; }
+        // Default model placeholders
+        var defaults = { ollama: "qwen3-coder:30b", openai: "gpt-4o", anthropic: "claude-sonnet-4-5-20250929", custom: "" };
+        modelInput.placeholder = defaults[p] || "";
+        if (!modelInput.value) modelInput.value = "";
+        // Persist selection
+        var st = loadState(); st.llmProvider = p; saveState(st);
       }
       function loadState() { try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) || {}; } catch(e) { return {}; } }
       function saveState(s) { try { localStorage.setItem(STORAGE_KEY, JSON.stringify(s)); } catch(e) {} }
@@ -2129,37 +2160,75 @@
 
       // ============== END NEW FEATURES ==============
 
-      // Direct AI Execution
+      // Direct AI Execution (multi-provider)
       $("llmRun").onclick = function() {
         var prompt = $("llmPrompt").value.trim();
         var provider = $("llmProvider").value;
         var key = $("llmApiKey").value.trim();
-        
-        if (!prompt) { alert("Please enter a prompt"); return; }
-        if (!key) { alert("Please enter an AI API Key in Settings"); return; }
-        
+        var model = $("llmModel").value.trim();
+        var endpoint = $("llmEndpoint").value.trim();
+
+        if (!prompt) { addLog("ai", "Please enter a prompt", false); return; }
+
+        var context = lastSelection
+          ? "\n\nContext: Selected Figma layers:\n" + JSON.stringify(lastSelection, null, 2)
+          : "";
+        var fullPrompt = prompt + context;
+
+        var url, headers, body, parseResponse;
+
+        switch (provider) {
+          case "ollama":
+            url = "http://127.0.0.1:11434/api/chat";
+            headers = { "Content-Type": "application/json" };
+            body = { model: model || "qwen3-coder:30b", messages: [{role:"user", content:fullPrompt}], stream: false };
+            parseResponse = function(d) { return d.message ? d.message.content : JSON.stringify(d); };
+            break;
+          case "openai":
+            if (!key) { addLog("ai", "API Key required for OpenAI", false); return; }
+            url = "https://api.openai.com/v1/chat/completions";
+            headers = { "Content-Type": "application/json", "Authorization": "Bearer " + key };
+            body = { model: model || "gpt-4o", messages: [{role:"user", content:fullPrompt}] };
+            parseResponse = function(d) { return d.choices[0].message.content; };
+            break;
+          case "anthropic":
+            if (!key) { addLog("ai", "API Key required for Anthropic", false); return; }
+            url = "https://api.anthropic.com/v1/messages";
+            headers = { "Content-Type": "application/json", "x-api-key": key, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true" };
+            body = { model: model || "claude-sonnet-4-5-20250929", max_tokens: 4096, messages: [{role:"user", content:fullPrompt}] };
+            parseResponse = function(d) { return d.content ? d.content.map(function(b){return b.text;}).join("") : JSON.stringify(d); };
+            break;
+          case "custom":
+            url = endpoint || "http://localhost:8932";
+            headers = key ? { "Content-Type": "application/json", "Authorization": "Bearer " + key } : { "Content-Type": "application/json" };
+            body = { model: model, messages: [{role:"user", content:fullPrompt}], stream: false };
+            parseResponse = function(d) { return d.choices ? d.choices[0].message.content : d.message ? d.message.content : JSON.stringify(d); };
+            break;
+        }
+
+        // Persist model selection
+        var st = loadState(); st.llmModel = model; st.llmProvider = provider; saveState(st);
+
         $("llmProgress").style.display = "block";
         $("llmResult").style.display = "none";
-        
-        // Example: Simple OpenAI call (Can be expanded to other providers)
-        var url = provider === "openai" ? "https://api.openai.com/v1/chat/completions" : "";
-        var body = provider === "openai" ? JSON.stringify({
-          model: "gpt-4o",
-          messages: [{role: "user", content: prompt + "\n\nContext: Selected Figma layers metadata: " + JSON.stringify(lastSelection)}]
-        }) : "";
 
         fetch(url, {
           method: "POST",
-          headers: { "Content-Type": "application/json", "Authorization": "Bearer " + key },
-          body: body
-        }).then(r => r.json()).then(data => {
+          headers: headers,
+          body: JSON.stringify(body)
+        }).then(function(r) {
+          if (!r.ok) return r.text().then(function(t) { throw new Error(r.status + ": " + t.substring(0, 200)); });
+          return r.json();
+        }).then(function(data) {
           $("llmProgress").style.display = "none";
           $("llmResult").style.display = "block";
-          $("llmResult").textContent = data.choices[0].message.content;
-          addLog("ai", "Direct AI action completed", true);
-        }).catch(e => {
+          $("llmResult").textContent = parseResponse(data);
+          addLog("ai", "Direct AI (" + provider + "/" + (model || "default") + ") completed", true);
+        }).catch(function(e) {
           $("llmProgress").style.display = "none";
-          addLog("ai", "AI Error: " + e.message, false);
+          $("llmResult").style.display = "block";
+          $("llmResult").textContent = "Error: " + e.message;
+          addLog("ai", "AI Error (" + provider + "): " + e.message, false);
         });
       };
 
@@ -2176,6 +2245,15 @@
         apiKey = initialApiKey;
         saveSessionApiKey(apiKey);
       }
+
+      // Restore Direct AI provider/model selection
+      if (state.llmProvider && $("llmProvider")) {
+        $("llmProvider").value = state.llmProvider;
+      }
+      if (state.llmModel && $("llmModel")) {
+        $("llmModel").value = state.llmModel;
+      }
+      updateLlmUI();
 
       // Auto-connect if we have a saved server URL
       if (state.serverUrl) {
