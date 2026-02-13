@@ -236,8 +236,9 @@
       }
       .quick-btn {
         flex: 0 0 auto;
-        padding: 4px 8px;
-        font-size: 8px;
+        padding: 7px 10px;
+        font-size: 10px;
+        min-height: 28px;
         width: 100%;
         text-align: center;
         white-space: nowrap;
@@ -246,6 +247,15 @@
         background: var(--bg-tertiary);
         border: none;
         border-radius: 4px;
+        color: var(--text);
+        cursor: pointer;
+      }
+      .layout-mode-btn {
+        padding: 5px 10px;
+        font-size: 10px;
+        border: 1px solid var(--border);
+        border-radius: 4px;
+        background: var(--bg-tertiary);
         color: var(--text);
         cursor: pointer;
       }
@@ -262,15 +272,6 @@
       .layout-mode-switch {
         display: flex;
         gap: 4px;
-      }
-      .layout-mode-btn {
-        padding: 3px 7px;
-        font-size: 9px;
-        border: 1px solid var(--border);
-        border-radius: 4px;
-        background: var(--bg-tertiary);
-        color: var(--text);
-        cursor: pointer;
       }
       .layout-mode-btn.active {
         background: var(--accent);
