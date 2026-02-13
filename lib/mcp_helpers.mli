@@ -12,7 +12,7 @@ val string_prop : string -> Yojson.Safe.t
 val number_prop : string -> Yojson.Safe.t
 val bool_prop : string -> Yojson.Safe.t
 val enum_prop : string list -> string -> Yojson.Safe.t
-val array_prop : string -> Yojson.Safe.t
+val array_prop : ?items_type:string -> string -> Yojson.Safe.t
 val object_prop : string -> Yojson.Safe.t
 val object_schema : (string * Yojson.Safe.t) list -> string list -> Yojson.Safe.t
 

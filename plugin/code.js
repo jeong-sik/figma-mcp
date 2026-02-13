@@ -3,7 +3,7 @@
  * 100 actions, ~800 lines (vs 2500 lines before)
  */
 
-figma.showUI(__html__, { width: 360, height: 600 });
+figma.showUI(__html__, { width: 620, height: 700 });
 
 // Base64 encoder for Uint8Array (btoa is not available in Figma plugin sandbox)
 const _b64chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
@@ -29,6 +29,7 @@ figma.ui.postMessage({ type: "init", nonce: sessionNonce });
 
 const MIXED = figma.mixed;
 const MAX_PAYLOAD_CHARS = 2000000;
+const MAX_EXPORT_B64_CHARS = Math.floor(MAX_PAYLOAD_CHARS * 0.4); // leave margin for wrapper fields
 
 // ============== Utilities ==============
 
@@ -104,6 +105,16 @@ function safeStringify(value) {
   });
 }
 
+function stringifyForUi(value) {
+  try {
+    const json = safeStringify(value);
+    if (json === undefined) return safeStringify({ error: "Unserializable payload" });
+    return json;
+  } catch (e) {
+    return safeStringify({ error: "Serialize error: " + String(e) });
+  }
+}
+
 function parseColor(c) {
   if (!c) return { r: 0, g: 0, b: 0 };
   if (typeof c === "string" && c.startsWith("#")) {
@@ -115,6 +126,60 @@ function parseColor(c) {
     };
   }
   return { r: c.r || 0, g: c.g || 0, b: c.b || 0 };
+}
+
+function clampNumeric(value, min, max, fallback) {
+  if (typeof value !== "number" || !Number.isFinite(value)) return fallback;
+  if (min !== undefined && value < min) return min;
+  if (max !== undefined && value > max) return max;
+  return value;
+}
+
+async function exportNodeImage(node, p = {}) {
+  const format = (p.format || "PNG").toUpperCase();
+  let scale = clampNumeric(Number(p.scale), 0.125, 8, 2);
+  if (!Number.isFinite(scale)) scale = 2;
+
+  let attempts = 0;
+  const maxAttempts = 4;
+  const maxChars = typeof p.max_payload_chars === "number" ? p.max_payload_chars : MAX_EXPORT_B64_CHARS;
+
+  while (attempts < maxAttempts) {
+    attempts += 1;
+    const bytes = await node.exportAsync({ format, constraint: { type: "SCALE", value: scale } });
+    const base64 = uint8ToBase64(bytes);
+
+    if (base64.length <= maxChars || attempts === maxAttempts) {
+      return {
+        node_id: node.id,
+        name: node.name,
+        type: node.type,
+        format,
+        scale,
+        size: bytes.length,
+        width: node.width * scale,
+        height: node.height * scale,
+        base64
+      };
+    }
+
+    const nextScale = Math.max(scale / 2, 0.125);
+    if (nextScale === scale) {
+      return {
+        node_id: node.id,
+        name: node.name,
+        type: node.type,
+        format,
+        scale,
+        size: bytes.length,
+        width: node.width * scale,
+        height: node.height * scale,
+        base64,
+        warning: "Image exceeds payload limit after downscale attempts"
+      };
+    }
+    scale = nextScale;
+  }
 }
 
 // Apply fill from hex string, parent_id reparenting, and corner_radius in one call
@@ -191,6 +256,60 @@ const H = {
   },
 };
 
+async function executeHttpProxyRequest(payload) {
+  var url = payload && typeof payload.url === "string" ? payload.url.trim() : "";
+  if (!url) return { error: "url required" };
+  if (!/^https?:\/\//i.test(url)) return { error: "invalid url protocol" };
+
+  var method = String(payload.method || "POST").toUpperCase();
+  if (["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"].indexOf(method) === -1) {
+    return { error: "unsupported method: " + method };
+  }
+
+  var headers = payload && typeof payload.headers === "object" && payload.headers !== null
+    ? payload.headers
+    : {};
+  var hasBody = method !== "GET" && method !== "HEAD";
+  var body = hasBody ? payload.body : undefined;
+  var requestBody = body === undefined ? undefined : (typeof body === "string" ? body : safeStringify(body));
+
+  var timeoutRaw = Number(payload.timeoutMs);
+  var timeoutMs = Number.isFinite(timeoutRaw) && timeoutRaw > 0 ? timeoutRaw : 30000;
+
+  try {
+    var fetchPromise = fetch(url, {
+      method: method,
+      headers: headers,
+      body: requestBody
+    });
+
+    var timeoutPromise = new Promise(function(resolve, reject) {
+      setTimeout(function() {
+        reject(new Error("Request timeout"));
+      }, timeoutMs);
+    });
+
+    var response = await Promise.race([fetchPromise, timeoutPromise]);
+    var text = await response.text();
+    var parsed = text;
+    if (text) {
+      try {
+        parsed = JSON.parse(text);
+      } catch (err) {}
+    }
+
+    return {
+      ok: response.ok,
+      status: response.status,
+      statusText: response.statusText,
+      data: parsed,
+      text: typeof text === "string" ? text : ""
+    };
+  } catch (error) {
+    return { error: String(error && error.message ? error.message : error) };
+  }
+}
+
 // === Document Change Observation (Feedback Loop) ===
 const _changeBuffer = [];
 const MAX_CHANGE_BUFFER = 200;
@@ -220,6 +339,12 @@ function _registerDocumentChangeWatcher() {
 
 const handlers = {
   // === Connection (3) ===
+  llm_proxy: async (payload) => {
+    const result = await executeHttpProxyRequest(payload || {});
+    if (result && result.error) return { ok: false, payload: result };
+    return { ok: true, payload: result };
+  },
+
   status: H.simple(() => ({ connected: true, page: figma.currentPage.name })),
 
   // === Pages (4) ===
@@ -810,44 +935,152 @@ const handlers = {
     const sel = figma.currentPage.selection;
     if (sel.length < 2) return { error: "Select at least 2 nodes" };
     const dir = (p.direction || "LEFT").toUpperCase();
-    // Simplified alignment
+    const alignMode = String(p.align_mode || p.mode || "selection").toLowerCase();
+    const isViewport = alignMode === "viewport";
+    const minX = Math.min.apply(null, sel.map(function(n) { return n.x; }));
+    const maxX = Math.max.apply(null, sel.map(function(n) { return n.x + n.width; }));
+    const minY = Math.min.apply(null, sel.map(function(n) { return n.y; }));
+    const maxY = Math.max.apply(null, sel.map(function(n) { return n.y + n.height; }));
+    const centerX = (figma.viewport.center && figma.viewport.center.x) || 0;
+    const centerY = (figma.viewport.center && figma.viewport.center.y) || 0;
+    const bboxW = maxX - minX;
+    const bboxH = maxY - minY;
+    const bboxCx = minX + bboxW / 2;
+    const bboxCy = minY + bboxH / 2;
+    const dx = alignMode === "viewport" ? (centerX - bboxCx) : 0;
+    const dy = alignMode === "viewport" ? (centerY - bboxCy) : 0;
+    const targetX = isViewport ? centerX : bboxCx;
+    const targetY = isViewport ? centerY : bboxCy;
     let target;
-    if (dir === "LEFT") target = Math.min.apply(null, sel.map(function(n) { return n.x; }));
-    else if (dir === "RIGHT") target = Math.max.apply(null, sel.map(function(n) { return n.x + n.width; }));
-    else if (dir === "TOP") target = Math.min.apply(null, sel.map(function(n) { return n.y; }));
-    else if (dir === "BOTTOM") target = Math.max.apply(null, sel.map(function(n) { return n.y + n.height; }));
-    else if (dir === "CENTER_H") target = sel.reduce((s, n) => s + n.x + n.width / 2, 0) / sel.length;
-    else if (dir === "CENTER_V") target = sel.reduce((s, n) => s + n.y + n.height / 2, 0) / sel.length;
 
-    for (const node of sel) {
-      if (dir === "LEFT") node.x = target;
-      else if (dir === "RIGHT") node.x = target - node.width;
-      else if (dir === "TOP") node.y = target;
-      else if (dir === "BOTTOM") node.y = target - node.height;
-      else if (dir === "CENTER_H") node.x = target - node.width / 2;
-      else if (dir === "CENTER_V") node.y = target - node.height / 2;
+    if (dir === "LEFT") target = minX;
+    else if (dir === "RIGHT") target = maxX;
+    else if (dir === "TOP") target = minY;
+    else if (dir === "BOTTOM") target = maxY;
+
+    for (let i = 0; i < sel.length; i++) {
+      const node = sel[i];
+      if (dir === "LEFT") node.x = target + dx;
+      else if (dir === "RIGHT") node.x = target - node.width + dx;
+      else if (dir === "TOP") node.y = target + dy;
+      else if (dir === "BOTTOM") node.y = target - node.height + dy;
+      else if (dir === "CENTER_H") node.x = targetX - (node.width / 2);
+      else if (dir === "CENTER_V") node.y = targetY - (node.height / 2);
+      else return { error: "Invalid direction" };
     }
-    return { aligned: sel.length, direction: dir };
+    return { aligned: sel.length, direction: dir, align_mode: alignMode };
   }),
 
   distribute: H.simple((p) => {
     const sel = figma.currentPage.selection;
-    if (sel.length < 3) return { error: "Select at least 3 nodes" };
+    if (sel.length < 2) return { error: "Select at least 2 nodes" };
     const axis = (p.axis || "horizontal").toLowerCase();
+    const distributeMode = String(p.distribute_mode || p.mode || "selection").toLowerCase();
+    const isViewport = distributeMode === "viewport";
+    const minX = Math.min.apply(null, sel.map(function(n) { return n.x; }));
+    const minY = Math.min.apply(null, sel.map(function(n) { return n.y; }));
+    const maxX = Math.max.apply(null, sel.map(function(n) { return n.x + n.width; }));
+    const maxY = Math.max.apply(null, sel.map(function(n) { return n.y + n.height; }));
+    const bboxW = maxX - minX;
+    const bboxH = maxY - minY;
+    const viewportCenter = figma.viewport.center || { x: 0, y: 0 };
+    const anchorOffsetX = isViewport ? (viewportCenter.x - (minX + bboxW / 2)) : 0;
+    const anchorOffsetY = isViewport ? (viewportCenter.y - (minY + bboxH / 2)) : 0;
+
     const sorted = sel.slice().sort(function(a, b) { return axis === "horizontal" ? a.x - b.x : a.y - b.y; });
-    const first = sorted[0], last = sorted[sorted.length - 1];
-    const total = axis === "horizontal"
-      ? (last.x + last.width) - first.x - sorted.reduce((s, n) => s + n.width, 0)
-      : (last.y + last.height) - first.y - sorted.reduce((s, n) => s + n.height, 0);
-    const gap = total / (sorted.length - 1);
-    let pos = axis === "horizontal" ? first.x + first.width : first.y + first.height;
+    if (sorted.length < 2) return { error: "Select at least 2 nodes" };
+    if (axis !== "horizontal" && axis !== "vertical") return { error: "Invalid axis" };
+
+    const first = sorted[0];
+    const last = sorted[sorted.length - 1];
+    const sizeSum = sorted.reduce(function(sum, n) {
+      return sum + (axis === "horizontal" ? n.width : n.height);
+    }, 0);
+    const minPos = axis === "horizontal" ? first.x : first.y;
+    const maxPos = axis === "horizontal" ? (last.x + last.width) : (last.y + last.height);
+    const available = Math.max(0, maxPos - minPos);
+    const extra = Math.max(0, available - sizeSum);
+    const gap = extra / (sorted.length - 1);
+
+    let cursor = axis === "horizontal" ? first.x + first.width : first.y + first.height;
     for (let i = 1; i < sorted.length - 1; i++) {
-      pos += gap;
-      if (axis === "horizontal") sorted[i].x = pos;
-      else sorted[i].y = pos;
-      pos += axis === "horizontal" ? sorted[i].width : sorted[i].height;
+      cursor += gap;
+      if (axis === "horizontal") sorted[i].x = cursor;
+      else sorted[i].y = cursor;
+      cursor += axis === "horizontal" ? sorted[i].width : sorted[i].height;
+    }
+
+    if (isViewport) {
+      for (let i = 0; i < sorted.length; i++) {
+        if (axis === "horizontal") sorted[i].x += anchorOffsetX;
+        else sorted[i].y += anchorOffsetY;
+      }
+
+      return { distributed: sel.length, axis, distribute_mode: distributeMode };
     }
     return { distributed: sel.length, axis };
+  }),
+
+  masonry_layout: H.simple((p) => {
+    const sel = figma.currentPage.selection;
+    if (sel.length < 2) return { error: "Select at least 2 nodes" };
+
+    const columns = clampNumeric(Number(p.columns), 1, 12, 3);
+    const gapX = clampNumeric(Number(p.gap_x), 0, 200, 16);
+    const gapY = clampNumeric(Number(p.gap_y), 0, 200, 16);
+    const mode = String(p.distribute_mode || "selection").toLowerCase();
+
+    const nodes = sel.slice().sort(function(a, b) {
+      return a.y === b.y ? a.x - b.x : a.y - b.y;
+    });
+    const minX = Math.min.apply(null, nodes.map(function(n) { return n.x; }));
+    const minY = Math.min.apply(null, nodes.map(function(n) { return n.y; }));
+    const maxNodeWidth = nodes.reduce(function(acc, n) { return Math.max(acc, n.width || 0); }, 0);
+    const colWidth = Math.max(maxNodeWidth, 1);
+    const heights = new Array(columns).fill(0);
+    const viewportCenter = figma.viewport.center || { x: 0, y: 0 };
+    const viewportCenterX = viewportCenter.x;
+    const viewportCenterY = viewportCenter.y;
+
+    let placed = 0;
+    for (let i = 0; i < nodes.length; i++) {
+      const node = nodes[i];
+      let targetCol = 0;
+      for (let c = 1; c < columns; c++) {
+        if (heights[c] < heights[targetCol]) targetCol = c;
+      }
+      const x = minX + targetCol * (colWidth + gapX);
+      const y = minY + heights[targetCol];
+      node.x = x;
+      node.y = y;
+      heights[targetCol] += (node.height || 0) + gapY;
+      placed++;
+    }
+
+    if (mode === "viewport") {
+      const usedMaxX = Math.max.apply(null, nodes.map(function(n) { return n.x + n.width; }));
+      const usedMaxY = Math.max.apply(null, nodes.map(function(n) { return n.y + n.height; }));
+      const usedMinX = Math.min.apply(null, nodes.map(function(n) { return n.x; }));
+      const usedMinY = Math.min.apply(null, nodes.map(function(n) { return n.y; }));
+      const usedCx = usedMinX + (usedMaxX - usedMinX) / 2;
+      const usedCy = usedMinY + (usedMaxY - usedMinY) / 2;
+      const dx = viewportCenterX - usedCx;
+      const dy = viewportCenterY - usedCy;
+
+      for (let i = 0; i < nodes.length; i++) {
+        const node = nodes[i];
+        node.x += dx;
+        node.y += dy;
+      }
+    }
+
+    return {
+      mode: mode,
+      columns: columns,
+      gap_x: gapX,
+      gap_y: gapY,
+      placed: placed
+    };
   }),
 
   // === Style (21) ===
@@ -1175,6 +1408,7 @@ const handlers = {
     const scale = p.scale || 1;
     const format = (p.format || "PNG").toUpperCase();
     const maxNodes = p.max_nodes || 5;
+    const maxPayload = p.max_payload_chars || MAX_EXPORT_B64_CHARS;
 
     // Get top-level children visible in viewport
     const children = figma.currentPage.children.filter(child => {
@@ -1188,11 +1422,12 @@ const handlers = {
     const results = [];
     for (const child of children.slice(0, maxNodes)) {
       try {
-        const bytes = await child.exportAsync({ format, constraint: { type: "SCALE", value: scale } });
-        results.push({
-          node_id: child.id, name: child.name, type: child.type,
-          base64: uint8ToBase64(bytes), width: child.width, height: child.height,
+        const exportResult = await exportNodeImage(child, {
+          format,
+          scale,
+          max_payload_chars: maxPayload
         });
+        results.push(exportResult);
       } catch (e) {
         results.push({ node_id: child.id, name: child.name, error: String(e) });
       }
@@ -1211,21 +1446,52 @@ const handlers = {
 
     const scale = p.scale || 2;
     const format = (p.format || "PNG").toUpperCase();
+    const maxPayload = p.max_payload_chars || MAX_EXPORT_B64_CHARS;
     const results = [];
 
     for (const node of selection.slice(0, 10)) {
       try {
-        const bytes = await node.exportAsync({ format, constraint: { type: "SCALE", value: scale } });
-        results.push({
-          node_id: node.id, name: node.name, type: node.type,
-          base64: uint8ToBase64(bytes), width: node.width, height: node.height,
+        const exportResult = await exportNodeImage(node, {
+          format,
+          scale,
+          max_payload_chars: maxPayload
         });
+        results.push(exportResult);
       } catch (e) {
         results.push({ node_id: node.id, name: node.name, error: String(e) });
       }
     }
 
     return { count: results.length, nodes: results };
+  }),
+
+  capture_selection_image: H.simple(async (p) => {
+    const selection = figma.currentPage.selection;
+    if (selection.length === 0) return { error: "Nothing selected" };
+
+    const maxNodes = clampNumeric(p.max_nodes, 1, 10, 1);
+    const scale = p.scale || 2;
+    const format = (p.format || "PNG").toUpperCase();
+    const maxPayload = p.max_payload_chars || MAX_EXPORT_B64_CHARS;
+    const results = [];
+
+    for (const node of selection.slice(0, maxNodes)) {
+      try {
+        const exportResult = await exportNodeImage(node, {
+          format,
+          scale,
+          max_payload_chars: maxPayload
+        });
+        results.push(exportResult);
+      } catch (e) {
+        results.push({ node_id: node.id, name: node.name, error: String(e) });
+      }
+    }
+
+    return {
+      count: results.length,
+      nodes: results
+    };
   }),
 
   get_changes: H.simple((p) => {
@@ -1497,7 +1763,11 @@ function extractTokens() {
 
 // Selection change listener
 figma.on("selectionchange", function() {
-  figma.ui.postMessage({ type: "selection_update", nonce: sessionNonce, selection: getSelectionData() });
+  figma.ui.postMessage({
+    type: "selection_update",
+    nonce: sessionNonce,
+    selection_json: stringifyForUi(getSelectionData())
+  });
 });
 
 // Document change listener (requires loadAllPagesAsync in dynamic-page mode)
@@ -1519,7 +1789,7 @@ figma.loadAllPagesAsync().then(function() {
     figma.ui.postMessage({
       type: "document_change",
       nonce: sessionNonce,
-      changes: summary
+      changes_json: stringifyForUi(summary)
     });
   });
 }).catch(function(err) {
@@ -1537,8 +1807,16 @@ figma.ui.onmessage = async (msg) => {
 
   // Handle selection request
   if (msg.type === "request_selection") {
-    figma.ui.postMessage({ type: "selection_update", nonce: sessionNonce, selection: getSelectionData() });
-    figma.ui.postMessage({ type: "tokens_update", nonce: sessionNonce, tokens: extractTokens() });
+    figma.ui.postMessage({
+      type: "selection_update",
+      nonce: sessionNonce,
+      selection_json: stringifyForUi(getSelectionData())
+    });
+    figma.ui.postMessage({
+      type: "tokens_update",
+      nonce: sessionNonce,
+      tokens_json: stringifyForUi(extractTokens())
+    });
     return;
   }
 

@@ -228,17 +228,69 @@
       .log-result.ok { color: var(--success); }
       .log-result.error { color: var(--error); }
 
-      .quick-actions { display: flex; flex-wrap: wrap; gap: 4px; padding: 6px; }
+      .quick-actions {
+        display: grid;
+        gap: 4px;
+        padding: 6px;
+        grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+      }
       .quick-btn {
-        padding: 4px 8px;
-        font-size: 9px;
+        flex: 0 0 auto;
+        padding: 7px 10px;
+        font-size: 10px;
+        min-height: 28px;
+        width: 100%;
+        text-align: center;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
         background: var(--bg-tertiary);
         border: none;
         border-radius: 4px;
         color: var(--text);
         cursor: pointer;
       }
+      .layout-mode-btn {
+        padding: 5px 10px;
+        font-size: 10px;
+        border: 1px solid var(--border);
+        border-radius: 4px;
+        background: var(--bg-tertiary);
+        color: var(--text);
+        cursor: pointer;
+      }
       .quick-btn:hover { background: var(--accent); color: #fff; }
+      .layout-control-row {
+        padding: 4px 6px;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        border-bottom: 1px solid var(--border);
+        font-size: 9px;
+        color: var(--text-muted);
+      }
+      .layout-mode-switch {
+        display: flex;
+        gap: 4px;
+      }
+      .layout-mode-btn.active {
+        background: var(--accent);
+        color: #fff;
+        border-color: var(--accent);
+      }
+      .layout-mode-btn:hover:not(.active) {
+        background: var(--border);
+      }
+      .layout-group {
+        padding: 0 4px 4px;
+      }
+      .layout-group-title {
+        font-size: 8px;
+        color: var(--text-muted);
+        margin: 4px 2px 2px;
+        text-transform: uppercase;
+        letter-spacing: 0.4px;
+      }
 
       .filter-btns { display: flex; gap: 3px; }
       .filter-btn {
@@ -675,6 +727,59 @@
         </div>
       </div>
 
+      <!-- Layout Tools -->
+      <div class="section" id="layoutSection" style="display:none;">
+        <div class="section-header">
+          <span>🔧 Node Layout</span>
+          <span class="section-action" id="toggleLayout">▼</span>
+        </div>
+        <div class="section-content" id="layoutContent">
+          <div class="layout-control-row">
+            <span>기준</span>
+            <div class="layout-mode-switch" id="layoutModeSwitch">
+              <button type="button" class="layout-mode-btn active" data-layout-mode="selection">선택 기준</button>
+              <button type="button" class="layout-mode-btn" data-layout-mode="viewport">화면 기준</button>
+            </div>
+          </div>
+          <div class="layout-group">
+            <div class="layout-group-title">Align</div>
+            <div class="quick-actions">
+              <button class="quick-btn" data-action="align" data-payload='{ "direction": "LEFT" }'>Align Left</button>
+              <button class="quick-btn" data-action="align" data-payload='{ "direction": "CENTER_H" }'>Align Center H</button>
+              <button class="quick-btn" data-action="align" data-payload='{ "direction": "RIGHT" }'>Align Right</button>
+              <button class="quick-btn" data-action="align" data-payload='{ "direction": "TOP" }'>Align Top</button>
+              <button class="quick-btn" data-action="align" data-payload='{ "direction": "CENTER_V" }'>Align Center V</button>
+              <button class="quick-btn" data-action="align" data-payload='{ "direction": "BOTTOM" }'>Align Bottom</button>
+            </div>
+          </div>
+          <div class="layout-group">
+            <div class="layout-group-title">Distribute</div>
+            <div class="quick-actions">
+              <button class="quick-btn" data-action="distribute" data-payload='{ "axis": "horizontal" }'>Distribute H</button>
+              <button class="quick-btn" data-action="distribute" data-payload='{ "axis": "vertical" }'>Distribute V</button>
+            </div>
+          </div>
+          <div class="layout-group">
+            <div class="layout-group-title">Transform</div>
+            <div class="quick-actions">
+              <button class="quick-btn" data-action="rotate" data-payload='{ "angle": 0 }'>Rotate 0°</button>
+              <button class="quick-btn" data-action="rotate" data-payload='{ "angle": 90 }'>Rotate 90°</button>
+              <button class="quick-btn" data-action="rotate" data-payload='{ "angle": 180 }'>Rotate 180°</button>
+              <button class="quick-btn" data-action="rotate" data-payload='{ "angle": 270 }'>Rotate 270°</button>
+              <button class="quick-btn" data-action="flip" data-payload='{ "flip_direction": "horizontal" }'>Flip H</button>
+              <button class="quick-btn" data-action="flip" data-payload='{ "flip_direction": "vertical" }'>Flip V</button>
+            </div>
+          </div>
+          <div class="layout-group">
+            <div class="layout-group-title">Masonry</div>
+            <div class="quick-actions">
+              <button class="quick-btn" data-action="masonry_layout" data-payload='{ "columns": 3, "gap_x": 16, "gap_y": 16 }'>Masonry 3</button>
+              <button class="quick-btn" data-action="masonry_layout" data-payload='{ "columns": 4, "gap_x": 12, "gap_y": 12 }'>Masonry 4</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <!-- Command History -->
       <div class="section" id="historySection" style="display:none;">
         <div class="section-header" id="historyHeader">
@@ -838,15 +943,37 @@
         <div class="section-content" style="display:flex;max-height:none;">
           <div style="padding: 6px; width: 100%;">
             <label>Provider</label>
-            <select id="llmProvider" style="width:100%;">
+            <select id="llmProvider" style="width:100%;" onchange="updateLlmUI()">
+              <option value="ollama">Ollama (Local)</option>
               <option value="openai">OpenAI</option>
+              <option value="anthropic">Anthropic</option>
+              <option value="custom">Custom Endpoint</option>
             </select>
-            <label style="margin-top:8px;display:block;">API Key</label>
+            <label style="margin-top:8px;display:block;">Model</label>
+            <input id="llmModel" placeholder="e.g. qwen3-coder:30b" style="width:100%;">
+            <label id="llmEndpointLabel" style="margin-top:8px;display:none;">Endpoint URL</label>
+            <input id="llmEndpoint" placeholder="http://localhost:8932" style="width:100%;display:none;">
+            <label id="llmApiKeyLabel" style="margin-top:8px;display:block;">API Key</label>
             <input type="password" id="llmApiKey" placeholder="sk-..." style="width:100%;">
             <label style="margin-top:8px;display:block;">Prompt</label>
             <textarea id="llmPrompt" rows="5" placeholder="Describe what to do with the selected Figma layers..." style="width:100%;resize:vertical;"></textarea>
+            <div style="margin-top:8px;padding:6px;border:1px solid var(--border);border-radius:4px;background:var(--bg-secondary);">
+              <div class="toggle-row" style="padding:0;margin:0 0 6px 0;">
+                <span>Use selected node image context</span>
+                <div class="toggle" id="llmUseSelectionImage"></div>
+              </div>
+              <label style="margin-top:4px;display:block;">Image scale</label>
+              <input id="llmCaptureScale" type="number" min="0.25" max="4" step="0.25" value="2" style="width:100%;">
+              <label style="margin-top:8px;display:block;">Feedback loops (max attempts)</label>
+              <input id="llmFeedbackLoops" type="number" min="1" max="5" step="1" value="2" style="width:100%;">
+              <div class="toggle-row" style="padding:0;margin-top:6px 0 0 0;">
+                <span>Auto-apply parsed DSL</span>
+                <div class="toggle on" id="llmAutoApply"></div>
+              </div>
+            </div>
             <button class="btn btn-primary" id="llmRun" style="width:100%;margin-top:8px;">Run</button>
             <div id="llmProgress" style="display:none;padding:8px 0;">Processing...</div>
+            <div id="llmStatus" style="padding:4px 0; font-size:10px; color:var(--text-muted);"></div>
             <pre id="llmResult" style="display:none;max-height:200px;overflow:auto;margin-top:8px;padding:8px;background:var(--bg-secondary);border-radius:4px;font-size:11px;"></pre>
           </div>
         </div>
@@ -917,7 +1044,7 @@
           if (el) el.classList.add("active");
         };
       });
-      var serverInput = $("server"), channelInput = $("channel"), apiKeyInput = $("apiKey"), rememberApiKeyToggle = $("rememberApiKey"), copyChannelBtn = $("copyChannel");
+      var serverInput = $("server"), channelInput = $("channel"), apiKeyInput = $("apiKey"), llmApiKeyInput = $("llmApiKey"), rememberApiKeyToggle = $("rememberApiKey"), copyChannelBtn = $("copyChannel");
       var connectBtn = $("connect"), connectText = $("connectText"), connectSpinner = $("connectSpinner");
       var disconnectBtn = $("disconnect"), selfTestBtn = $("selfTest");
       var statusDot = $("statusDot"), statusText = $("statusText"), pingDisplay = $("pingDisplay");
@@ -934,11 +1061,16 @@
       var copyCodeBtn = $("copyCodeBtn"), stopGenBtn = $("stopGenBtn"), applyToFigmaBtn = $("applyToFigmaBtn");
       var historyData = $("historyData"), historyCountBadge = $("historyCount");
       var tokenGrid = $("tokenGrid"), tokenCountBadge = $("tokenCount");
-      var quickSection = $("quickSection"), historySection = $("historySection"), tokensSection = $("tokensSection");
+      var quickSection = $("quickSection"), layoutSection = $("layoutSection"), historySection = $("historySection"), tokensSection = $("tokensSection");
+      var llmUseSelectionImageToggle = $("llmUseSelectionImage"), llmAutoApplyToggle = $("llmAutoApply");
+      var llmCaptureScaleInput = $("llmCaptureScale"), llmFeedbackLoopsInput = $("llmFeedbackLoops");
+      var llmStatus = $("llmStatus");
+      var layoutMode = "selection";
 
       // State
       var STORAGE_KEY = "figmaMcpBridgeState";
       var SESSION_API_KEY_KEY = "figmaMcpBridgeApiKey";
+      var SESSION_LLM_API_KEY_KEY = "figmaMcpBridgeLlmApiKey";
       var serverUrl = "", channelId = "", apiKey = "", rememberApiKey = false, polling = false;
       var stats = { cmd: 0, ok: 0, err: 0 };
       var logs = [], cmdHistory = [], tokens = [];
@@ -953,6 +1085,11 @@
       var currentEventSource = null;  // For SSE streaming
       var generatedCode = "";
       var sessionNonce = "";
+      var pendingDirectCommands = {};
+      var llmUseSelectionImage = true;
+      var llmAutoApply = true;
+      var llmFeedbackLoops = 2;
+      var llmCaptureScale = 2;
 
       // Messaging hardening: restrict origin + nonce handshake with plugin.
       var PARENT_ORIGIN = (function() {
@@ -969,6 +1106,52 @@
       function postToPlugin(pluginMessage) {
         if (sessionNonce) pluginMessage.nonce = sessionNonce;
         parent.postMessage({ pluginMessage: pluginMessage }, PARENT_ORIGIN);
+      }
+
+      function postCommandAndWait(command, timeoutMs) {
+        if (!command || !command.name) {
+          return Promise.reject(new Error("Invalid command"));
+        }
+
+        if (!channelId && command.name !== "llm_proxy") {
+          return Promise.reject(new Error("Not connected"));
+        }
+
+        var commandId = command.id || ("cmd-" + Date.now() + "-" + Math.floor(Math.random() * 1000));
+        command.id = commandId;
+        var timeout = timeoutMs || 15000;
+
+        return new Promise(function(resolve, reject) {
+          var done = false;
+          var timer = setTimeout(function() {
+            if (done) return;
+            done = true;
+            delete pendingDirectCommands[commandId];
+            reject(new Error("Command timeout"));
+          }, timeout);
+
+          pendingDirectCommands[commandId] = {
+            resolve: function(payload) {
+              if (done) return;
+              done = true;
+              clearTimeout(timer);
+              delete pendingDirectCommands[commandId];
+              resolve(payload);
+            },
+            reject: function(err) {
+              if (done) return;
+              done = true;
+              clearTimeout(timer);
+              delete pendingDirectCommands[commandId];
+              reject(err);
+            }
+          };
+
+          postToPlugin({ type: "command", command: command });
+          stats.cmd++; updateStats();
+          addHistory(command.name, command.payload || {});
+          addLog(command.name, "executing...", true);
+        });
       }
 
       // Request a nonce in case the plugin's initial init message was missed.
@@ -1007,17 +1190,95 @@
         }
         return "";
       }
+      function updateLlmUI() {
+        var p = $("llmProvider").value;
+        var keyLabel = $("llmApiKeyLabel");
+        var keyInput = $("llmApiKey");
+        var endLabel = $("llmEndpointLabel");
+        var endInput = $("llmEndpoint");
+        var modelInput = $("llmModel");
+        // Show/hide API key
+        var needsKey = (p === "openai" || p === "anthropic");
+        keyLabel.style.display = needsKey ? "block" : "none";
+        keyInput.style.display = needsKey ? "block" : "none";
+        // Show/hide endpoint
+        var needsEndpoint = (p === "custom");
+        endLabel.style.display = needsEndpoint ? "block" : "none";
+        endInput.style.display = needsEndpoint ? "block" : "none";
+        // For custom, show key fields too (optional)
+        if (p === "custom") { keyLabel.style.display = "block"; keyInput.style.display = "block"; }
+        // Default model placeholders
+        var defaults = { ollama: "qwen3-coder:30b", openai: "gpt-4o", anthropic: "claude-sonnet-4-5-20250929", custom: "" };
+        modelInput.placeholder = defaults[p] || "";
+        if (!modelInput.value) modelInput.value = "";
+        // Persist selection
+        var st = loadState(); st.llmProvider = p; saveState(st);
+      }
       function loadState() { try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) || {}; } catch(e) { return {}; } }
       function saveState(s) { try { localStorage.setItem(STORAGE_KEY, JSON.stringify(s)); } catch(e) {} }
       function loadSessionApiKey() { try { return sessionStorage.getItem(SESSION_API_KEY_KEY) || ""; } catch(e) { return ""; } }
       function saveSessionApiKey(k) { try { sessionStorage.setItem(SESSION_API_KEY_KEY, k || ""); } catch(e) {} }
+      function setLlmToggle(el, on) {
+        if (el) el.className = "toggle" + (on ? " on" : "");
+      }
+      function readNumberInput(el, fallback, min, max) {
+        var value = Number((el && el.value !== undefined) ? el.value : fallback);
+        if (!isFinite(value)) return fallback;
+        if (min !== undefined && value < min) value = min;
+        if (max !== undefined && value > max) value = max;
+        return value;
+      }
+      function setLlmStatus(message, isError) {
+        if (!llmStatus) return;
+        llmStatus.textContent = message || "";
+        llmStatus.style.color = isError ? "var(--error)" : "var(--text-muted)";
+      }
+      function syncLlmStateFromInputs(save) {
+        llmUseSelectionImage = isLlmToggleOn(llmUseSelectionImageToggle);
+        llmAutoApply = isLlmToggleOn(llmAutoApplyToggle);
+        llmFeedbackLoops = readNumberInput(llmFeedbackLoopsInput, 2, 1, 5);
+        llmCaptureScale = readNumberInput(llmCaptureScaleInput, 2, 0.25, 4);
+        if (llmFeedbackLoopsInput) llmFeedbackLoopsInput.value = String(llmFeedbackLoops);
+        if (llmCaptureScaleInput) llmCaptureScaleInput.value = String(llmCaptureScale);
+        if (!save) return;
+        var st = loadState();
+        st.llmUseSelectionImage = llmUseSelectionImage;
+        st.llmAutoApply = llmAutoApply;
+        st.llmFeedbackLoops = llmFeedbackLoops;
+        st.llmCaptureScale = llmCaptureScale;
+        saveState(st);
+      }
+      function restoreLlmState() {
+        var state = loadState();
+        llmUseSelectionImage = state.llmUseSelectionImage === undefined ? true : !!state.llmUseSelectionImage;
+        llmAutoApply = state.llmAutoApply === undefined ? true : !!state.llmAutoApply;
+        llmFeedbackLoops = readNumberInput(llmFeedbackLoopsInput, Number(state.llmFeedbackLoops) || 2, 1, 5);
+        llmCaptureScale = readNumberInput(llmCaptureScaleInput, Number(state.llmCaptureScale) || 2, 0.25, 4);
+        setLlmToggle(llmUseSelectionImageToggle, llmUseSelectionImage);
+        setLlmToggle(llmAutoApplyToggle, llmAutoApply);
+        if (llmFeedbackLoopsInput) llmFeedbackLoopsInput.value = String(llmFeedbackLoops);
+        if (llmCaptureScaleInput) llmCaptureScaleInput.value = String(llmCaptureScale);
+      }
+      function isLlmToggleOn(el) {
+        return !!(el && el.classList && el.classList.contains("on"));
+      }
       function currentApiKey() {
         if (!apiKeyInput) return "";
         return apiKeyInput.value.trim();
       }
+      function currentLlmApiKey() {
+        if (!llmApiKeyInput) return "";
+        return llmApiKeyInput.value.trim();
+      }
+      function loadSessionLlmApiKey() {
+        try { return sessionStorage.getItem(SESSION_LLM_API_KEY_KEY) || ""; } catch(e) { return ""; }
+      }
+      function saveSessionLlmApiKey(k) {
+        try { sessionStorage.setItem(SESSION_LLM_API_KEY_KEY, k || ""); } catch(e) {}
+      }
       function buildHeaders(base) {
         var headers = base ? Object.assign({}, base) : {};
-        var key = currentApiKey();
+        var key = currentLlmApiKey() || currentApiKey();
         if (key) headers["X-MCP-API-Key"] = key;
         return headers;
       }
@@ -1490,6 +1751,7 @@
         channelInput.disabled = connected;
         if (apiKeyInput) apiKeyInput.disabled = connected;
         quickSection.style.display = connected ? "block" : "none";
+        layoutSection.style.display = connected ? "block" : "none";
         historySection.style.display = connected ? "block" : "none";
         tokensSection.style.display = connected ? "block" : "none";
         if (typeof multiPlatformSection !== "undefined") multiPlatformSection.style.display = connected ? "block" : "none";
@@ -1615,6 +1877,15 @@
       }
 
       // Message handler
+      function parsePluginPayload(msg, key, fallback) {
+        var raw = msg ? msg[key] : undefined;
+        if (typeof raw === "string") {
+          try { return JSON.parse(raw); } catch (e) { return fallback; }
+        }
+        if (typeof raw === "undefined") return fallback;
+        return raw;
+      }
+
       window.onmessage = function(ev) {
         // Figma's sandbox bridge may relay messages with ev.source !== parent,
         // so we rely on the pluginMessage wrapper + nonce for authentication.
@@ -1629,11 +1900,21 @@
         if (sessionNonce && msg.nonce !== sessionNonce) return;
 
         if (msg.type === "command_result") {
-          if (!channelId) return;
-          var payload = msg.payload;
+          var resultForPending = msg.payload;
           if (typeof msg.payload_json === "string") {
-            try { payload = JSON.parse(msg.payload_json); } catch(e) { payload = { error: "Parse error" }; }
+            try { resultForPending = JSON.parse(msg.payload_json); } catch(e) { resultForPending = { error: "Parse error" }; }
           }
+
+          if (msg.command_id && pendingDirectCommands[msg.command_id]) {
+            if (msg.ok) {
+              pendingDirectCommands[msg.command_id].resolve({ ok: true, payload: resultForPending });
+            } else {
+              pendingDirectCommands[msg.command_id].reject(new Error((resultForPending && resultForPending.error) ? resultForPending.error : "Command failed"));
+            }
+          }
+
+          if (!channelId) return;
+          var payload = resultForPending;
           if (msg.ok) stats.ok++; else stats.err++;
           updateStats();
           addLog(msg.action || "result", msg.ok ? "OK" : (payload && payload.error ? payload.error : "Error"), msg.ok);
@@ -1645,15 +1926,17 @@
         }
 
         if (msg.type === "selection_update") {
-          updateInspector(msg.selection);
+          updateInspector(parsePluginPayload(msg, "selection_json", msg.selection));
         }
 
         if (msg.type === "tokens_update") {
-          updateTokens(msg.tokens);
+          updateTokens(parsePluginPayload(msg, "tokens_json", msg.tokens));
         }
 
         if (msg.type === "document_change") {
-          addLog("docchange", "Document changed (" + msg.changes.total + " changes)", true);
+          var changes = parsePluginPayload(msg, "changes_json", msg.changes || {});
+          var total = changes && typeof changes.total === "number" ? changes.total : 0;
+          addLog("docchange", "Document changed (" + total + " changes)", true);
           if (serverUrl && channelId) {
             fetch(serverUrl + "/plugin/event", {
               method: "POST",
@@ -1661,7 +1944,7 @@
               body: JSON.stringify({
                 channel_id: channelId,
                 event_type: "document_change",
-                changes: msg.changes
+                changes: changes
               })
             }).catch(function(err) {
               addLog("docchange", "Failed to send: " + err.message, false);
@@ -1684,6 +1967,11 @@
             rememberApiKey: rememberApiKey,
             apiKey: rememberApiKey ? apiKey : undefined
           });
+        };
+      }
+      if (llmApiKeyInput) {
+        llmApiKeyInput.oninput = function() {
+          saveSessionLlmApiKey(currentLlmApiKey());
         };
       }
       copyChannelBtn.onclick = function() {
@@ -1817,14 +2105,50 @@
       });
 
       // Quick actions
+      var applyLayoutModeToPayload = function(action, payload) {
+        if (action === "align" && payload.align_mode === undefined && payload.mode === undefined) {
+          payload.align_mode = layoutMode;
+        } else if (action === "distribute" && payload.distribute_mode === undefined && payload.mode === undefined) {
+          payload.distribute_mode = layoutMode;
+        } else if (action === "masonry_layout" && payload.distribute_mode === undefined && payload.mode === undefined) {
+          payload.distribute_mode = layoutMode;
+        }
+      };
+
+      // Layout mode switch (selection/viewport)
+      var layoutModeButtons = document.querySelectorAll("[data-layout-mode]");
+      var applyLayoutMode = function(mode) {
+        layoutMode = (mode === "viewport" ? "viewport" : "selection");
+        layoutModeButtons.forEach(function(btn) {
+          btn.classList.toggle("active", btn.getAttribute("data-layout-mode") === layoutMode);
+        });
+      };
+      layoutModeButtons.forEach(function(btn) {
+        btn.onclick = function() {
+          applyLayoutMode(btn.getAttribute("data-layout-mode"));
+        };
+      });
+
       document.querySelectorAll(".quick-btn").forEach(function(b) {
         b.onclick = function() {
           var action = b.getAttribute("data-action");
           if (!channelId) return;
-          var cmd = { id: "quick-" + Date.now(), name: action, payload: {} };
+          var rawPayload = b.getAttribute("data-payload");
+          var parsedPayload = {};
+
+          if (rawPayload) {
+            var safePayload = safeParseJson(rawPayload);
+            if (typeof safePayload === "object" && safePayload !== null) {
+              parsedPayload = safePayload;
+            }
+          }
+
+          applyLayoutModeToPayload(action, parsedPayload);
+
+          var cmd = { id: "quick-" + Date.now(), name: action, payload: parsedPayload };
           postToPlugin({ type: "command", command: cmd });
           addLog(action, "executing...", true);
-          addHistory(action, {});
+          addHistory(action, parsedPayload);
           stats.cmd++; updateStats();
         };
       });
@@ -1856,6 +2180,7 @@
       }
       setupToggle("toggleLog", "logWrapper");
       setupToggle("toggleQuick", "quickContent");
+      setupToggle("toggleLayout", "layoutContent");
       setupToggle("toggleHistory", "historyContent");
       setupToggle("toggleInspector", "inspectorContent");
       setupToggle("toggleTokens", "tokensContent");
@@ -2129,38 +2454,557 @@
 
       // ============== END NEW FEATURES ==============
 
-      // Direct AI Execution
+      function extractTextFromCodeBlock(text) {
+        if (typeof text !== "string") return "";
+        var fenced = text.match(/```(?:json|javascript|css|html|tsx|jsx|xml)?\s*([\s\S]*?)```/i);
+        if (fenced && fenced[1]) return fenced[1].trim();
+        return text.trim();
+      }
+
+      function safeParseJson(text) {
+        if (typeof text !== "string") return null;
+        try {
+          return JSON.parse(text);
+        } catch (e) {
+          return null;
+        }
+      }
+
+      function parseColorString(color) {
+        if (typeof color !== "string") return null;
+        var value = color.trim().toLowerCase();
+        if (!value) return null;
+
+        var hex = value;
+        if (hex.charAt(0) !== "#") return null;
+
+        hex = hex.substring(1);
+        if (hex.length === 3) {
+          hex = hex.charAt(0) + hex.charAt(0) + hex.charAt(1) + hex.charAt(1) + hex.charAt(2) + hex.charAt(2);
+        }
+        if (hex.length === 4) {
+          hex = hex.substring(0, 3);
+        }
+        if (hex.length !== 6) return null;
+        if (!/^([0-9a-f]{6})$/i.test(hex)) return null;
+        return "#" + hex;
+      }
+
+      function normalizeNumber(value, fallback) {
+        if (typeof value === "number" && isFinite(value)) return value;
+        var parsed = Number(value);
+        return isFinite(parsed) ? parsed : fallback;
+      }
+
+      function pickAction(rawAction) {
+        if (!rawAction) return "";
+        var action = String(rawAction).toLowerCase().trim();
+        if (action === "rectangle" || action === "rect") return "create_rectangle";
+        if (action === "ellipse" || action === "circle") return "create_ellipse";
+        if (action === "frame") return "create_frame";
+        if (action === "text") return "create_text";
+        if (action === "create_frame" || action === "create_rectangle" || action === "create_ellipse" || action === "create_text") return action;
+        return "";
+      }
+
+      function normalizeOperation(raw) {
+        if (!raw || typeof raw !== "object") return null;
+        var normalized = {};
+        var action = pickAction(raw.action || raw.type || raw.kind || raw.op || raw.operation);
+        if (!action) return null;
+        normalized.action = action;
+        normalized.name = raw.name || raw.label || undefined;
+
+        normalized.x = normalizeNumber(raw.x, raw.left);
+        normalized.y = normalizeNumber(raw.y, raw.top);
+        normalized.width = normalizeNumber(raw.width, raw.w);
+        normalized.height = normalizeNumber(raw.height, raw.h);
+
+        if (raw.cornerRadius !== undefined || raw.corner_radius !== undefined) {
+          normalized.cornerRadius = normalizeNumber(raw.cornerRadius, raw.corner_radius);
+        }
+
+        if (action === "create_text") {
+          var textValue = raw.text || raw.characters || raw.content;
+          if (typeof textValue === "string") normalized.text = textValue;
+        }
+
+        var fillValue = raw.fill || (raw.fills && raw.fills[0] && (raw.fills[0].color || raw.fills[0])) || raw.color;
+        var color = parseColorString(fillValue);
+        if (color) {
+          normalized.fills = [{ type: "SOLID", color: color }];
+        }
+
+        return normalized;
+      }
+
+      function parseOperationFromLine(line) {
+        var m = line.match(/^(?:[-*]|\d+\.)?\s*(?:create|add|make|draw)?\s*(frame|rectangle|rect|ellipse|circle|text)\b(.*)$/i);
+        if (!m) return null;
+        var detail = (m[2] || "").trim();
+        var normalized = { action: pickAction(m[1]) };
+        if (!normalized.action) return null;
+
+        var nameMatch = detail.match(/\b(?:name|label)\s*[:=]\s*["']([^"']+)["']/i);
+        if (!nameMatch) {
+          nameMatch = detail.match(/\b(?:name|label)\s*[:=]\s*([^\s,;]+)/i);
+        }
+        if (nameMatch && nameMatch[1]) normalized.name = nameMatch[1];
+
+        var parseProp = function(pattern, fallback) {
+          var matched = detail.match(pattern);
+          return matched ? normalizeNumber(matched[1], fallback) : undefined;
+        };
+
+        normalized.x = parseProp(/\b(?:x|left)\s*[:=]?\s*(-?\d+(?:\.\d+)?)/i, normalized.x);
+        normalized.y = parseProp(/\b(?:y|top)\s*[:=]?\s*(-?\d+(?:\.\d+)?)/i, normalized.y);
+        normalized.width = parseProp(/\b(?:width|w)\s*[:=]?\s*(\d+(?:\.\d+)?)/i, normalized.width);
+        normalized.height = parseProp(/\b(?:height|h)\s*[:=]?\s*(\d+(?:\.\d+)?)/i, normalized.height);
+        normalized.cornerRadius = parseProp(/\b(?:radius|corner[_\s]?radius|r)\s*[:=]?\s*(\d+(?:\.\d+)?)/i, normalized.cornerRadius);
+
+        if (normalized.action === "create_text") {
+          var textMatch = detail.match(/\btext\s*[:=]\s*["']([^"']+)["']/i);
+          if (!textMatch) {
+            textMatch = detail.match(/\btext\s*[:=]\s*([^,;]+)/i);
+          }
+          if (textMatch && textMatch[1]) normalized.text = textMatch[1].trim();
+        }
+
+        var colorMatch = detail.match(/\b(?:fill|color)\s*[:=]?\s*(#[0-9a-f]{3,8}|[a-z]+)/i);
+        if (colorMatch && colorMatch[1]) {
+          var color = parseColorString(colorMatch[1]);
+          if (color) normalized.fills = [{ type: "SOLID", color: color }];
+        }
+        return normalized;
+      }
+
+      function normalizeOperationsFromText(text) {
+        var candidate = extractTextFromCodeBlock(text || "");
+        if (!candidate) return [];
+
+        var parsed = safeParseJson(candidate);
+        if (!parsed) {
+          var head = candidate.indexOf("[");
+          var tail = candidate.lastIndexOf("]");
+          if (head >= 0 && tail > head) parsed = safeParseJson(candidate.substring(head, tail + 1));
+        }
+
+        if (Array.isArray(parsed)) {
+          var arrOps = [];
+          for (var i = 0; i < parsed.length; i++) {
+            var op = normalizeOperation(parsed[i]);
+            if (op) arrOps.push(op);
+          }
+          return arrOps;
+        }
+
+        if (parsed && typeof parsed === "object") {
+          if (Array.isArray(parsed.operations)) {
+            return parsed.operations
+              .map(normalizeOperation)
+              .filter(function(op) { return !!op; });
+          }
+          if (Array.isArray(parsed.nodes)) {
+            return parsed.nodes
+              .map(normalizeOperation)
+              .filter(function(op) { return !!op; });
+          }
+          if (Array.isArray(parsed.dsl)) {
+            return parsed.dsl
+              .map(normalizeOperation)
+              .filter(function(op) { return !!op; });
+          }
+          var one = normalizeOperation(parsed);
+          if (one) return [one];
+        }
+
+        var operations = [];
+        var lines = candidate.split(/\r?\n/);
+        for (var i = 0; i < lines.length; i++) {
+          var parsedLine = parseOperationFromLine(lines[i]);
+          if (parsedLine) operations.push(parsedLine);
+        }
+        return operations;
+      }
+
+      function showDirectAIResult(raw, operations, source) {
+        generatedCode = raw || "";
+        if (typeof codegenOutput !== "undefined" && codegenOutput) {
+          codegenOutput.textContent = generatedCode;
+        }
+        if (copyCodeBtn) copyCodeBtn.disabled = !generatedCode;
+        if (applyToFigmaBtn) applyToFigmaBtn.disabled = !generatedCode;
+        if (generatedCode && source) addLog("ai", source + " output received", true);
+        return generatedCode;
+      }
+
+      async function captureSelectionImageContext() {
+        if (!channelId) throw new Error("Not connected to plugin");
+
+        var commandName = "capture_selection_image";
+        var payload = {
+          scale: llmCaptureScale,
+          max_nodes: 1,
+          max_payload_chars: 800000
+        };
+
+        if (!lastSelection || !lastSelection.nodes || !lastSelection.nodes.length) {
+          commandName = "export_viewport";
+          payload = {
+            scale: Math.min(llmCaptureScale, 1),
+            max_nodes: 1,
+            max_payload_chars: 800000,
+            format: "PNG"
+          };
+        }
+
+        var response = await postCommandAndWait({
+          name: commandName,
+          payload: payload
+        }, 20000);
+
+        var nodes = response && response.payload && response.payload.nodes ? response.payload.nodes : [];
+        var first = nodes && nodes.length ? nodes[0] : null;
+        if (!first || first.error) {
+          return null;
+        }
+        return first;
+      }
+
+      function buildSelectionSummaryForPrompt() {
+        if (!lastSelection || !lastSelection.nodes || !lastSelection.nodes.length) return "";
+        var summaryNodes = lastSelection.nodes.slice(0, 5).map(function(node) {
+          return "- " + node.name + " [" + (node.type || "UNKNOWN") + "] id=" + (node.id || "n/a") +
+            " x=" + Math.round(node.x || 0) + " y=" + Math.round(node.y || 0) +
+            " w=" + Math.round(node.width || 0) + " h=" + Math.round(node.height || 0) +
+            (node.fills ? " fills=" + (Array.isArray(node.fills) ? node.fills.length : 0) : "") +
+            (node.type === "TEXT" && node.characters ? " text=\"" + String(node.characters).replace(/"/g, "\\\"") + "\"" : "");
+        }).join("\n");
+        var countInfo = lastSelection.count ? ("Selected " + lastSelection.count + " node(s)") : "Selection";
+        return countInfo + ":\n" + summaryNodes + "\n\n";
+      }
+
+      function buildDirectPrompt(userPrompt, selectionContext, imageContext) {
+        var context = "";
+        if (selectionContext) {
+          context += "\n\nContext:\n" + selectionContext;
+        }
+        if (imageContext) {
+          context += "\nImage context has been provided for selected node(s). Use visual clues for relative placement.";
+        }
+
+        var instruction = [
+          "You are a deterministic Figma DSL translator.",
+          "Return ONLY compact JSON that can be used to execute_dsl.",
+          "Allowed action values are: create_frame, create_rectangle, create_ellipse, create_text.",
+          "Each operation supports fields: action, name, x, y, width, height, text, fills, cornerRadius.",
+          "If using fills, use [{\"type\":\"SOLID\",\"color\":\"#rrggbb\"}].",
+          "Do not include explanation, markdown, or commentary."
+        ].join(" ");
+
+        return instruction + "\n\nPrompt: " + userPrompt + context;
+      }
+
+      function buildLlmConfig(provider, promptText, imageContext) {
+        var key = currentLlmApiKey() || currentApiKey();
+        var model = ($("llmModel").value || "").trim();
+        var endpoint = $("llmEndpoint").value.trim();
+        var cfg = {
+          provider: provider,
+          model: model,
+          imageContext: imageContext,
+          method: "POST",
+          usePluginProxy: true
+        };
+
+        if (provider === "ollama") {
+          cfg.url = "http://localhost:11434/api/chat";
+          cfg.supportsImage = false;
+          cfg.timeoutMs = 30000;
+          cfg.headers = { "Content-Type": "application/json" };
+          cfg.body = {
+            model: model || "qwen3-coder:30b",
+            messages: [{ role: "user", content: promptText }],
+            stream: false
+          };
+          cfg.parse = function(d) {
+            if (d && d.message && typeof d.message.content === "string") return d.message.content;
+            return JSON.stringify(d || {});
+          };
+          return cfg;
+        }
+
+        if (provider === "openai") {
+          if (!key) throw new Error("API key required for OpenAI");
+          var openaiContent = [{ type: "text", text: promptText }];
+          if (imageContext && imageContext.base64 && imageContext.format) {
+            openaiContent.push({
+              type: "image_url",
+              image_url: { url: "data:image/" + imageContext.format.toLowerCase() + ";base64," + imageContext.base64 }
+            });
+          }
+          cfg.url = "https://api.openai.com/v1/chat/completions";
+          cfg.usePluginProxy = true;
+          cfg.supportsImage = true;
+          cfg.headers = { "Content-Type": "application/json", Authorization: "Bearer " + key };
+          cfg.body = {
+            model: model || "gpt-4o",
+            messages: [{ role: "user", content: openaiContent }]
+          };
+          cfg.parse = function(d) {
+            if (!d || !d.choices || !d.choices[0] || !d.choices[0].message) {
+              return JSON.stringify(d || {});
+            }
+            return d.choices[0].message.content || "";
+          };
+          return cfg;
+        }
+
+        if (provider === "anthropic") {
+          if (!key) throw new Error("API key required for Anthropic");
+          var anthropicContent = [{ type: "text", text: promptText }];
+          if (imageContext && imageContext.base64 && imageContext.format) {
+            anthropicContent.push({
+              type: "image",
+              source: { type: "base64", media_type: "image/" + imageContext.format.toLowerCase(), data: imageContext.base64 }
+            });
+          }
+          cfg.url = "https://api.anthropic.com/v1/messages";
+          cfg.usePluginProxy = true;
+          cfg.supportsImage = true;
+          cfg.headers = {
+            "Content-Type": "application/json",
+            "x-api-key": key,
+            "anthropic-version": "2023-06-01",
+            "anthropic-dangerous-direct-browser-access": "true"
+          };
+          cfg.body = {
+            model: model || "claude-sonnet-4-5-20250929",
+            max_tokens: 4096,
+            messages: [{ role: "user", content: anthropicContent }]
+          };
+          cfg.parse = function(d) {
+            if (!d || !d.content) return JSON.stringify(d || {});
+            if (Array.isArray(d.content)) {
+              return d.content.map(function(block) {
+                return block.type === "text" ? block.text : "";
+              }).join("");
+            }
+            return JSON.stringify(d.content);
+          };
+          return cfg;
+        }
+
+        if (provider === "custom") {
+          cfg.url = endpoint || "http://localhost:8932";
+          cfg.usePluginProxy = true;
+          cfg.supportsImage = false;
+          cfg.headers = { "Content-Type": "application/json" };
+          if (key) cfg.headers.Authorization = "Bearer " + key;
+          cfg.body = {
+            model: model || "",
+            messages: [{ role: "user", content: promptText }],
+            stream: false
+          };
+          cfg.parse = function(d) {
+            if (!d) return "";
+            if (d.choices && d.choices[0] && d.choices[0].message && d.choices[0].message.content) return d.choices[0].message.content;
+            if (d.message) return d.message;
+            return JSON.stringify(d);
+          };
+          return cfg;
+        }
+        return null;
+      }
+
+      function callDirectLLM(config) {
+        if (config.usePluginProxy) {
+          return postCommandAndWait({
+            name: "llm_proxy",
+            payload: {
+              url: config.url,
+              method: config.method || "POST",
+              headers: config.headers || {},
+              body: config.body,
+              timeoutMs: config.timeoutMs || 30000
+            }
+          }, 45000).then(function(response) {
+            if (!response || response.ok !== true) {
+              throw new Error("LLM proxy command failed");
+            }
+            var payload = response.payload || {};
+            if (!payload.ok) {
+              var message = payload.error || "LLM request failed";
+              if (payload.status) {
+                message = "HTTP " + payload.status + " " + (payload.statusText || "") + ": " + message;
+              }
+              throw new Error(message);
+            }
+            return config.parse(payload.data);
+          });
+        }
+
+        return fetch(config.url, {
+          method: "POST",
+          headers: config.headers,
+          body: JSON.stringify(config.body)
+        }).then(function(r) {
+          if (!r.ok) {
+            return r.text().then(function(t) {
+              throw new Error(r.status + ": " + t.substring(0, 200));
+            });
+          }
+          return r.json();
+        }).then(function(data) {
+          return config.parse(data);
+        });
+      }
+
+      async function applyOperationsDirectly(operations) {
+        if (!Array.isArray(operations) || !operations.length) return { ok: false, payload: { error: "No operations" } };
+        if (!channelId) throw new Error("Not connected");
+        var result = await postCommandAndWait({
+          name: "execute_dsl",
+          payload: { operations: operations }
+        }, 20000);
+
+        var created = (result && result.payload && typeof result.payload.created !== "undefined")
+          ? result.payload.created
+          : null;
+        if (!result.ok) {
+          return result;
+        }
+        if (created !== null && created === 0) {
+          return { ok: false, payload: { error: "No nodes were created" } };
+        }
+        addLog("apply", "Direct AI operations executed", true);
+        return result;
+      }
+
+      // Direct AI Execution (multi-provider)
       $("llmRun").onclick = function() {
+        var runButton = this;
+        var originalLabel = runButton.textContent;
         var prompt = $("llmPrompt").value.trim();
         var provider = $("llmProvider").value;
-        var key = $("llmApiKey").value.trim();
-        
-        if (!prompt) { alert("Please enter a prompt"); return; }
-        if (!key) { alert("Please enter an AI API Key in Settings"); return; }
-        
+        var model = $("llmModel").value.trim();
+        var endpoint = $("llmEndpoint").value.trim();
+
+        if (!prompt) { addLog("ai", "Please enter a prompt", false); return; }
+
+        syncLlmStateFromInputs(true);
+
         $("llmProgress").style.display = "block";
         $("llmResult").style.display = "none";
-        
-        // Example: Simple OpenAI call (Can be expanded to other providers)
-        var url = provider === "openai" ? "https://api.openai.com/v1/chat/completions" : "";
-        var body = provider === "openai" ? JSON.stringify({
-          model: "gpt-4o",
-          messages: [{role: "user", content: prompt + "\n\nContext: Selected Figma layers metadata: " + JSON.stringify(lastSelection)}]
-        }) : "";
+        runButton.disabled = true;
+        runButton.textContent = "Running...";
+        setLlmStatus("Starting...");
+        if (endpoint && !endpoint.startsWith("http")) {
+          endpoint = normalizeUrl(endpoint);
+        }
+        if (endpoint) $("llmEndpoint").value = endpoint;
 
-        fetch(url, {
-          method: "POST",
-          headers: { "Content-Type": "application/json", "Authorization": "Bearer " + key },
-          body: body
-        }).then(r => r.json()).then(data => {
-          $("llmProgress").style.display = "none";
-          $("llmResult").style.display = "block";
-          $("llmResult").textContent = data.choices[0].message.content;
-          addLog("ai", "Direct AI action completed", true);
-        }).catch(e => {
-          $("llmProgress").style.display = "none";
-          addLog("ai", "AI Error: " + e.message, false);
-        });
+        var selectionContext = "";
+        if (lastSelection) {
+          selectionContext = buildSelectionSummaryForPrompt() ||
+            JSON.stringify(lastSelection, function(key, value) {
+              if (key === "children") return value && value.length ? value : null;
+              return value;
+            }, 2);
+          if (selectionContext.length > 3000) selectionContext = selectionContext.substring(0, 3000) + "...";
+        }
+
+        var basePrompt = buildDirectPrompt(prompt, selectionContext, null);
+        // Persist selection
+        var st = loadState();
+        st.llmModel = model;
+        st.llmProvider = provider;
+        st.llmEndpoint = endpoint;
+        saveState(st);
+
+        (async function() {
+          try {
+            var imageContext = null;
+            if (llmUseSelectionImage) {
+              if (!lastSelection || !lastSelection.nodes || !lastSelection.nodes.length) {
+                setLlmStatus("Selection image enabled but no selected node. Using viewport context if available.");
+              } else {
+                setLlmStatus("Capturing selected node image...");
+              }
+              try {
+                imageContext = await captureSelectionImageContext();
+                if (imageContext) basePrompt = buildDirectPrompt(prompt, selectionContext, imageContext);
+              } catch (e) {
+                addLog("ai", "Image capture failed: " + e.message + ". Continue without image.", false);
+                setLlmStatus("Image capture failed, continue without image");
+              }
+            }
+
+            var candidateText = "";
+            var operations = [];
+            var lastError = "";
+            var usedText = "";
+
+            for (var attempt = 1; attempt <= llmFeedbackLoops; attempt++) {
+              var attemptPrompt = basePrompt;
+              if (attempt > 1 && lastError) {
+                attemptPrompt += "\n\nPrevious output was invalid: " + lastError + ". Return only strict JSON.";
+              }
+
+              var cfg = buildLlmConfig(provider, attemptPrompt, imageContext);
+              if (!cfg) throw new Error("Unknown provider: " + provider);
+              cfg.endpoint = endpoint;
+
+              setLlmStatus("LLM call (" + attempt + "/" + llmFeedbackLoops + ") ...");
+              usedText = await callDirectLLM(cfg);
+              candidateText = typeof usedText === "string" ? usedText : JSON.stringify(usedText || "");
+              operations = normalizeOperationsFromText(candidateText);
+              if (!operations.length) {
+                lastError = "No operations parsed from: " + candidateText.substring(0, 180);
+                continue;
+              }
+
+              try {
+                if (llmAutoApply) {
+                  setLlmStatus("Applying " + operations.length + " operation(s)...");
+                  var applyResult = await applyOperationsDirectly(operations);
+                  if (!applyResult || !applyResult.ok) {
+                    lastError = "Execution failed: " + JSON.stringify((applyResult && applyResult.payload) || {});
+                    continue;
+                  }
+                  addLog("ai", "Direct AI applied (" + operations.length + " op(s))", true);
+                } else {
+                  addLog("ai", "Direct AI parsed " + operations.length + " op(s). Auto-apply disabled.", true);
+                }
+                break;
+              } catch (applyErr) {
+                lastError = String(applyErr && applyErr.message ? applyErr.message : applyErr);
+                if (attempt >= llmFeedbackLoops) {
+                  throw applyErr;
+                }
+              }
+            }
+
+            if (!operations.length) {
+              throw new Error("No valid operations after " + llmFeedbackLoops + " attempt(s). Last error: " + lastError);
+            }
+
+            showDirectAIResult(candidateText, operations, "Direct AI (" + provider + "/" + (model || "default") + ")");
+            $("llmResult").style.display = "block";
+            $("llmResult").textContent = candidateText;
+            setLlmStatus(llmAutoApply ? "Done" : "Parsed. Manual apply is OFF.");
+            addLog("ai", "Direct AI result ready. Parsed " + operations.length + " op(s).", true);
+          } catch (e) {
+            setLlmStatus("Error", true);
+            $("llmResult").style.display = "block";
+            $("llmResult").textContent = "Error: " + e.message;
+            addLog("ai", "AI Error (" + provider + "): " + e.message, false);
+          } finally {
+            $("llmProgress").style.display = "none";
+            runButton.disabled = false;
+            runButton.textContent = originalLabel;
+          }
+        })();
       };
 
       // Load saved state and auto-connect
@@ -2175,6 +3019,47 @@
         apiKeyInput.value = initialApiKey;
         apiKey = initialApiKey;
         saveSessionApiKey(apiKey);
+      }
+      var initialLlmApiKey = loadSessionLlmApiKey();
+      if (initialLlmApiKey && llmApiKeyInput) {
+        llmApiKeyInput.value = initialLlmApiKey;
+        saveSessionLlmApiKey(initialLlmApiKey);
+      }
+
+      // Restore Direct AI provider/model selection
+      if (state.llmProvider && $("llmProvider")) {
+        $("llmProvider").value = state.llmProvider;
+      }
+      if (state.llmModel && $("llmModel")) {
+        $("llmModel").value = state.llmModel;
+      }
+      if (state.llmEndpoint && $("llmEndpoint")) {
+        $("llmEndpoint").value = state.llmEndpoint;
+      }
+      restoreLlmState();
+      updateLlmUI();
+
+      if (llmUseSelectionImageToggle) {
+        llmUseSelectionImageToggle.onclick = function() {
+          setLlmToggle(llmUseSelectionImageToggle, !isLlmToggleOn(llmUseSelectionImageToggle));
+          syncLlmStateFromInputs(true);
+        };
+      }
+      if (llmAutoApplyToggle) {
+        llmAutoApplyToggle.onclick = function() {
+          setLlmToggle(llmAutoApplyToggle, !isLlmToggleOn(llmAutoApplyToggle));
+          syncLlmStateFromInputs(true);
+        };
+      }
+      if (llmFeedbackLoopsInput) {
+        llmFeedbackLoopsInput.onchange = function() {
+          syncLlmStateFromInputs(true);
+        };
+      }
+      if (llmCaptureScaleInput) {
+        llmCaptureScaleInput.onchange = function() {
+          syncLlmStateFromInputs(true);
+        };
       }
 
       // Auto-connect if we have a saved server URL
