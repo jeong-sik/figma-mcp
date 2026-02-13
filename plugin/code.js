@@ -935,38 +935,61 @@ const handlers = {
     const sel = figma.currentPage.selection;
     if (sel.length < 2) return { error: "Select at least 2 nodes" };
     const dir = (p.direction || "LEFT").toUpperCase();
+    const alignMode = String(p.align_mode || p.mode || "selection").toLowerCase();
+    const isViewport = alignMode === "viewport";
     const minX = Math.min.apply(null, sel.map(function(n) { return n.x; }));
     const maxX = Math.max.apply(null, sel.map(function(n) { return n.x + n.width; }));
     const minY = Math.min.apply(null, sel.map(function(n) { return n.y; }));
     const maxY = Math.max.apply(null, sel.map(function(n) { return n.y + n.height; }));
-    const viewportCenter = figma.viewport.center || { x: 0, y: 0 };
+    const centerX = (figma.viewport.center && figma.viewport.center.x) || 0;
+    const centerY = (figma.viewport.center && figma.viewport.center.y) || 0;
+    const bboxW = maxX - minX;
+    const bboxH = maxY - minY;
+    const bboxCx = minX + bboxW / 2;
+    const bboxCy = minY + bboxH / 2;
+    const dx = alignMode === "viewport" ? (centerX - bboxCx) : 0;
+    const dy = alignMode === "viewport" ? (centerY - bboxCy) : 0;
+    const targetX = isViewport ? centerX : bboxCx;
+    const targetY = isViewport ? centerY : bboxCy;
     let target;
 
     if (dir === "LEFT") target = minX;
     else if (dir === "RIGHT") target = maxX;
     else if (dir === "TOP") target = minY;
     else if (dir === "BOTTOM") target = maxY;
-    else if (dir === "CENTER_H") target = viewportCenter.x;
-    else if (dir === "CENTER_V") target = viewportCenter.y;
 
     for (let i = 0; i < sel.length; i++) {
       const node = sel[i];
-      if (dir === "LEFT") node.x = target;
-      else if (dir === "RIGHT") node.x = target - node.width;
-      else if (dir === "TOP") node.y = target;
-      else if (dir === "BOTTOM") node.y = target - node.height;
-      else if (dir === "CENTER_H") node.x = (viewportCenter.x + (node.x + node.width / 2 - (minX + maxX) / 2)) - node.width / 2;
-      else if (dir === "CENTER_V") node.y = (viewportCenter.y + (node.y + node.height / 2 - (minY + maxY) / 2)) - node.height / 2;
+      if (dir === "LEFT") node.x = target + dx;
+      else if (dir === "RIGHT") node.x = target - node.width + dx;
+      else if (dir === "TOP") node.y = target + dy;
+      else if (dir === "BOTTOM") node.y = target - node.height + dy;
+      else if (dir === "CENTER_H") node.x = targetX - (node.width / 2);
+      else if (dir === "CENTER_V") node.y = targetY - (node.height / 2);
+      else return { error: "Invalid direction" };
     }
-    return { aligned: sel.length, direction: dir };
+    return { aligned: sel.length, direction: dir, align_mode: alignMode };
   }),
 
   distribute: H.simple((p) => {
     const sel = figma.currentPage.selection;
     if (sel.length < 2) return { error: "Select at least 2 nodes" };
     const axis = (p.axis || "horizontal").toLowerCase();
+    const distributeMode = String(p.distribute_mode || p.mode || "selection").toLowerCase();
+    const isViewport = distributeMode === "viewport";
+    const minX = Math.min.apply(null, sel.map(function(n) { return n.x; }));
+    const minY = Math.min.apply(null, sel.map(function(n) { return n.y; }));
+    const maxX = Math.max.apply(null, sel.map(function(n) { return n.x + n.width; }));
+    const maxY = Math.max.apply(null, sel.map(function(n) { return n.y + n.height; }));
+    const bboxW = maxX - minX;
+    const bboxH = maxY - minY;
+    const viewportCenter = figma.viewport.center || { x: 0, y: 0 };
+    const anchorOffsetX = isViewport ? (viewportCenter.x - (minX + bboxW / 2)) : 0;
+    const anchorOffsetY = isViewport ? (viewportCenter.y - (minY + bboxH / 2)) : 0;
+
     const sorted = sel.slice().sort(function(a, b) { return axis === "horizontal" ? a.x - b.x : a.y - b.y; });
     if (sorted.length < 2) return { error: "Select at least 2 nodes" };
+    if (axis !== "horizontal" && axis !== "vertical") return { error: "Invalid axis" };
 
     const first = sorted[0];
     const last = sorted[sorted.length - 1];
@@ -986,7 +1009,78 @@ const handlers = {
       else sorted[i].y = cursor;
       cursor += axis === "horizontal" ? sorted[i].width : sorted[i].height;
     }
+
+    if (isViewport) {
+      for (let i = 0; i < sorted.length; i++) {
+        if (axis === "horizontal") sorted[i].x += anchorOffsetX;
+        else sorted[i].y += anchorOffsetY;
+      }
+
+      return { distributed: sel.length, axis, distribute_mode: distributeMode };
+    }
     return { distributed: sel.length, axis };
+  }),
+
+  masonry_layout: H.simple((p) => {
+    const sel = figma.currentPage.selection;
+    if (sel.length < 2) return { error: "Select at least 2 nodes" };
+
+    const columns = clampNumeric(Number(p.columns), 1, 12, 3);
+    const gapX = clampNumeric(Number(p.gap_x), 0, 200, 16);
+    const gapY = clampNumeric(Number(p.gap_y), 0, 200, 16);
+    const mode = String(p.distribute_mode || "selection").toLowerCase();
+
+    const nodes = sel.slice().sort(function(a, b) {
+      return a.y === b.y ? a.x - b.x : a.y - b.y;
+    });
+    const minX = Math.min.apply(null, nodes.map(function(n) { return n.x; }));
+    const minY = Math.min.apply(null, nodes.map(function(n) { return n.y; }));
+    const maxNodeWidth = nodes.reduce(function(acc, n) { return Math.max(acc, n.width || 0); }, 0);
+    const colWidth = Math.max(maxNodeWidth, 1);
+    const heights = new Array(columns).fill(0);
+    const viewportCenter = figma.viewport.center || { x: 0, y: 0 };
+    const viewportCenterX = viewportCenter.x;
+    const viewportCenterY = viewportCenter.y;
+
+    let placed = 0;
+    for (let i = 0; i < nodes.length; i++) {
+      const node = nodes[i];
+      let targetCol = 0;
+      for (let c = 1; c < columns; c++) {
+        if (heights[c] < heights[targetCol]) targetCol = c;
+      }
+      const x = minX + targetCol * (colWidth + gapX);
+      const y = minY + heights[targetCol];
+      node.x = x;
+      node.y = y;
+      heights[targetCol] += (node.height || 0) + gapY;
+      placed++;
+    }
+
+    if (mode === "viewport") {
+      const usedMaxX = Math.max.apply(null, nodes.map(function(n) { return n.x + n.width; }));
+      const usedMaxY = Math.max.apply(null, nodes.map(function(n) { return n.y + n.height; }));
+      const usedMinX = Math.min.apply(null, nodes.map(function(n) { return n.x; }));
+      const usedMinY = Math.min.apply(null, nodes.map(function(n) { return n.y; }));
+      const usedCx = usedMinX + (usedMaxX - usedMinX) / 2;
+      const usedCy = usedMinY + (usedMaxY - usedMinY) / 2;
+      const dx = viewportCenterX - usedCx;
+      const dy = viewportCenterY - usedCy;
+
+      for (let i = 0; i < nodes.length; i++) {
+        const node = nodes[i];
+        node.x += dx;
+        node.y += dy;
+      }
+    }
+
+    return {
+      mode: mode,
+      columns: columns,
+      gap_x: gapX,
+      gap_y: gapY,
+      placed: placed
+    };
   }),
 
   // === Style (21) ===
