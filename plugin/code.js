@@ -3,7 +3,7 @@
  * 100 actions, ~800 lines (vs 2500 lines before)
  */
 
-figma.showUI(__html__, { width: 360, height: 600 });
+figma.showUI(__html__, { width: 460, height: 640 });
 
 // Base64 encoder for Uint8Array (btoa is not available in Figma plugin sandbox)
 const _b64chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
