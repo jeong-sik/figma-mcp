@@ -54,7 +54,7 @@ module Cache = struct
 
   (** TTL for general cache entries (hours) *)
   let ttl_hours =
-    get_float ~default:24.0 "FIGMA_MCP_CACHE_TTL_HOURS"
+    get_float ~default:8.0 "FIGMA_MCP_CACHE_TTL_HOURS"
 
   (** TTL for variable cache entries (hours) *)
   let ttl_variables_hours =
