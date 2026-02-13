@@ -40,9 +40,10 @@ let enum_prop options desc : Yojson.Safe.t =
     ("description", `String desc);
   ]
 
-let array_prop desc : Yojson.Safe.t =
+let array_prop ?(items_type="string") desc : Yojson.Safe.t =
   `Assoc [
     ("type", `String "array");
+    ("items", `Assoc [("type", `String items_type)]);
     ("description", `String desc);
   ]
 

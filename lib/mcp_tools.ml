@@ -85,7 +85,7 @@ let tool_figma_list_screens : tool_def = {
 
 let tool_figma_get_node : tool_def = {
   name = "figma_get_node";
-  description = "🎯 CORE: Figma 노드를 Fidelity DSL로 변환. UI 구현의 첫 단계로 사용. URL 또는 file_key+node_id 지정. 대형 노드는 depth 제한 권장. 반환: DSL 문자열 + 구조 정보. (전체 재귀는 gRPC GetNodeStream recursive 사용)";
+  description = "🎯 CORE: Figma 노드를 Fidelity DSL로 변환. ⚠️ REQUIRED: url 또는 (file_key + node_id) 중 하나를 반드시 제공하세요. 대형 노드는 depth 제한 권장. 반환: DSL 문자열 + 구조 정보. (전체 재귀는 gRPC GetNodeStream recursive 사용)";
   input_schema = object_schema [
     ("file_key", string_prop "Figma 파일 키");
     ("node_id", string_prop "노드 ID (예: 123:456)");
@@ -101,7 +101,7 @@ let tool_figma_get_node : tool_def = {
 
 let tool_figma_get_node_bundle : tool_def = {
   name = "figma_get_node_bundle";
-  description = "📦 RECOMMENDED: 구현에 필요한 모든 정보를 한번에. DSL + 렌더 이미지 + 변수 + 이미지 fills. Visual Verification 전 사용 권장. download=true로 에셋 저장. 반환: 번들 JSON.";
+  description = "📦 RECOMMENDED: 구현에 필요한 모든 정보를 한번에. ⚠️ REQUIRED: url 또는 (file_key + node_id) 중 하나를 반드시 제공하세요. DSL + 렌더 이미지 + 변수 + 이미지 fills. download=true로 에셋 저장. 반환: 번들 JSON.";
   input_schema = object_schema [
     ("file_key", string_prop "Figma 파일 키");
     ("node_id", string_prop "노드 ID (예: 123:456)");
@@ -137,7 +137,7 @@ let tool_figma_get_node_bundle : tool_def = {
 (** 경량 구조 요약 - 큰 노드를 탐색할 때 전체 로드 없이 구조 파악 *)
 let tool_figma_get_node_summary : tool_def = {
   name = "figma_get_node_summary";
-  description = "📋 QUICK: 대형 노드 탐색 전 구조 파악. 전체 로드 없이 자식 목록/타입/크기만. Outside-In 패턴의 첫 단계. 반환: children 배열 (id, name, type, size).";
+  description = "📋 QUICK: 대형 노드 탐색 전 구조 파악. ⚠️ REQUIRED: url 또는 (file_key + node_id) 중 하나를 반드시 제공하세요. 전체 로드 없이 자식 목록/타입/크기만. Outside-In 패턴의 첫 단계. 반환: children 배열 (id, name, type, size).";
   input_schema = object_schema [
     ("file_key", string_prop "Figma 파일 키");
     ("node_id", string_prop "노드 ID (예: 123:456)");
@@ -151,7 +151,7 @@ let tool_figma_get_node_summary : tool_def = {
 (** 노드 자동 선택 - 점수 기반 후보 선별 *)
 let tool_figma_select_nodes : tool_def = {
   name = "figma_select_nodes";
-  description = "🎯 CORE: 후보 노드 점수화 선택. 노트/주석 자동 분리. Outside-In 첫 단계.";
+  description = "🎯 CORE: 후보 노드 점수화 선택. ⚠️ REQUIRED: url 또는 (file_key + node_id) 중 하나를 반드시 제공하세요. 노트/주석 자동 분리. Outside-In 첫 단계.";
   input_schema = object_schema [
     ("file_key", string_prop "Figma 파일 키");
     ("node_id", string_prop "노드 ID (예: 123:456)");
@@ -177,7 +177,7 @@ let tool_figma_select_nodes : tool_def = {
 (** 깊이 범위별 청크 로드 - 대형 노드를 점진적으로 로드 *)
 let tool_figma_get_node_chunk : tool_def = {
   name = "figma_get_node_chunk";
-  description = "📦 CHUNK: 깊이 범위별 노드 로드. 대형 노드 점진적 탐색. depth_start=0, depth_end=2면 2단계까지.";
+  description = "📦 CHUNK: 깊이 범위별 노드 로드. ⚠️ REQUIRED: url 또는 (file_key + node_id) 중 하나를 반드시 제공하세요. 대형 노드 점진적 탐색. depth_start=0, depth_end=2면 2단계까지.";
   input_schema = object_schema [
     ("file_key", string_prop "Figma 파일 키");
     ("node_id", string_prop "노드 ID (예: 123:456)");
@@ -199,7 +199,7 @@ let tool_figma_get_node_chunk : tool_def = {
 
 let tool_figma_fidelity_loop : tool_def = {
   name = "figma_fidelity_loop";
-  description = "🔄 AUTO: fidelity 점수 미달 시 depth/geometry 자동 증가. 목표 달성까지 반복.";
+  description = "🔄 AUTO: fidelity 점수 미달 시 depth/geometry 자동 증가. ⚠️ REQUIRED: url 또는 (file_key + node_id) 중 하나를 반드시 제공하세요. 목표 달성까지 반복.";
   input_schema = object_schema [
     ("file_key", string_prop "Figma 파일 키");
     ("node_id", string_prop "노드 ID (예: 123:456)");
@@ -531,7 +531,7 @@ let tool_figma_plugin_read_selection : tool_def = {
 
 let tool_figma_plugin_get_node : tool_def = {
   name = "figma_plugin_get_node";
-  description = "🔌 PLUGIN: 특정 노드 정보. REST API 보다 빠름.";
+  description = "🔌 PLUGIN: 특정 노드 정보. REST API 보다 빠름. ⚠️ REQUIRED: node_id 또는 url 중 하나를 반드시 제공하세요.";
   input_schema = object_schema [
     ("channel_id", string_prop "채널 ID (옵션)");
     ("node_id", string_prop "노드 ID (예: 123:456)");
@@ -544,7 +544,7 @@ let tool_figma_plugin_get_node : tool_def = {
 
 let tool_figma_plugin_export_node_image : tool_def = {
   name = "figma_plugin_export_node_image";
-  description = "🔌 PLUGIN: exportAsync로 이미지 내보내기. base64 반환.";
+  description = "🔌 PLUGIN: exportAsync로 이미지 내보내기. base64 반환. ⚠️ REQUIRED: node_id 또는 url 중 하나를 반드시 제공하세요.";
   input_schema = object_schema [
     ("channel_id", string_prop "채널 ID (옵션)");
     ("node_id", string_prop "노드 ID (예: 123:456)");
@@ -899,12 +899,12 @@ let tool_figma_search : tool_def = {
     ("query", string_prop "검색어 (텍스트 내용 또는 노드 이름)");
     ("search_in", enum_prop ["name"; "text"; "both"] "검색 대상 (기본값: both)");
     ("limit", number_prop "결과 개수 제한 (기본값: 20)");
-  ] ["file_key"; "token"; "query"];
+  ] ["file_key"; "query"];
 }
 
 let tool_figma_compare : tool_def = {
   name = "figma_compare";
-  description = "✅ VERIFY: 통합 비교 도구. mode로 기능 선택: general(노드 비교), batch(Web/Mobile), regions(영역별), elements(색상/박스), evolution(리포트).";
+  description = "✅ VERIFY: 통합 비교 도구. mode 필수. ▸general: file_key + node_a_id + node_b_id ▸batch: file_key (+ web_prefix/mobile_prefix) ▸regions: image_a + image_b + regions JSON ▸elements: type + color1/color2 또는 box1/box2 ▸evolution: run_dir (없으면 목록 반환)";
   input_schema = object_schema [
     (* Common *)
     ("mode", enum_prop ["general"; "batch"; "regions"; "elements"; "evolution"] "비교 모드 선택");
@@ -1005,7 +1005,7 @@ let tool_figma_cache_invalidate : tool_def = {
 (** Code Connect-style component mapping (repo-local) *)
 let tool_figma_code_connect : tool_def = {
   name = "figma_code_connect";
-  description = "🔗 CODE: Code Connect-style component mapping. mode=validate|index|match|list. 로컬 매핑 JSON을 파싱/검증하고, Figma 컴포넌트/노드를 코드 컴포넌트로 결정론적으로 매칭합니다.";
+  description = "🔗 CODE: Code Connect-style component mapping. mode 필수. ▸validate: path 또는 json으로 매핑 파일 검증 ▸index: path 또는 json으로 인덱스 생성 (index_id 반환) ▸match: node_id/component_key/name 중 하나로 매칭 (index_id 권장) ▸list: 등록된 매핑 목록 조회";
   input_schema = object_schema [
     ("mode", enum_prop ["validate"; "index"; "match"; "list"] "동작 모드");
     ("path", string_prop "매핑 파일 경로 (옵션, 기본: ./figma-code-connect.json → ./.figma/code-connect.json 검색)");
@@ -1038,7 +1038,7 @@ let tool_categories = [
   { name = "visual";
     description = "시각 검증 (SSIM, 비교)";
     (* NOTE: compare_elements, compare_regions, evolution_report는 DEPRECATED → figma_compare(mode=...)로 통합 *)
-    tools = ["verify_semantic"; "verify_visual"; "image_similarity"; "compare"; "fidelity_loop"; "fidelity_review"] };
+    tools = ["verify_semantic"; "verify_visual"; "image_similarity"; "compare"; "fidelity_loop"] };
   (* plugin: monolithic tool로 직접 노출 (sub-handlers 미등록으로 category 라우팅 불가) *)
   { name = "team";
     description = "팀/프로젝트 관리";
@@ -1060,7 +1060,7 @@ let find_tool_in_category category_name tool_name =
   |> Option.value ~default:false
 
 (** 최상위 유지 도구 (자주 사용) *)
-let featured_tool_names = ["codegen"; "doctor"; "stats"; "cache_stats"; "cache_invalidate"; "read_large_result"; "code_connect"; "error_troubleshoot"; "post_comment"; "get_file_comments"; "plugin"; "plugin_edit_node"; "plugin_create_node"; "plugin_delete_nodes"; "plugin_batch"; "plugin_subscribe_events"]
+let featured_tool_names = ["codegen"; "doctor"; "stats"; "cache_stats"; "cache_invalidate"; "read_large_result"; "code_connect"; "post_comment"; "get_file_comments"; "plugin"; "plugin_edit_node"; "plugin_create_node"; "plugin_delete_nodes"; "plugin_batch"; "plugin_subscribe_events"]
 
 (** ============== 모든 도구 목록 (내부용) ============== *)
 
@@ -1181,24 +1181,14 @@ let make_category_tool cat : tool_def =
   {
     name = "figma_" ^ cat.name;
     description = sprintf "[Category] %s. 도구: %s" cat.description tool_list;
-    input_schema = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc [
-        ("mode", `Assoc [
-          ("type", `String "string");
-          ("enum", `List [`String "list"; `String "describe"; `String "call"]);
-          ("description", `String "동작 모드. 기본(auto): tool/args 유무로 list/describe/call 결정");
-        ]);
-        ("tool", `Assoc [
-          ("type", `String "string");
-          ("description", `String "하위 도구 이름 (예: verify_visual). 생략시 목록(list). tool만 주고 args 생략하면 describe로 스키마/설명 반환");
-        ]);
-        ("args", `Assoc [
-          ("type", `String "object");
-          ("description", `String "도구에 전달할 인자");
-        ]);
-      ]);
-    ];
+    input_schema = object_schema [
+      ("mode", enum_prop ["list"; "describe"; "call"]
+        "동작 모드. 생략 시 자동 판별: tool 미지정→list, tool만 지정→describe, tool+args 지정→call. 잘못된 mode 값은 에러 반환");
+      ("tool", string_prop
+        "하위 도구 이름 (figma_ 접두사 제외, 예: get_me). mode=describe 및 mode=call 시 필수");
+      ("args", object_prop
+        "도구에 전달할 인자 객체. mode=call 시 필수. 인자 없는 도구도 빈 객체 {} 전달 필요");
+    ] [];
   }
 
 (** 카테고리 도구들 *)
