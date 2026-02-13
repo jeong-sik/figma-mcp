@@ -1240,7 +1240,7 @@ let has_node_module name =
 (** mkdir_p: moved to mcp_helpers.ml *)
 
 let normalize_path path =
-  try Some (Unix.realpath path) with _ -> None
+  try Some (Unix.realpath path) with Unix.Unix_error _ -> None
 
 let is_under_dir ~dir path =
   match (normalize_path dir, normalize_path path) with

@@ -274,7 +274,8 @@ let get ~file_key ~node_id ?(options=[]) ?(ttl_hours=Config.ttl_hours) () =
                FS.delete_file cache_file;  (* 만료된 캐시 삭제 *)
                None
              )
-         | exception _ ->
+         | exception exn ->
+             eprintf "[Cache] L2 parse error for %s: %s\n%!" node_id (Printexc.to_string exn);
              Stats.record_miss ();
              FS.delete_file cache_file;
              None)

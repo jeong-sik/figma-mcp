@@ -16,12 +16,12 @@ let get_string ~default name =
 
 let get_int ~default name =
   match Sys.getenv_opt name with
-  | Some v -> (try int_of_string v with _ -> default)
+  | Some v -> (try int_of_string v with Failure _ -> default)
   | None -> default
 
 let get_float ~default name =
   match Sys.getenv_opt name with
-  | Some v -> (try float_of_string v with _ -> default)
+  | Some v -> (try float_of_string v with Failure _ -> default)
   | None -> default
 
 let get_bool ~default name =

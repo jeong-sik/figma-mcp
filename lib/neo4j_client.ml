@@ -206,46 +206,52 @@ let create_figma_team ~sw ~env client ~team_id ~name =
 
 (** Figma 프로젝트 노드 생성 *)
 let create_figma_project ~sw ~env client ~project_id ~name ~team_id =
-  let _ = merge_node ~sw ~env client "FigmaProject" ("id", `String project_id) [
+  match merge_node ~sw ~env client "FigmaProject" ("id", `String project_id) [
     ("id", `String project_id);
     ("name", `String name);
-  ] in
-  create_relationship ~sw ~env client
-    ~from_label:"FigmaTeam" ~from_key:"id" ~from_value:(`String team_id)
-    ~to_label:"FigmaProject" ~to_key:"id" ~to_value:(`String project_id)
-    ~rel_type:"HAS_PROJECT"
+  ] with
+  | Error _ as e -> e
+  | Ok _ ->
+      create_relationship ~sw ~env client
+        ~from_label:"FigmaTeam" ~from_key:"id" ~from_value:(`String team_id)
+        ~to_label:"FigmaProject" ~to_key:"id" ~to_value:(`String project_id)
+        ~rel_type:"HAS_PROJECT"
 
 (** Figma 파일 노드 생성 *)
 let create_figma_file ~sw ~env client ~file_key ~name ~project_id ~last_modified =
-  let _ = merge_node ~sw ~env client "FigmaFile" ("key", `String file_key) [
+  match merge_node ~sw ~env client "FigmaFile" ("key", `String file_key) [
     ("key", `String file_key);
     ("name", `String name);
     ("last_modified", `String last_modified);
-  ] in
-  create_relationship ~sw ~env client
-    ~from_label:"FigmaProject" ~from_key:"id" ~from_value:(`String project_id)
-    ~to_label:"FigmaFile" ~to_key:"key" ~to_value:(`String file_key)
-    ~rel_type:"HAS_FILE"
+  ] with
+  | Error _ as e -> e
+  | Ok _ ->
+      create_relationship ~sw ~env client
+        ~from_label:"FigmaProject" ~from_key:"id" ~from_value:(`String project_id)
+        ~to_label:"FigmaFile" ~to_key:"key" ~to_value:(`String file_key)
+        ~rel_type:"HAS_FILE"
 
 (** Figma 노드 생성 *)
 let create_figma_node ~sw ~env client ~node_id ~name ~node_type ~file_key ~parent_id =
-  let _ = merge_node ~sw ~env client "FigmaNode" ("id", `String node_id) [
+  match merge_node ~sw ~env client "FigmaNode" ("id", `String node_id) [
     ("id", `String node_id);
     ("name", `String name);
     ("type", `String node_type);
     ("file_key", `String file_key);
-  ] in
-  match parent_id with
-  | Some pid ->
-      create_relationship ~sw ~env client
-        ~from_label:"FigmaNode" ~from_key:"id" ~from_value:(`String pid)
-        ~to_label:"FigmaNode" ~to_key:"id" ~to_value:(`String node_id)
-        ~rel_type:"HAS_CHILD"
-  | None ->
-      create_relationship ~sw ~env client
-        ~from_label:"FigmaFile" ~from_key:"key" ~from_value:(`String file_key)
-        ~to_label:"FigmaNode" ~to_key:"id" ~to_value:(`String node_id)
-        ~rel_type:"HAS_NODE"
+  ] with
+  | Error _ as e -> e
+  | Ok _ ->
+      (match parent_id with
+       | Some pid ->
+           create_relationship ~sw ~env client
+             ~from_label:"FigmaNode" ~from_key:"id" ~from_value:(`String pid)
+             ~to_label:"FigmaNode" ~to_key:"id" ~to_value:(`String node_id)
+             ~rel_type:"HAS_CHILD"
+       | None ->
+           create_relationship ~sw ~env client
+             ~from_label:"FigmaFile" ~from_key:"key" ~from_value:(`String file_key)
+             ~to_label:"FigmaNode" ~to_key:"id" ~to_value:(`String node_id)
+             ~rel_type:"HAS_NODE")
 
 (** 배치로 Figma 노드들 생성 (성능 최적화) *)
 let batch_create_figma_nodes ~sw ~env client nodes =
