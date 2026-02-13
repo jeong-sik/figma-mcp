@@ -239,6 +239,46 @@
         cursor: pointer;
       }
       .quick-btn:hover { background: var(--accent); color: #fff; }
+      .layout-control-row {
+        padding: 4px 6px;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        border-bottom: 1px solid var(--border);
+        font-size: 9px;
+        color: var(--text-muted);
+      }
+      .layout-mode-switch {
+        display: flex;
+        gap: 4px;
+      }
+      .layout-mode-btn {
+        padding: 3px 7px;
+        font-size: 9px;
+        border: 1px solid var(--border);
+        border-radius: 4px;
+        background: var(--bg-tertiary);
+        color: var(--text);
+        cursor: pointer;
+      }
+      .layout-mode-btn.active {
+        background: var(--accent);
+        color: #fff;
+        border-color: var(--accent);
+      }
+      .layout-mode-btn:hover:not(.active) {
+        background: var(--border);
+      }
+      .layout-group {
+        padding: 0 4px 4px;
+      }
+      .layout-group-title {
+        font-size: 8px;
+        color: var(--text-muted);
+        margin: 4px 2px 2px;
+        text-transform: uppercase;
+        letter-spacing: 0.4px;
+      }
 
       .filter-btns { display: flex; gap: 3px; }
       .filter-btn {
@@ -682,28 +722,48 @@
           <span class="section-action" id="toggleLayout">▼</span>
         </div>
         <div class="section-content" id="layoutContent">
-          <div class="quick-actions">
-            <button class="quick-btn" data-action="align" data-payload='{ "direction": "LEFT" }'>Align Left</button>
-            <button class="quick-btn" data-action="align" data-payload='{ "direction": "CENTER_H" }'>Align Center H</button>
-            <button class="quick-btn" data-action="align" data-payload='{ "direction": "RIGHT" }'>Align Right</button>
-            <button class="quick-btn" data-action="align" data-payload='{ "direction": "TOP" }'>Align Top</button>
-            <button class="quick-btn" data-action="align" data-payload='{ "direction": "CENTER_V" }'>Align Center V</button>
-            <button class="quick-btn" data-action="align" data-payload='{ "direction": "BOTTOM" }'>Align Bottom</button>
-            <button class="quick-btn" data-action="align" data-payload='{ "direction": "CENTER_H", "align_mode": "viewport" }'>Align Center H (Viewport)</button>
-            <button class="quick-btn" data-action="align" data-payload='{ "direction": "CENTER_V", "align_mode": "viewport" }'>Align Center V (Viewport)</button>
-            <button class="quick-btn" data-action="distribute" data-payload='{ "axis": "horizontal" }'>Distribute H</button>
-            <button class="quick-btn" data-action="distribute" data-payload='{ "axis": "vertical" }'>Distribute V</button>
-            <button class="quick-btn" data-action="distribute" data-payload='{ "axis": "horizontal", "distribute_mode": "viewport" }'>Distribute H (Viewport)</button>
-            <button class="quick-btn" data-action="distribute" data-payload='{ "axis": "vertical", "distribute_mode": "viewport" }'>Distribute V (Viewport)</button>
-            <button class="quick-btn" data-action="rotate" data-payload='{ "angle": 0 }'>Rotate 0°</button>
-            <button class="quick-btn" data-action="rotate" data-payload='{ "angle": 90 }'>Rotate 90°</button>
-            <button class="quick-btn" data-action="rotate" data-payload='{ "angle": 180 }'>Rotate 180°</button>
-            <button class="quick-btn" data-action="rotate" data-payload='{ "angle": 270 }'>Rotate 270°</button>
-            <button class="quick-btn" data-action="flip" data-payload='{ "flip_direction": "horizontal" }'>Flip H</button>
-            <button class="quick-btn" data-action="flip" data-payload='{ "flip_direction": "vertical" }'>Flip V</button>
-            <button class="quick-btn" data-action="masonry_layout" data-payload='{ "columns": 3, "gap_x": 16, "gap_y": 16 }'>Masonry 3</button>
-            <button class="quick-btn" data-action="masonry_layout" data-payload='{ "columns": 3, "gap_x": 16, "gap_y": 16, "distribute_mode": "viewport" }'>Masonry 3 (Viewport)</button>
-            <button class="quick-btn" data-action="masonry_layout" data-payload='{ "columns": 4, "gap_x": 12, "gap_y": 12 }'>Masonry 4</button>
+          <div class="layout-control-row">
+            <span>기준</span>
+            <div class="layout-mode-switch" id="layoutModeSwitch">
+              <button type="button" class="layout-mode-btn active" data-layout-mode="selection">선택 기준</button>
+              <button type="button" class="layout-mode-btn" data-layout-mode="viewport">화면 기준</button>
+            </div>
+          </div>
+          <div class="layout-group">
+            <div class="layout-group-title">Align</div>
+            <div class="quick-actions">
+              <button class="quick-btn" data-action="align" data-payload='{ "direction": "LEFT" }'>Align Left</button>
+              <button class="quick-btn" data-action="align" data-payload='{ "direction": "CENTER_H" }'>Align Center H</button>
+              <button class="quick-btn" data-action="align" data-payload='{ "direction": "RIGHT" }'>Align Right</button>
+              <button class="quick-btn" data-action="align" data-payload='{ "direction": "TOP" }'>Align Top</button>
+              <button class="quick-btn" data-action="align" data-payload='{ "direction": "CENTER_V" }'>Align Center V</button>
+              <button class="quick-btn" data-action="align" data-payload='{ "direction": "BOTTOM" }'>Align Bottom</button>
+            </div>
+          </div>
+          <div class="layout-group">
+            <div class="layout-group-title">Distribute</div>
+            <div class="quick-actions">
+              <button class="quick-btn" data-action="distribute" data-payload='{ "axis": "horizontal" }'>Distribute H</button>
+              <button class="quick-btn" data-action="distribute" data-payload='{ "axis": "vertical" }'>Distribute V</button>
+            </div>
+          </div>
+          <div class="layout-group">
+            <div class="layout-group-title">Transform</div>
+            <div class="quick-actions">
+              <button class="quick-btn" data-action="rotate" data-payload='{ "angle": 0 }'>Rotate 0°</button>
+              <button class="quick-btn" data-action="rotate" data-payload='{ "angle": 90 }'>Rotate 90°</button>
+              <button class="quick-btn" data-action="rotate" data-payload='{ "angle": 180 }'>Rotate 180°</button>
+              <button class="quick-btn" data-action="rotate" data-payload='{ "angle": 270 }'>Rotate 270°</button>
+              <button class="quick-btn" data-action="flip" data-payload='{ "flip_direction": "horizontal" }'>Flip H</button>
+              <button class="quick-btn" data-action="flip" data-payload='{ "flip_direction": "vertical" }'>Flip V</button>
+            </div>
+          </div>
+          <div class="layout-group">
+            <div class="layout-group-title">Masonry</div>
+            <div class="quick-actions">
+              <button class="quick-btn" data-action="masonry_layout" data-payload='{ "columns": 3, "gap_x": 16, "gap_y": 16 }'>Masonry 3</button>
+              <button class="quick-btn" data-action="masonry_layout" data-payload='{ "columns": 4, "gap_x": 12, "gap_y": 12 }'>Masonry 4</button>
+            </div>
           </div>
         </div>
       </div>
@@ -993,6 +1053,7 @@
       var llmUseSelectionImageToggle = $("llmUseSelectionImage"), llmAutoApplyToggle = $("llmAutoApply");
       var llmCaptureScaleInput = $("llmCaptureScale"), llmFeedbackLoopsInput = $("llmFeedbackLoops");
       var llmStatus = $("llmStatus");
+      var layoutMode = "selection";
 
       // State
       var STORAGE_KEY = "figmaMcpBridgeState";
@@ -2032,6 +2093,30 @@
       });
 
       // Quick actions
+      var applyLayoutModeToPayload = function(action, payload) {
+        if (action === "align" && payload.align_mode === undefined && payload.mode === undefined) {
+          payload.align_mode = layoutMode;
+        } else if (action === "distribute" && payload.distribute_mode === undefined && payload.mode === undefined) {
+          payload.distribute_mode = layoutMode;
+        } else if (action === "masonry_layout" && payload.distribute_mode === undefined && payload.mode === undefined) {
+          payload.distribute_mode = layoutMode;
+        }
+      };
+
+      // Layout mode switch (selection/viewport)
+      var layoutModeButtons = document.querySelectorAll("[data-layout-mode]");
+      var applyLayoutMode = function(mode) {
+        layoutMode = (mode === "viewport" ? "viewport" : "selection");
+        layoutModeButtons.forEach(function(btn) {
+          btn.classList.toggle("active", btn.getAttribute("data-layout-mode") === layoutMode);
+        });
+      };
+      layoutModeButtons.forEach(function(btn) {
+        btn.onclick = function() {
+          applyLayoutMode(btn.getAttribute("data-layout-mode"));
+        };
+      });
+
       document.querySelectorAll(".quick-btn").forEach(function(b) {
         b.onclick = function() {
           var action = b.getAttribute("data-action");
@@ -2045,6 +2130,8 @@
               parsedPayload = safePayload;
             }
           }
+
+          applyLayoutModeToPayload(action, parsedPayload);
 
           var cmd = { id: "quick-" + Date.now(), name: action, payload: parsedPayload };
           postToPlugin({ type: "command", command: cmd });
