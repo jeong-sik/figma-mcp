@@ -939,14 +939,15 @@ const handlers = {
     const maxX = Math.max.apply(null, sel.map(function(n) { return n.x + n.width; }));
     const minY = Math.min.apply(null, sel.map(function(n) { return n.y; }));
     const maxY = Math.max.apply(null, sel.map(function(n) { return n.y + n.height; }));
+    const viewportCenter = figma.viewport.center || { x: 0, y: 0 };
     let target;
 
     if (dir === "LEFT") target = minX;
     else if (dir === "RIGHT") target = maxX;
     else if (dir === "TOP") target = minY;
     else if (dir === "BOTTOM") target = maxY;
-    else if (dir === "CENTER_H") target = (minX + maxX) / 2;
-    else if (dir === "CENTER_V") target = (minY + maxY) / 2;
+    else if (dir === "CENTER_H") target = viewportCenter.x;
+    else if (dir === "CENTER_V") target = viewportCenter.y;
 
     for (let i = 0; i < sel.length; i++) {
       const node = sel[i];
@@ -954,8 +955,8 @@ const handlers = {
       else if (dir === "RIGHT") node.x = target - node.width;
       else if (dir === "TOP") node.y = target;
       else if (dir === "BOTTOM") node.y = target - node.height;
-      else if (dir === "CENTER_H") node.x = target - node.width / 2;
-      else if (dir === "CENTER_V") node.y = target - node.height / 2;
+      else if (dir === "CENTER_H") node.x = (viewportCenter.x + (node.x + node.width / 2 - (minX + maxX) / 2)) - node.width / 2;
+      else if (dir === "CENTER_V") node.y = (viewportCenter.y + (node.y + node.height / 2 - (minY + maxY) / 2)) - node.height / 2;
     }
     return { aligned: sel.length, direction: dir };
   }),
