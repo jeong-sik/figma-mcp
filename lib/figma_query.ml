@@ -140,6 +140,23 @@ let rec collect_nodes ?(current_depth=0) ~max_depth node =
   else
     self
 
+(** 깊이 제한 탐색으로 모든 노드를 ancestor 경로와 함께 수집 (breadcrumb 지원) *)
+let rec collect_nodes_with_ancestors ?(current_depth=0) ~max_depth ~ancestors node =
+  let should_continue = match max_depth with
+    | None -> true
+    | Some d -> current_depth < d
+  in
+  let self = [(ancestors, node)] in
+  if should_continue then
+    let child_ancestors = ancestors @ [node.Figma_types.name] in
+    let children = List.concat_map
+      (collect_nodes_with_ancestors ~current_depth:(current_depth + 1) ~max_depth ~ancestors:child_ancestors)
+      node.Figma_types.children
+    in
+    self @ children
+  else
+    self
+
 (** ============== 쿼리 실행 ============== *)
 
 (** 쿼리 실행: 노드 트리에서 조건에 맞는 노드들 반환 *)
