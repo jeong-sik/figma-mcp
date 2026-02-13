@@ -28,12 +28,15 @@
         }
       }
       * { box-sizing: border-box; margin: 0; padding: 0; }
+      html, body { height: 100%; }
       body {
         font-family: "Inter", "SF Pro", -apple-system, sans-serif;
         font-size: 11px;
         background: var(--bg);
         color: var(--text);
         overflow-x: hidden;
+        display: flex;
+        flex-direction: column;
       }
       .container {
         padding: 12px;
@@ -495,7 +498,7 @@
         color: var(--accent);
         box-shadow: 0 1px 2px rgba(0,0,0,0.1);
       }
-      .tab-content { display: none; padding: 12px; flex-direction: column; gap: 12px; }
+      .tab-content { display: none; padding: 8px; flex-direction: column; gap: 8px; overflow-y: auto; flex: 1; min-height: 0; }
       .tab-content.active { display: flex; }
 
       .section-card {
@@ -771,7 +774,7 @@
             <span class="section-action" id="toggleMultiPlatform">▼</span>
           </div>
         </div>
-        <div class="section-content" id="multiPlatformContent">
+        <div class="section-content" id="multiPlatformContent" style="max-height:none;">
           <div style="padding: 8px;">
             <div style="display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 8px;">
               <label style="display: flex; align-items: center; gap: 4px; margin: 0;">
@@ -804,7 +807,7 @@
             <span class="section-action" id="toggleVision">▼</span>
           </div>
         </div>
-        <div class="section-content" id="visionContent">
+        <div class="section-content" id="visionContent" style="max-height:none;">
           <div style="padding: 8px;">
             <div style="margin-bottom: 8px;">
               <label>Reference Image (Figma Export)</label>
@@ -831,7 +834,7 @@
             <span class="section-action" id="toggleStorybook">▼</span>
           </div>
         </div>
-        <div class="section-content" id="storybookContent">
+        <div class="section-content" id="storybookContent" style="max-height:none;">
           <div style="padding: 8px;">
             <div style="margin-bottom: 8px;">
               <label>Figma URL</label>
@@ -856,17 +859,17 @@
     <div id="tab-llm" class="tab-content">
       <div class="section">
         <div class="section-header"><span>🤖 Direct AI Prompt</span></div>
-        <div class="section-content" style="display:flex;">
+        <div class="section-content" style="display:flex;max-height:none;">
           <div style="padding: 8px; width: 100%;">
             <label>Provider</label>
             <select id="llmProvider" style="width:100%;">
               <option value="openai">OpenAI</option>
             </select>
-            <label style="margin-top:8px;">API Key</label>
+            <label style="margin-top:8px;display:block;">API Key</label>
             <input type="password" id="llmApiKey" placeholder="sk-..." style="width:100%;">
-            <label style="margin-top:8px;">Prompt</label>
-            <textarea id="llmPrompt" rows="4" placeholder="Describe what to do with the selected Figma layers..." style="width:100%;"></textarea>
-            <button class="btn btn-primary" id="llmRun" style="width:100%;margin-top:8px;">▶ Run</button>
+            <label style="margin-top:8px;display:block;">Prompt</label>
+            <textarea id="llmPrompt" rows="5" placeholder="Describe what to do with the selected Figma layers..." style="width:100%;resize:vertical;"></textarea>
+            <button class="btn btn-primary" id="llmRun" style="width:100%;margin-top:8px;">Run</button>
             <div id="llmProgress" style="display:none;padding:8px 0;">Processing...</div>
             <pre id="llmResult" style="display:none;max-height:200px;overflow:auto;margin-top:8px;padding:8px;background:var(--bg-secondary);border-radius:4px;font-size:11px;"></pre>
           </div>
@@ -877,9 +880,9 @@
     <!-- Tab: Settings -->
     <div id="tab-settings" class="tab-content">
       <div class="section">
-        <div class="section-header"><span>⚙️ Connection</span></div>
-        <div class="section-content" style="display:flex;">
-          <div style="padding: 8px; width: 100%;">
+        <div class="section-header"><span>Connection</span></div>
+        <div class="section-content" style="display:flex;max-height:none;">
+          <div style="padding: 6px 8px; width: 100%; display:flex; flex-direction:column; gap:4px;">
             <div class="toggle-row">
               <span>Remember API key</span>
               <div class="toggle" id="rememberApiKey"></div>
@@ -888,6 +891,34 @@
               <span>Auto-reconnect</span>
               <div class="toggle on" id="autoReconnect"></div>
             </div>
+          </div>
+        </div>
+      </div>
+      <div class="section">
+        <div class="section-header"><span>Display</span></div>
+        <div class="section-content" style="display:flex;max-height:none;">
+          <div style="padding: 6px 8px; width: 100%; display:flex; flex-direction:column; gap:4px;">
+            <div class="toggle-row">
+              <span>Verbose logging</span>
+              <div class="toggle" id="verboseLogging"></div>
+            </div>
+            <div class="toggle-row">
+              <span>Show notifications</span>
+              <div class="toggle on" id="showNotifications"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="section">
+        <div class="section-header"><span>Export</span></div>
+        <div class="section-content" style="display:flex;max-height:none;">
+          <div style="padding: 6px 8px; width: 100%;">
+            <label>Default format</label>
+            <select id="defaultExportFormat" style="width:100%;">
+              <option value="json">JSON</option>
+              <option value="css">CSS</option>
+              <option value="tailwind">Tailwind</option>
+            </select>
           </div>
         </div>
       </div>
@@ -1704,6 +1735,26 @@
             rememberApiKey: rememberApiKey,
             apiKey: rememberApiKey ? apiKey : undefined
           });
+        };
+      }
+
+      // Settings: verbose logging toggle
+      var verboseLoggingToggle = $("verboseLogging");
+      var verboseLogging = false;
+      if (verboseLoggingToggle) {
+        verboseLoggingToggle.onclick = function() {
+          verboseLogging = !verboseLogging;
+          verboseLoggingToggle.className = "toggle" + (verboseLogging ? " on" : "");
+        };
+      }
+
+      // Settings: show notifications toggle
+      var showNotificationsToggle = $("showNotifications");
+      var showNotifications = true;
+      if (showNotificationsToggle) {
+        showNotificationsToggle.onclick = function() {
+          showNotifications = !showNotifications;
+          showNotificationsToggle.className = "toggle" + (showNotifications ? " on" : "");
         };
       }
 
