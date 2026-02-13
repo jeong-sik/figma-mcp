@@ -281,6 +281,7 @@ type client = {
   cohttp_client : Cohttp_eio.Client.t;  (** LLM provider 등 호환용 *)
   raw_pool : (string, raw_conn) Hashtbl.t;
   raw_pool_lock : Eio.Mutex.t;
+  api_limiter : Eio.Semaphore.t;  (** max concurrent Figma API calls *)
 }
 
 (** TLS 설정 생성 *)
@@ -305,7 +306,7 @@ let make_cohttp_https_handler tls_config =
     Tls_eio.client_of_flow tls_config ~host:host_domain tcp_flow)
 
 (** HTTP 클라이언트 생성 *)
-let make_client (net : _ Eio.Net.t) : client =
+let make_client ?(max_concurrent_api=3) (net : _ Eio.Net.t) : client =
   let tls_config = make_tls_config () in
   let https = make_cohttp_https_handler tls_config in
   let cohttp_client = Cohttp_eio.Client.make ~https net in
@@ -314,6 +315,7 @@ let make_client (net : _ Eio.Net.t) : client =
     cohttp_client;
     raw_pool = Hashtbl.create 4;
     raw_pool_lock = Eio.Mutex.create ();
+    api_limiter = Eio.Semaphore.make max_concurrent_api;
   }
 
 (** Cohttp 클라이언트 추출 (LLM provider 등 호환용) *)
@@ -908,22 +910,34 @@ let with_smart_retry ~clock ?(max_retries=2) f =
   in
   loop 0
 
-(** GET 요청 with smart retry *)
+(** Concurrency limiter: acquire slot before API call, release after completion.
+    Holds slot during retry backoff to prevent 429 cascade. *)
+let with_api_limiter client f =
+  Eio.Semaphore.acquire client.api_limiter;
+  Fun.protect f ~finally:(fun () -> Eio.Semaphore.release client.api_limiter)
+
+(** GET 요청 with smart retry + concurrency limit *)
 let get_json_with_retry ~sw ~net ~clock ~client ~token ?(max_retries=2) url =
-  with_smart_retry ~clock ~max_retries (fun () ->
-    get_json ~sw ~net ~clock ~client ~token url
+  with_api_limiter client (fun () ->
+    with_smart_retry ~clock ~max_retries (fun () ->
+      get_json ~sw ~net ~clock ~client ~token url
+    )
   )
 
-(** POST 요청 with smart retry *)
+(** POST 요청 with smart retry + concurrency limit *)
 let post_json_with_retry ~sw ~net ~clock ~client ~token ?(max_retries=2) url body_json =
-  with_smart_retry ~clock ~max_retries (fun () ->
-    post_json ~sw ~net ~clock ~client ~token url body_json
+  with_api_limiter client (fun () ->
+    with_smart_retry ~clock ~max_retries (fun () ->
+      post_json ~sw ~net ~clock ~client ~token url body_json
+    )
   )
 
-(** 다운로드 with smart retry *)
+(** 다운로드 with smart retry + concurrency limit *)
 let download_url_with_retry ~sw ~net ~clock ~client ~url ~path ?(max_retries=2) () =
-  with_smart_retry ~clock ~max_retries (fun () ->
-    download_url ~sw ~net ~clock ~client ~url ~path
+  with_api_limiter client (fun () ->
+    with_smart_retry ~clock ~max_retries (fun () ->
+      download_url ~sw ~net ~clock ~client ~url ~path
+    )
   )
 
 (** ============== JSON Utilities ============== *)
