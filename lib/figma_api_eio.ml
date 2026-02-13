@@ -282,6 +282,8 @@ type client = {
   raw_pool : (string, raw_conn) Hashtbl.t;
   raw_pool_lock : Eio.Mutex.t;
   api_limiter : Eio.Semaphore.t;  (** max concurrent Figma API calls *)
+  inflight : (string, ((Yojson.Safe.t, api_error) result, exn) result Eio.Promise.t) Hashtbl.t;
+  inflight_lock : Eio.Mutex.t;
 }
 
 (** TLS 설정 생성 *)
@@ -316,6 +318,8 @@ let make_client ?(max_concurrent_api=3) (net : _ Eio.Net.t) : client =
     raw_pool = Hashtbl.create 4;
     raw_pool_lock = Eio.Mutex.create ();
     api_limiter = Eio.Semaphore.make max_concurrent_api;
+    inflight = Hashtbl.create 16;
+    inflight_lock = Eio.Mutex.create ();
   }
 
 (** Cohttp 클라이언트 추출 (LLM provider 등 호환용) *)
@@ -916,11 +920,46 @@ let with_api_limiter client f =
   Eio.Semaphore.acquire client.api_limiter;
   Fun.protect f ~finally:(fun () -> Eio.Semaphore.release client.api_limiter)
 
-(** GET 요청 with smart retry + concurrency limit *)
+(** Coalesce concurrent GET requests for the same URL.
+    If a request for [key] is already in-flight, the caller waits for
+    its result instead of issuing a duplicate HTTP call.
+    Runs OUTSIDE the semaphore so joiners consume no concurrency slot. *)
+let dedup_get client key compute =
+  let action = Eio.Mutex.use_rw ~protect:true client.inflight_lock (fun () ->
+    match Hashtbl.find_opt client.inflight key with
+    | Some promise -> `Join promise
+    | None ->
+      let promise, resolver = Eio.Promise.create () in
+      Hashtbl.replace client.inflight key promise;
+      `Lead resolver
+  ) in
+  match action with
+  | `Join promise ->
+    (match Eio.Promise.await promise with
+     | Ok v -> v
+     | Error exn -> raise exn)
+  | `Lead resolver ->
+    match compute () with
+    | v ->
+      Eio.Mutex.use_rw ~protect:true client.inflight_lock (fun () ->
+        Hashtbl.remove client.inflight key
+      );
+      Eio.Promise.resolve resolver (Ok v);
+      v
+    | exception exn ->
+      Eio.Mutex.use_rw ~protect:true client.inflight_lock (fun () ->
+        Hashtbl.remove client.inflight key
+      );
+      Eio.Promise.resolve resolver (Error exn);
+      raise exn
+
+(** GET 요청 with dedup + concurrency limit + smart retry *)
 let get_json_with_retry ~sw ~net ~clock ~client ~token ?(max_retries=2) url =
-  with_api_limiter client (fun () ->
-    with_smart_retry ~clock ~max_retries (fun () ->
-      get_json ~sw ~net ~clock ~client ~token url
+  dedup_get client url (fun () ->
+    with_api_limiter client (fun () ->
+      with_smart_retry ~clock ~max_retries (fun () ->
+        get_json ~sw ~net ~clock ~client ~token url
+      )
     )
   )
 

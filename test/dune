@@ -198,6 +198,12 @@
  (libraries figma_mcp alcotest eio_main)
  (action (run %{test} --color=always)))
 
+; Request deduplication: in-flight coalescing via Eio.Promise
+(test
+ (name test_request_dedup)
+ (libraries figma_mcp alcotest eio_main)
+ (action (run %{test} --color=always)))
+
 ; Category tools: list/describe/call behavior
 (test
  (name test_category_tools)
