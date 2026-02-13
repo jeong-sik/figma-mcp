@@ -1906,7 +1906,7 @@ let handle_search args : (Yojson.Safe.t, string) result =
                 (match Figma_parser.parse_json_string doc_str with
                  | Some root ->
                      (* 모든 노드 수집 *)
-                     let all_nodes = Figma_query.collect_nodes ~max_depth:None root in
+                     let all_nodes = Figma_query.collect_nodes_with_ancestors ~max_depth:None ~ancestors:[] root in
                      let query_lower = String.lowercase_ascii query |> String.trim in
                      if query_lower = "" then
                        Ok (make_text_content "[]")
@@ -1925,7 +1925,7 @@ let handle_search args : (Yojson.Safe.t, string) result =
                          with Not_found -> false
                        in
 
-                       let score_node node =
+                       let score_node (ancestors, node) =
                          let name_lower = String.lowercase_ascii node.Figma_types.name in
                          let chars_lower =
                            match node.Figma_types.characters with
@@ -1977,13 +1977,13 @@ let handle_search args : (Yojson.Safe.t, string) result =
                              | (false, true) -> "text"
                              | _ -> "both"
                            in
-                           Some (base_score +. exact_bonus +. prefix_bonus, matched_in, node)
+                           Some (base_score +. exact_bonus +. prefix_bonus, matched_in, ancestors, node)
                        in
 
                        let scored =
                          all_nodes
                          |> List.filter_map score_node
-                         |> List.sort (fun (sa, _, a) (sb, _, b) ->
+                         |> List.sort (fun (sa, _, _, a) (sb, _, _, b) ->
                               let c = compare sb sa in
                               if c <> 0 then c
                               else
@@ -1999,7 +1999,7 @@ let handle_search args : (Yojson.Safe.t, string) result =
                           Each item: {id,name,type,characters,score,matched_in}. *)
                        let items_json =
                          scored
-                         |> List.map (fun (score, matched_in, node) ->
+                         |> List.map (fun (score, matched_in, ancestors, node) ->
                               let type_str =
                                 Figma_query.node_type_to_string node.Figma_types.node_type
                               in
@@ -2008,6 +2008,10 @@ let handle_search args : (Yojson.Safe.t, string) result =
                                 | Some c -> truncate_string ~max_len:200 c
                                 | None -> ""
                               in
+                              let parent_name = match List.rev ancestors with
+                                | x :: _ -> x
+                                | [] -> ""
+                              in
                               `Assoc [
                                 ("id", `String node.Figma_types.id);
                                 ("name", `String node.Figma_types.name);
@@ -2015,6 +2019,8 @@ let handle_search args : (Yojson.Safe.t, string) result =
                                 ("characters", `String chars);
                                 ("score", `Float score);
                                 ("matched_in", `String matched_in);
+                                ("parent_name", `String parent_name);
+                                ("ancestors", `List (List.map (fun s -> `String s) ancestors));
                               ])
                        in
                        Ok (make_text_content (Yojson.Safe.to_string (`List items_json)))
