@@ -229,7 +229,7 @@ let tool_figma_fidelity_loop : tool_def = {
 
 let tool_figma_image_similarity : tool_def = {
   name = "figma_image_similarity";
-  description = "✅ VERIFY: 렌더 이미지 SSIM/PSNR 비교. 노드 간 정확도 평가.";
+  description = "✅ VERIFY: 두 노드의 렌더 이미지를 SSIM/PSNR로 비교. scale 자동 증가로 목표 SSIM 달성.";
   input_schema = object_schema [
     ("file_key", string_prop "Figma 파일 키");
     ("node_a_id", string_prop "기준 노드 ID");
@@ -642,7 +642,7 @@ let tool_figma_plugin_subscribe_events : tool_def = {
 (* STRAP 통합: plugin 도구 통합 (8→14 actions) *)
 let tool_figma_plugin : tool_def = {
   name = "figma_plugin";
-  description = "🔌 PLUGIN: Figma Desktop 앱과 실시간 연동. action으로 세부 동작 선택. 100개 action 지원. 전용 WRITE 도구도 있음: figma_plugin_edit_node, figma_plugin_create_node, figma_plugin_delete_nodes, figma_plugin_batch.";
+  description = "🔌 PLUGIN: Figma Desktop 앱과 실시간 연동. action으로 세부 동작 선택. 106개 action 지원. 전용 WRITE 도구: figma_plugin_edit_node, figma_plugin_create_node, figma_plugin_delete_nodes, figma_plugin_batch.";
   input_schema = object_schema [
     ("action", enum_prop [
       "connect"; "use_channel"; "status";
@@ -675,7 +675,7 @@ let tool_figma_plugin : tool_def = {
       "scroll_and_zoom"; "get_paint_styles"; "set_text_case";
       "get_stroke_details"; "set_stroke_weight"; "collapse_layer";
       "export_viewport"; "export_selection"; "get_changes"; "watch_start"; "watch_stop";
-    ] "🎉 100개 action: 연결(3), 페이지(4), 문서(1), 생성(11), 조회(20), 편집(9), 변형(7), 불리언(4), 정렬(2), 스타일(21), 텍스트(5), 레이아웃(4), 컴포넌트(4), 내보내기(2), 프로토타입(2), 레이어(4)");
+    ] "106개 action: 연결(3), 페이지(4), 문서(1), 생성(12), 조회(20), 편집(9), 변형(7), 불리언(4), 정렬(2), 스타일(17), 텍스트(5), 레이아웃(4), 컴포넌트(4), 내보내기(3), 프로토타입(2), 레이어(4), 감시(3), 기타(2)");
     ("channel_id", string_prop "채널 ID");
     ("node_id", string_prop "노드 ID");
     ("url", string_prop "Figma URL (node_id 자동 추출)");
@@ -830,8 +830,8 @@ let tool_figma_crawl_team : tool_def = {
     ("neo4j_uri", string_prop "Neo4j URI (기본값: NEO4J_URI 환경변수)");
     ("neo4j_user", string_prop "Neo4j 사용자 (기본값: NEO4J_USER 환경변수)");
     ("neo4j_password", string_prop "Neo4j 비밀번호 (기본값: NEO4J_PASSWORD 환경변수)");
-    ("max_depth", string_prop "노드 탐색 최대 깊이 (기본값: 10)");
-    ("rate_limit_ms", string_prop "API 호출 간 대기 시간 ms (기본값: 100)");
+    ("max_depth", number_prop "노드 탐색 최대 깊이 (기본값: 10)");
+    ("rate_limit_ms", number_prop "API 호출 간 대기 시간 ms (기본값: 100)");
   ] ["team_id"];
 }
 
@@ -843,7 +843,7 @@ let tool_figma_team_tree : tool_def = {
     ("team_name", string_prop "팀 이름 (선택)");
     ("token", string_prop "Figma Personal Access Token (optional if FIGMA_TOKEN env var is set)");
     ("include_nodes", bool_prop "파일 내 노드 포함 여부 (기본값: false)");
-    ("node_depth", string_prop "노드 탐색 깊이 (기본값: 2, include_nodes=true일 때만 적용)");
+    ("node_depth", number_prop "노드 탐색 깊이 (기본값: 2, include_nodes=true일 때만 적용)");
   ] ["team_id"];
 }
 
@@ -855,7 +855,7 @@ let tool_figma_export_team : tool_def = {
     ("team_name", string_prop "팀 이름 (선택)");
     ("token", string_prop "Figma Personal Access Token (optional if FIGMA_TOKEN env var is set)");
     ("output_dir", string_prop "출력 디렉토리 경로 (필수)");
-    ("max_depth", string_prop "노드 깊이 (0=파일만, 1=페이지까지, 2+=노드까지, 기본값: 2)");
+    ("max_depth", number_prop "노드 깊이 (0=파일만, 1=페이지까지, 2+=노드까지, 기본값: 2)");
   ] ["team_id"; "output_dir"];
 }
 
@@ -942,8 +942,8 @@ let tool_figma_tree : tool_def = {
     ("node_id", string_prop "시작 노드 ID (생략시 전체 문서)");
     ("style", enum_prop ["ascii"; "indent"; "compact"] "출력 스타일 (기본값: ascii)");
     ("max_depth", number_prop "최대 깊이 (기본값: 무제한)");
-    ("show_size", enum_prop ["true"; "false"] "크기 표시 (기본값: true)");
-    ("show_stats", enum_prop ["true"; "false"] "통계 포함 (기본값: false)");
+    ("show_size", bool_prop "크기 표시 (기본값: true)");
+    ("show_stats", bool_prop "통계 포함 (기본값: false)");
   ] ["file_key"];
 }
 
