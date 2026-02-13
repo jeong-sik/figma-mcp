@@ -582,9 +582,14 @@ module Response = struct
 
   (** SSE single message response for POST→SSE (MCP Streamable HTTP) *)
   let sse_message ?(session_id="") json_str reqd =
+    (* Ensure JSON is single-line to prevent SSE frame corruption *)
+    let safe_json = match Yojson.Safe.from_string json_str with
+      | json -> Yojson.Safe.to_string json
+      | exception (Yojson.Json_error _) -> json_str
+    in
     let event_id = Printf.sprintf "s%d-%d" (Unix.getpid ()) (Random.int 10000) in
     let prime = Printf.sprintf "retry: 5000\nid: %s:2\n\n" event_id in
-    let message = Printf.sprintf "id: %s:1\ndata: %s\n\n" event_id json_str in
+    let message = Printf.sprintf "id: %s:1\ndata: %s\n\n" event_id safe_json in
     let body = prime ^ message in
     let session_headers = if session_id = "" then [] else [("mcp-session-id", session_id)] in
     let headers = Httpun.Headers.of_list ([
@@ -784,14 +789,26 @@ let random_sse_client_id () =
   in
   loop ()
 
+(** Re-serialize JSON string to compact single-line form.
+    Prevents multi-line data: fields in SSE output.
+    Returns original string unchanged if not valid JSON. *)
+let compact_json_string s =
+  match Yojson.Safe.from_string s with
+  | json -> Yojson.Safe.to_string json
+  | exception (Yojson.Json_error _) -> s
+
 let format_sse_data data =
   if data = "" then
     "data: "
   else
-    data
-    |> String.split_on_char '\n'
-    |> List.map (fun line -> "data: " ^ line)
-    |> String.concat "\n"
+    (* Compact JSON to single line to avoid multi-line data: split *)
+    let compacted = compact_json_string data in
+    if not (String.contains compacted '\n') then
+      "data: " ^ compacted
+    else
+      (* Non-JSON multi-line: split per SSE spec *)
+      let lines = String.split_on_char '\n' compacted in
+      String.concat "\n" (List.map (fun line -> "data: " ^ line) lines)
 
 let register_sse_client body =
   let id = random_sse_client_id () in
