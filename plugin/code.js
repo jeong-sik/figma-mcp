@@ -29,6 +29,7 @@ figma.ui.postMessage({ type: "init", nonce: sessionNonce });
 
 const MIXED = figma.mixed;
 const MAX_PAYLOAD_CHARS = 2000000;
+const MAX_EXPORT_B64_CHARS = Math.floor(MAX_PAYLOAD_CHARS * 0.4); // leave margin for wrapper fields
 
 // ============== Utilities ==============
 
@@ -104,6 +105,16 @@ function safeStringify(value) {
   });
 }
 
+function stringifyForUi(value) {
+  try {
+    const json = safeStringify(value);
+    if (json === undefined) return safeStringify({ error: "Unserializable payload" });
+    return json;
+  } catch (e) {
+    return safeStringify({ error: "Serialize error: " + String(e) });
+  }
+}
+
 function parseColor(c) {
   if (!c) return { r: 0, g: 0, b: 0 };
   if (typeof c === "string" && c.startsWith("#")) {
@@ -115,6 +126,60 @@ function parseColor(c) {
     };
   }
   return { r: c.r || 0, g: c.g || 0, b: c.b || 0 };
+}
+
+function clampNumeric(value, min, max, fallback) {
+  if (typeof value !== "number" || !Number.isFinite(value)) return fallback;
+  if (min !== undefined && value < min) return min;
+  if (max !== undefined && value > max) return max;
+  return value;
+}
+
+async function exportNodeImage(node, p = {}) {
+  const format = (p.format || "PNG").toUpperCase();
+  let scale = clampNumeric(Number(p.scale), 0.125, 8, 2);
+  if (!Number.isFinite(scale)) scale = 2;
+
+  let attempts = 0;
+  const maxAttempts = 4;
+  const maxChars = typeof p.max_payload_chars === "number" ? p.max_payload_chars : MAX_EXPORT_B64_CHARS;
+
+  while (attempts < maxAttempts) {
+    attempts += 1;
+    const bytes = await node.exportAsync({ format, constraint: { type: "SCALE", value: scale } });
+    const base64 = uint8ToBase64(bytes);
+
+    if (base64.length <= maxChars || attempts === maxAttempts) {
+      return {
+        node_id: node.id,
+        name: node.name,
+        type: node.type,
+        format,
+        scale,
+        size: bytes.length,
+        width: node.width * scale,
+        height: node.height * scale,
+        base64
+      };
+    }
+
+    const nextScale = Math.max(scale / 2, 0.125);
+    if (nextScale === scale) {
+      return {
+        node_id: node.id,
+        name: node.name,
+        type: node.type,
+        format,
+        scale,
+        size: bytes.length,
+        width: node.width * scale,
+        height: node.height * scale,
+        base64,
+        warning: "Image exceeds payload limit after downscale attempts"
+      };
+    }
+    scale = nextScale;
+  }
 }
 
 // Apply fill from hex string, parent_id reparenting, and corner_radius in one call
@@ -191,6 +256,60 @@ const H = {
   },
 };
 
+async function executeHttpProxyRequest(payload) {
+  var url = payload && typeof payload.url === "string" ? payload.url.trim() : "";
+  if (!url) return { error: "url required" };
+  if (!/^https?:\/\//i.test(url)) return { error: "invalid url protocol" };
+
+  var method = String(payload.method || "POST").toUpperCase();
+  if (["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"].indexOf(method) === -1) {
+    return { error: "unsupported method: " + method };
+  }
+
+  var headers = payload && typeof payload.headers === "object" && payload.headers !== null
+    ? payload.headers
+    : {};
+  var hasBody = method !== "GET" && method !== "HEAD";
+  var body = hasBody ? payload.body : undefined;
+  var requestBody = body === undefined ? undefined : (typeof body === "string" ? body : safeStringify(body));
+
+  var timeoutRaw = Number(payload.timeoutMs);
+  var timeoutMs = Number.isFinite(timeoutRaw) && timeoutRaw > 0 ? timeoutRaw : 30000;
+
+  try {
+    var fetchPromise = fetch(url, {
+      method: method,
+      headers: headers,
+      body: requestBody
+    });
+
+    var timeoutPromise = new Promise(function(resolve, reject) {
+      setTimeout(function() {
+        reject(new Error("Request timeout"));
+      }, timeoutMs);
+    });
+
+    var response = await Promise.race([fetchPromise, timeoutPromise]);
+    var text = await response.text();
+    var parsed = text;
+    if (text) {
+      try {
+        parsed = JSON.parse(text);
+      } catch (err) {}
+    }
+
+    return {
+      ok: response.ok,
+      status: response.status,
+      statusText: response.statusText,
+      data: parsed,
+      text: typeof text === "string" ? text : ""
+    };
+  } catch (error) {
+    return { error: String(error && error.message ? error.message : error) };
+  }
+}
+
 // === Document Change Observation (Feedback Loop) ===
 const _changeBuffer = [];
 const MAX_CHANGE_BUFFER = 200;
@@ -220,6 +339,12 @@ function _registerDocumentChangeWatcher() {
 
 const handlers = {
   // === Connection (3) ===
+  llm_proxy: async (payload) => {
+    const result = await executeHttpProxyRequest(payload || {});
+    if (result && result.error) return { ok: false, payload: result };
+    return { ok: true, payload: result };
+  },
+
   status: H.simple(() => ({ connected: true, page: figma.currentPage.name })),
 
   // === Pages (4) ===
@@ -1175,6 +1300,7 @@ const handlers = {
     const scale = p.scale || 1;
     const format = (p.format || "PNG").toUpperCase();
     const maxNodes = p.max_nodes || 5;
+    const maxPayload = p.max_payload_chars || MAX_EXPORT_B64_CHARS;
 
     // Get top-level children visible in viewport
     const children = figma.currentPage.children.filter(child => {
@@ -1188,11 +1314,12 @@ const handlers = {
     const results = [];
     for (const child of children.slice(0, maxNodes)) {
       try {
-        const bytes = await child.exportAsync({ format, constraint: { type: "SCALE", value: scale } });
-        results.push({
-          node_id: child.id, name: child.name, type: child.type,
-          base64: uint8ToBase64(bytes), width: child.width, height: child.height,
+        const exportResult = await exportNodeImage(child, {
+          format,
+          scale,
+          max_payload_chars: maxPayload
         });
+        results.push(exportResult);
       } catch (e) {
         results.push({ node_id: child.id, name: child.name, error: String(e) });
       }
@@ -1211,21 +1338,52 @@ const handlers = {
 
     const scale = p.scale || 2;
     const format = (p.format || "PNG").toUpperCase();
+    const maxPayload = p.max_payload_chars || MAX_EXPORT_B64_CHARS;
     const results = [];
 
     for (const node of selection.slice(0, 10)) {
       try {
-        const bytes = await node.exportAsync({ format, constraint: { type: "SCALE", value: scale } });
-        results.push({
-          node_id: node.id, name: node.name, type: node.type,
-          base64: uint8ToBase64(bytes), width: node.width, height: node.height,
+        const exportResult = await exportNodeImage(node, {
+          format,
+          scale,
+          max_payload_chars: maxPayload
         });
+        results.push(exportResult);
       } catch (e) {
         results.push({ node_id: node.id, name: node.name, error: String(e) });
       }
     }
 
     return { count: results.length, nodes: results };
+  }),
+
+  capture_selection_image: H.simple(async (p) => {
+    const selection = figma.currentPage.selection;
+    if (selection.length === 0) return { error: "Nothing selected" };
+
+    const maxNodes = clampNumeric(p.max_nodes, 1, 10, 1);
+    const scale = p.scale || 2;
+    const format = (p.format || "PNG").toUpperCase();
+    const maxPayload = p.max_payload_chars || MAX_EXPORT_B64_CHARS;
+    const results = [];
+
+    for (const node of selection.slice(0, maxNodes)) {
+      try {
+        const exportResult = await exportNodeImage(node, {
+          format,
+          scale,
+          max_payload_chars: maxPayload
+        });
+        results.push(exportResult);
+      } catch (e) {
+        results.push({ node_id: node.id, name: node.name, error: String(e) });
+      }
+    }
+
+    return {
+      count: results.length,
+      nodes: results
+    };
   }),
 
   get_changes: H.simple((p) => {
@@ -1497,7 +1655,11 @@ function extractTokens() {
 
 // Selection change listener
 figma.on("selectionchange", function() {
-  figma.ui.postMessage({ type: "selection_update", nonce: sessionNonce, selection: getSelectionData() });
+  figma.ui.postMessage({
+    type: "selection_update",
+    nonce: sessionNonce,
+    selection_json: stringifyForUi(getSelectionData())
+  });
 });
 
 // Document change listener (requires loadAllPagesAsync in dynamic-page mode)
@@ -1519,7 +1681,7 @@ figma.loadAllPagesAsync().then(function() {
     figma.ui.postMessage({
       type: "document_change",
       nonce: sessionNonce,
-      changes: summary
+      changes_json: stringifyForUi(summary)
     });
   });
 }).catch(function(err) {
@@ -1537,8 +1699,16 @@ figma.ui.onmessage = async (msg) => {
 
   // Handle selection request
   if (msg.type === "request_selection") {
-    figma.ui.postMessage({ type: "selection_update", nonce: sessionNonce, selection: getSelectionData() });
-    figma.ui.postMessage({ type: "tokens_update", nonce: sessionNonce, tokens: extractTokens() });
+    figma.ui.postMessage({
+      type: "selection_update",
+      nonce: sessionNonce,
+      selection_json: stringifyForUi(getSelectionData())
+    });
+    figma.ui.postMessage({
+      type: "tokens_update",
+      nonce: sessionNonce,
+      tokens_json: stringifyForUi(extractTokens())
+    });
     return;
   }
 
