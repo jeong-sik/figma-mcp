@@ -1,6 +1,7 @@
 # Figma MCP Server
 
-[![Version](https://img.shields.io/badge/version-0.3.10-blue.svg)](https://github.com/jeong-sik/figma-mcp)
+[![Version](https://img.shields.io/badge/version-0.7.3-blue.svg)](https://github.com/jeong-sik/figma-mcp)
+[![Coverage](https://img.shields.io/badge/coverage-51.1%25-yellow.svg)]()
 [![OCaml](https://img.shields.io/badge/OCaml-5.x-orange.svg)](https://ocaml.org/)
 [![MCP](https://img.shields.io/badge/MCP-2025--11--25-blue.svg)](https://spec.modelcontextprotocol.io/)
 [![Status](https://img.shields.io/badge/status-Personal%20Project-lightgrey.svg)]()
@@ -38,6 +39,11 @@ export FIGMA_TOKEN="YOUR_TOKEN"
 - **충실도 중심 옵션** - 레이아웃/페인트/보더/타이포 정보를 최대한 보존
 - **타입 안전** - OCaml Variant/ADT 기반 파싱 (HTML 모드)
 - **네이티브 실행** - 바이너리 배포 가능
+- **요청 중복 제거** - Eio.Promise 기반 in-flight request coalescing으로 동일 요청 병합
+- **동시성 제한** - Eio.Semaphore 기반 API rate limiting (Figma API 동시 호출 수 제한)
+- **SSE compact JSON** - multi-line data 버그 수정, 단일 라인 JSON 프레이밍 보장
+- **모듈 분리** - mcp_tools.ml에서 handler별 모듈(.ml + .mli)로 분리 (mcp_api_handlers, mcp_plugin_handlers, mcp_visual_handlers, mcp_helpers 등)
+- **캐시 TTL 8시간** - 노드 캐시 TTL을 24h에서 8h로 변경 (FIGMA_MCP_CACHE_TTL_HOURS로 조정 가능)
 
 ## Capabilities
 
@@ -47,14 +53,16 @@ Capabilities: tools ✅ · resources ✅ · prompts ✅
 
 | Capability | 상태 | 설명 |
 |------------|------|------|
-| **tools** | ✅ 지원 | 58개 도구 (5개 카테고리 라우터 + 15개 직접 도구로 노출, `tools/list` 참고) |
+| **tools** | ✅ 지원 | 58개 도구 (5개 카테고리 라우터 + 14개 직접 도구로 노출, `tools/list` 참고) |
 | **resources** | ✅ 지원 | `figma://docs/*` 가이드 |
 | **prompts** | ✅ 지원 | Fidelity 리뷰 프롬프트 |
 
 ### Resources
 ```
-figma://docs/fidelity  # Fidelity DSL 키 설명
-figma://docs/usage     # 정확도 우선 호출 패턴
+figma://docs/fidelity      # Fidelity DSL 키 설명
+figma://docs/usage         # 정확도 우선 호출 패턴
+figma://docs/tokens        # Design token/variable 문서
+figma://tokens/{file_key}  # 파일별 design token 동적 리소스 템플릿
 ```
 
 ### Prompts
@@ -75,10 +83,16 @@ echo '{"jsonrpc":"2.0","id":5,"method":"prompts/get","params":{"name":"figma_fid
 - `docs/MCP-TEMPLATE.md` - ~/.mcp.json 템플릿
 - `docs/INSTALL-CHECKLIST.md` - 설치 후 확인
 - `docs/CODE-CONNECT.md` - Code Connect-style component mapping spec
+- `docs/DESIGN-PRINCIPLES.md` - 설계 철학과 아키텍처
+- `docs/SSIM-HEARTBEAT.md` - SSIM 테스트용 heartbeat 메커니즘
+- `docs/PROTOCOL-2025-11-25.md` - MCP 프로토콜 준수 사항
+- `docs/LARGE-RESPONSE-ARCHITECTURE.md` - 대용량 응답 처리 구조
+- `docs/plugin-workflow.md` - 플러그인 워크플로우와 호출 흐름
+- `docs/DISCOVERIES.md` - 실험적 발견 사항
 
 ## 도구 개요 (2026-01-27 기준)
 
-- 코드상 `all_detailed_tools`에 등록된 도구는 58개입니다. `tools/list`에서는 5개 카테고리 라우터 + 15개 직접 도구 = 20개 항목으로 노출됩니다.
+- 코드상 `all_detailed_tools`에 등록된 도구는 58개입니다. `tools/list`에서는 5개 카테고리 라우터 + 14개 직접 도구 = 19개 항목으로 노출됩니다.
 - 전체 목록 확인:
 
 ```bash
@@ -101,6 +115,8 @@ echo '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}' | ./start-figm
 - `figma_parse_url`을 사용하면 변환 없이 `node_id`를 바로 얻을 수 있습니다.
 
 ## 설치
+
+OCaml >= 5.1 필요.
 
 ```bash
 # opam 환경
@@ -203,7 +219,7 @@ export SSL_CERT_FILE="/etc/ssl/certs/ca-certificates.crt"
 # Step 3: 플러그인 UI에서 Connect 클릭 → Channel ID 복사
 ```
 
-이제 MCP에서 `figma_plugin action=connect`로 연결하세요!
+이제 MCP에서 `figma_plugin action=connect`로 연결하세요.
 
 ### 📝 Drawing 예시 (vectorPaths)
 
@@ -402,8 +418,13 @@ PlanTasks 응답 추가 필드:
 
 ## 테스트
 
+커버리지: 51.1% (v0.7.3 기준, 13개 테스트 파일).
+
 ```bash
-# initialize
+# 유닛 테스트 실행
+dune runtest
+
+# initialize (stdio 모드)
 echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' | ./start-figma-mcp.sh
 
 # tools/list
@@ -421,6 +442,10 @@ echo '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}' | ./start-figm
 - cmdliner (>= 1.1)
 - ppx_deriving_yojson (>= 3.6)
 - tls-eio, ca-certs, mirage-crypto-rng
+- httpun-eio (>= 0.1)
+- gluten-eio (>= 0.4)
+- bigstringaf (>= 0.9)
+- ipaddr (>= 5.0)
 
 ## 변경 이력과 노트
 
