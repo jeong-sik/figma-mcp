@@ -17,6 +17,25 @@ type selection_config = {
   excluded_limit: int;
 }
 
+(** {1 Pure helpers (exposed for testing)} *)
+
+val default_exclude_patterns : string list
+val default_note_patterns : string list
+val normalize_patterns : string list -> string list
+val string_contains : needle:string -> haystack:string -> bool
+val matches_any : string list -> string -> bool
+val find_matching_pattern : string list -> string -> string option
+val node_text_blob : Figma_types.ui_node -> string
+val node_is_text : Figma_types.ui_node -> bool
+val node_is_container : Figma_types.ui_node -> bool
+val node_is_component : Figma_types.ui_node -> bool
+val node_has_image_fill : Figma_types.ui_node -> bool
+val node_area : Figma_types.ui_node -> float
+val node_area_score : float -> float
+val node_has_auto_layout : Figma_types.ui_node -> bool
+val node_has_mask_hint : Figma_types.ui_node -> bool
+val node_duplicate_key : Figma_types.ui_node -> string
+
 (** {1 Handlers} *)
 
 val handle_get_file : Yojson.Safe.t -> (Yojson.Safe.t, string) result

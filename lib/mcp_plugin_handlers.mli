@@ -3,6 +3,11 @@
     Provides plugin communication primitives and handler combinator functions
     used by mcp_visual_handlers and mcp_api_handlers. *)
 
+(** {1 Pure helpers (exposed for testing)} *)
+
+val truncate_string : ?max_len:int -> string -> string
+val plugin_error_message : Yojson.Safe.t -> string
+
 (** {1 Plugin infrastructure} *)
 
 val resolve_channel_id : Yojson.Safe.t -> (string, string) result

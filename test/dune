@@ -208,3 +208,68 @@
 (test
  (name test_category_tools)
  (libraries figma_mcp alcotest yojson))
+
+; Coverage: html_metrics.ml (pure computation — color, CSS, JSON parsing)
+(test
+ (name test_html_metrics_coverage)
+ (libraries figma_mcp alcotest yojson str))
+
+; Coverage: mcp_helpers.ml (schema helpers, param extractors, error handling)
+(test
+ (name test_mcp_helpers_extra)
+ (libraries figma_mcp alcotest yojson str unix))
+
+; Coverage: figma_effects.ml (mock handler + Perform module branches)
+(test
+ (name test_effects_coverage)
+ (libraries figma_mcp alcotest yojson str))
+
+; Extra Coverage Tests for figma_codegen.ml (uncovered pure functions)
+(test
+ (name test_codegen_extra)
+ (libraries figma_mcp alcotest yojson str))
+
+; Extra Coverage Tests for figma_cache.ml (pure functions)
+(test
+ (name test_cache_extra)
+ (libraries figma_mcp alcotest yojson unix))
+
+; Extra Coverage Tests for large_response.ml (pure functions)
+(test
+ (name test_large_response_extra)
+ (libraries figma_mcp alcotest yojson unix str))
+
+; Coverage: mcp_api_handlers.ml (node selection helpers, string matching)
+(test
+ (name test_api_handlers_coverage)
+ (libraries figma_mcp alcotest str))
+
+; Coverage: mcp_plugin_handlers.ml (truncate_string, plugin_error_message)
+(test
+ (name test_plugin_handlers_coverage)
+ (libraries figma_mcp alcotest yojson str))
+
+; Coverage: mcp_plugin_handlers.ml (dispatch + combinator + handler error paths)
+(test
+ (name test_plugin_dispatch_coverage)
+ (libraries figma_mcp alcotest yojson unix str))
+
+; Coverage: figma_crawl.ml (config, JSON helpers, flatten_nodes)
+(test
+ (name test_crawl_coverage)
+ (libraries figma_mcp alcotest yojson))
+
+; Coverage: visual_verifier.ml extra (hints, corrections, parse_diff_regions)
+(test
+ (name test_visual_verifier_extra)
+ (libraries figma_mcp alcotest yojson str))
+
+; Coverage: mcp_api_handlers.ml (mock effect handler tests for all 26 handlers)
+(test
+ (name test_api_handlers_effects)
+ (libraries figma_mcp alcotest yojson unix))
+
+; Coverage: mcp_visual_handlers.ml (mock effect handler tests)
+(test
+ (name test_visual_handlers_effects)
+ (libraries figma_mcp alcotest yojson unix str))
