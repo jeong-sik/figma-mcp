@@ -7,6 +7,78 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.3] - 2026-02-14
+
+### Added
+- In-flight request deduplication via Eio.Promise (#106)
+- Eio.Semaphore concurrency limiter for Figma API calls (#104)
+- Breadcrumb/ancestor path in search response (#107)
+- 13 test files (7,516 lines) pushing bisect_ppx coverage from 29.6% to 51.1% (#108)
+
+### Fixed
+- Compact JSON to single line before SSE framing — fixes multi-line data bug (#105)
+- MCP tool descriptions and array_prop schema (#103)
+
+### Changed
+- Default node cache TTL reduced from 24h to 8h (#102)
+
+## [0.7.2] - 2026-02-10
+
+### Changed
+- Replace Unix.sleepf with Eio.Time.sleep, fix metrics lock docs (#97)
+
+## [0.7.1] - 2026-02-09
+
+### Added
+- `.mli` interface files for module encapsulation (#96)
+
+### Changed
+- Modularize mcp_tools.ml: 9,013 → 3,090 lines (#95)
+
+### Fixed
+- Plugin lazy-init documentchange watcher with loadAllPagesAsync
+
+## [0.7.0] - 2026-02-07
+
+### Added
+- Plugin feedback loop: viewport capture, selection export, change watcher
+- Plugin create_instance handler + enriched channel status
+- Plugin mutation tools, event subscription
+- Figma search hardening: tokenize + score + JSON (#88)
+
+### Fixed
+- Plugin sandbox messaging and poll loop restart
+- Plugin parent_id + fill support for all create_* handlers
+- Expose plugin tools as monolithic instead of broken category
+- Log realpath fallback in mcp_protocol_eio
+- Harden remaining silent failures, add diagnostic logging
+
+## [0.6.0] - 2026-02-05
+
+### Added
+- File cache for search + restore depth=4 (#92)
+- Category tools describe mode + strict routing (#91)
+- Semantic-first verifier tool (design IR vs DOM metrics) (#90)
+- Variables tokens via MCP resources (#85)
+- Code Connect mapping + match tool (#73)
+- Strict/compat CORS profile defaults (#72)
+- Security hardening + tokens export formats (#71)
+- CI test workflow (#74)
+- bisect_ppx code coverage instrumentation (#69)
+
+### Fixed
+- Restrict env token resolution, simplify args, enable domain_mgr
+- Clamp max_commands to prevent unbounded plugin poll requests
+- Avoid verify_visual tmp collisions (#84)
+- SSE client_id within int range (#83)
+- Harden SSE session id + redact URL queries (#75)
+- Disable Domain_manager.run for MCP requests (#77)
+- Search depth=4 in handle_search (#76)
+- Forward flat arguments in hub category dispatch (#70)
+- Prevent zombie SSE client accumulation on broadcast failure
+- Plugin API key UI and CORS defaults (#67)
+- Accept MCP_API_KEY for HTTP auth (#66)
+
 ## [0.5.4] - 2026-02-01
 
 ### Fixed
