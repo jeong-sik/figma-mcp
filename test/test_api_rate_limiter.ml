@@ -1,14 +1,24 @@
 (** Test: Eio.Semaphore-based API rate limiter in figma_api_eio.ml
 
     Spawns 5 concurrent fibers through a semaphore limited to 2 slots.
-    Verifies that at no point more than 2 fibers execute simultaneously. *)
+    Verifies that at no point more than 2 fibers execute simultaneously.
+
+    Uses Eio.Fiber.yield for deterministic synchronization instead of
+    wall-clock sleeps. Fibers blocked on Semaphore.acquire only wake on
+    release, not on yield — so yielding inside the critical section
+    correctly holds the slot while letting other slot-holders run. *)
 
 open Alcotest
+
+(** Yield to hold the semaphore slot while other ready fibers (those that
+    also acquired a slot) can run and update peak. Fibers blocked on
+    Semaphore.acquire remain blocked until a slot is released. *)
+let hold_slot () =
+  for _ = 1 to 20 do Eio.Fiber.yield () done
 
 let test_concurrency_bounded_by_semaphore () =
   Eio_main.run @@ fun env ->
   let net = Eio.Stdenv.net env in
-  let clock = Eio.Stdenv.clock env in
   let client = Figma_api_eio.make_client ~max_concurrent_api:2 net in
 
   (* Shared atomic counters for lock-free concurrency tracking *)
@@ -27,8 +37,7 @@ let test_concurrency_bounded_by_semaphore () =
       in
       update_peak ();
       if c > 2 then Atomic.incr violations;
-      (* Hold the slot long enough for other fibers to contend *)
-      Eio.Time.sleep clock 0.05;
+      hold_slot ();
       ignore (Atomic.fetch_and_add current (-1)))
   in
 
@@ -50,7 +59,6 @@ let test_concurrency_bounded_by_semaphore () =
 let test_single_slot_serializes () =
   Eio_main.run @@ fun env ->
   let net = Eio.Stdenv.net env in
-  let clock = Eio.Stdenv.clock env in
   let client = Figma_api_eio.make_client ~max_concurrent_api:1 net in
 
   let current = Atomic.make 0 in
@@ -65,7 +73,7 @@ let test_single_slot_serializes () =
           if not (Atomic.compare_and_set peak old_peak c) then update_peak ()
       in
       update_peak ();
-      Eio.Time.sleep clock 0.02;
+      hold_slot ();
       ignore (Atomic.fetch_and_add current (-1)))
   in
 

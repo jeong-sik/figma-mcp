@@ -48,3 +48,4 @@ figma-mcp-linux-x64
 tokens.json
 .figma-experiments.log
 data/telemetry.jsonl
+_coverage/
