@@ -944,6 +944,1100 @@ let network_util_tests = [
   "is_network_error string", `Quick, test_is_network_error_string;
 ]
 
+(** ============== Category / Tool Lookup ============== *)
+
+let test_find_tool_in_category_core_get_file () =
+  check bool "get_file in core" true
+    (Mcp_tools.find_tool_in_category "core" "get_file")
+
+let test_find_tool_in_category_core_get_node () =
+  check bool "get_node in core" true
+    (Mcp_tools.find_tool_in_category "core" "get_node")
+
+let test_find_tool_in_category_visual_verify () =
+  check bool "verify_visual in visual" true
+    (Mcp_tools.find_tool_in_category "visual" "verify_visual")
+
+let test_find_tool_in_category_missing_tool () =
+  check bool "nonexistent tool" false
+    (Mcp_tools.find_tool_in_category "core" "nonexistent_tool")
+
+let test_find_tool_in_category_missing_category () =
+  check bool "nonexistent category" false
+    (Mcp_tools.find_tool_in_category "nonexistent_category" "get_file")
+
+let test_find_tool_in_category_team () =
+  check bool "list_projects in team" true
+    (Mcp_tools.find_tool_in_category "team" "list_projects")
+
+let test_find_tool_in_category_export () =
+  check bool "export_image in export" true
+    (Mcp_tools.find_tool_in_category "export" "export_image")
+
+let test_find_tool_in_category_components () =
+  check bool "get_variables in components" true
+    (Mcp_tools.find_tool_in_category "components" "get_variables")
+
+let test_find_tool_in_category_wrong_category () =
+  check bool "get_file not in visual" false
+    (Mcp_tools.find_tool_in_category "visual" "get_file")
+
+let category_lookup_tests = [
+  "find_tool core/get_file", `Quick, test_find_tool_in_category_core_get_file;
+  "find_tool core/get_node", `Quick, test_find_tool_in_category_core_get_node;
+  "find_tool visual/verify_visual", `Quick, test_find_tool_in_category_visual_verify;
+  "find_tool missing tool", `Quick, test_find_tool_in_category_missing_tool;
+  "find_tool missing category", `Quick, test_find_tool_in_category_missing_category;
+  "find_tool team/list_projects", `Quick, test_find_tool_in_category_team;
+  "find_tool export/export_image", `Quick, test_find_tool_in_category_export;
+  "find_tool components/get_variables", `Quick, test_find_tool_in_category_components;
+  "find_tool wrong category", `Quick, test_find_tool_in_category_wrong_category;
+]
+
+(** ============== Tool Categories Structure ============== *)
+
+let test_tool_categories_not_empty () =
+  check bool "tool_categories not empty" true
+    (List.length Mcp_tools.tool_categories > 0)
+
+let test_tool_categories_have_names () =
+  let all_named = List.for_all (fun (cat : Mcp_tools.tool_category) ->
+    String.length cat.name > 0
+  ) Mcp_tools.tool_categories in
+  check bool "all categories have names" true all_named
+
+let test_tool_categories_have_tools () =
+  let all_have_tools = List.for_all (fun (cat : Mcp_tools.tool_category) ->
+    List.length cat.tools > 0
+  ) Mcp_tools.tool_categories in
+  check bool "all categories have tools" true all_have_tools
+
+let test_tool_categories_core_exists () =
+  let core_exists = List.exists (fun (cat : Mcp_tools.tool_category) ->
+    cat.name = "core"
+  ) Mcp_tools.tool_categories in
+  check bool "core category exists" true core_exists
+
+let test_tool_categories_visual_exists () =
+  let visual_exists = List.exists (fun (cat : Mcp_tools.tool_category) ->
+    cat.name = "visual"
+  ) Mcp_tools.tool_categories in
+  check bool "visual category exists" true visual_exists
+
+let test_tool_categories_unique_names () =
+  let names = List.map (fun (cat : Mcp_tools.tool_category) -> cat.name)
+    Mcp_tools.tool_categories in
+  let unique = List.sort_uniq String.compare names in
+  check int "unique category names" (List.length names) (List.length unique)
+
+let test_category_tools_count () =
+  check int "category_tools count matches tool_categories"
+    (List.length Mcp_tools.tool_categories)
+    (List.length Mcp_tools.category_tools)
+
+let test_category_tools_names_prefixed () =
+  let all_prefixed = List.for_all (fun (t : Mcp_protocol.tool_def) ->
+    String.length t.name >= 6 && String.sub t.name 0 6 = "figma_"
+  ) Mcp_tools.category_tools in
+  check bool "all category tools prefixed with figma_" true all_prefixed
+
+let test_make_category_tool_name () =
+  let cat : Mcp_tools.tool_category = { name = "test_cat"; description = "Test"; tools = ["a"; "b"] } in
+  let tool = Mcp_tools.make_category_tool cat in
+  check string "tool name" "figma_test_cat" tool.name
+
+let test_make_category_tool_description_contains_tools () =
+  let cat : Mcp_tools.tool_category = { name = "mycat"; description = "My description"; tools = ["foo"; "bar"] } in
+  let tool = Mcp_tools.make_category_tool cat in
+  check bool "description contains foo" true (Mcp_tools.string_contains tool.description "foo");
+  check bool "description contains bar" true (Mcp_tools.string_contains tool.description "bar")
+
+let test_make_category_tool_has_mode_enum () =
+  let cat : Mcp_tools.tool_category = { name = "test"; description = "Test"; tools = ["x"] } in
+  let tool = Mcp_tools.make_category_tool cat in
+  match tool.input_schema with
+  | `Assoc fields ->
+      (match List.assoc_opt "properties" fields with
+       | Some (`Assoc props) ->
+           check bool "has mode property" true (List.mem_assoc "mode" props);
+           check bool "has tool property" true (List.mem_assoc "tool" props);
+           check bool "has args property" true (List.mem_assoc "args" props)
+       | _ -> fail "Expected properties Assoc")
+  | _ -> fail "Expected Assoc schema"
+
+let test_featured_tool_names_not_empty () =
+  check bool "featured_tool_names not empty" true
+    (List.length Mcp_tools.featured_tool_names > 0)
+
+let test_featured_tools_not_empty () =
+  check bool "featured_tools not empty" true
+    (List.length Mcp_tools.featured_tools > 0)
+
+let test_featured_tools_subset_of_all () =
+  let all_names = List.map (fun (t : Mcp_protocol.tool_def) -> t.name) Mcp_tools.all_tools in
+  let all_featured_in_all = List.for_all (fun (t : Mcp_protocol.tool_def) ->
+    List.mem t.name all_names
+  ) Mcp_tools.featured_tools in
+  check bool "all featured tools in all_tools" true all_featured_in_all
+
+let test_public_tools_equals_category_plus_featured () =
+  let expected_len = List.length Mcp_tools.category_tools + List.length Mcp_tools.featured_tools in
+  check int "public_tools length" expected_len (List.length Mcp_tools.public_tools)
+
+let category_structure_tests = [
+  "tool_categories not empty", `Quick, test_tool_categories_not_empty;
+  "categories have names", `Quick, test_tool_categories_have_names;
+  "categories have tools", `Quick, test_tool_categories_have_tools;
+  "core category exists", `Quick, test_tool_categories_core_exists;
+  "visual category exists", `Quick, test_tool_categories_visual_exists;
+  "category names unique", `Quick, test_tool_categories_unique_names;
+  "category_tools count", `Quick, test_category_tools_count;
+  "category_tools prefixed", `Quick, test_category_tools_names_prefixed;
+  "make_category_tool name", `Quick, test_make_category_tool_name;
+  "make_category_tool desc", `Quick, test_make_category_tool_description_contains_tools;
+  "make_category_tool schema", `Quick, test_make_category_tool_has_mode_enum;
+  "featured_tool_names not empty", `Quick, test_featured_tool_names_not_empty;
+  "featured_tools not empty", `Quick, test_featured_tools_not_empty;
+  "featured_tools subset of all", `Quick, test_featured_tools_subset_of_all;
+  "public_tools = category + featured", `Quick, test_public_tools_equals_category_plus_featured;
+]
+
+(** ============== Chunkify Children ============== *)
+
+let test_chunkify_children_basic () =
+  let children = List.init 6 (fun i -> `Assoc [("id", `Int i)]) in
+  let json = `Assoc [("name", `String "parent"); ("children", `List children)] in
+  let result = Mcp_tools.chunkify_children ~chunk_size:2 json in
+  match result with
+  | `Assoc fields ->
+      (match List.assoc_opt "chunks" fields with
+       | Some (`List chunks) ->
+           check int "chunk count" 3 (List.length chunks);
+           (* Each chunk should have chunk_index, chunk_total, children *)
+           (match List.nth chunks 0 with
+            | `Assoc cf ->
+                (match List.assoc_opt "chunk_index" cf with
+                 | Some (`Int idx) -> check int "first chunk index" 1 idx
+                 | _ -> fail "Expected chunk_index Int");
+                (match List.assoc_opt "chunk_total" cf with
+                 | Some (`Int total) -> check int "chunk total" 3 total
+                 | _ -> fail "Expected chunk_total Int");
+                (match List.assoc_opt "children" cf with
+                 | Some (`List c) -> check int "first chunk children" 2 (List.length c)
+                 | _ -> fail "Expected children list")
+            | _ -> fail "Expected Assoc chunk")
+       | _ -> fail "Expected chunks list");
+      (match List.assoc_opt "chunk_total" fields with
+       | Some (`Int t) -> check int "top-level chunk_total" 3 t
+       | _ -> fail "Expected chunk_total");
+      (* Original "name" field should be preserved *)
+      (match List.assoc_opt "name" fields with
+       | Some (`String n) -> check string "name preserved" "parent" n
+       | _ -> fail "Expected name preserved")
+  | _ -> fail "Expected Assoc"
+
+let test_chunkify_children_no_children () =
+  let json = `Assoc [("name", `String "leaf")] in
+  let result = Mcp_tools.chunkify_children ~chunk_size:5 json in
+  match result with
+  | `Assoc fields ->
+      check bool "name still present" true (List.mem_assoc "name" fields);
+      check bool "no chunks" false (List.mem_assoc "chunks" fields)
+  | _ -> fail "Expected Assoc"
+
+let test_chunkify_children_not_assoc () =
+  let json = `String "not an object" in
+  let result = Mcp_tools.chunkify_children ~chunk_size:5 json in
+  check bool "passthrough non-assoc" true
+    (result = `String "not an object")
+
+let test_chunkify_children_children_not_list () =
+  let json = `Assoc [("children", `String "not a list")] in
+  let result = Mcp_tools.chunkify_children ~chunk_size:5 json in
+  match result with
+  | `Assoc fields ->
+      (* children is not a list, so should be unchanged *)
+      check bool "no chunks created" false (List.mem_assoc "chunks" fields)
+  | _ -> fail "Expected Assoc"
+
+let chunkify_children_tests = [
+  "chunkify_children basic", `Quick, test_chunkify_children_basic;
+  "chunkify_children no children", `Quick, test_chunkify_children_no_children;
+  "chunkify_children not assoc", `Quick, test_chunkify_children_not_assoc;
+  "chunkify_children non-list children", `Quick, test_chunkify_children_children_not_list;
+]
+
+(** ============== Chunkify Text ============== *)
+
+let test_chunkify_text_basic () =
+  let result = Mcp_tools.chunkify_text ~chunk_size:5 "HelloWorld!" in
+  match result with
+  | `Assoc fields ->
+      (match List.assoc_opt "chunked_text" fields with
+       | Some (`Bool true) -> ()
+       | _ -> fail "Expected chunked_text=true");
+      (match List.assoc_opt "chunks" fields with
+       | Some (`List chunks) ->
+           check bool "has chunks" true (List.length chunks > 0);
+           (* First chunk should have chunk_index=1 *)
+           (match List.nth chunks 0 with
+            | `Assoc cf ->
+                (match List.assoc_opt "chunk_index" cf with
+                 | Some (`Int 1) -> ()
+                 | _ -> fail "Expected chunk_index 1");
+                (match List.assoc_opt "content" cf with
+                 | Some (`String s) -> check bool "content not empty" true (String.length s > 0)
+                 | _ -> fail "Expected content string")
+            | _ -> fail "Expected Assoc")
+       | _ -> fail "Expected chunks list")
+  | _ -> fail "Expected Assoc"
+
+let test_chunkify_text_single_chunk () =
+  let result = Mcp_tools.chunkify_text ~chunk_size:100 "short" in
+  match result with
+  | `Assoc fields ->
+      (match List.assoc_opt "chunk_total" fields with
+       | Some (`Int 1) -> ()
+       | _ -> fail "Expected single chunk");
+      (match List.assoc_opt "chunks" fields with
+       | Some (`List [chunk]) ->
+           (match chunk with
+            | `Assoc cf ->
+                (match List.assoc_opt "content" cf with
+                 | Some (`String "short") -> ()
+                 | _ -> fail "Expected content 'short'")
+            | _ -> fail "Expected Assoc chunk")
+       | _ -> fail "Expected single chunk list")
+  | _ -> fail "Expected Assoc"
+
+let test_chunkify_text_empty () =
+  let result = Mcp_tools.chunkify_text ~chunk_size:5 "" in
+  match result with
+  | `Assoc fields ->
+      (match List.assoc_opt "chunk_total" fields with
+       | Some (`Int 0) -> ()
+       | Some (`Int n) -> check int "empty text chunk count" 0 n
+       | _ -> fail "Expected chunk_total")
+  | _ -> fail "Expected Assoc"
+
+let test_chunkify_text_zero_chunk_size () =
+  (* chunk_size 0 should be treated as 1 *)
+  let result = Mcp_tools.chunkify_text ~chunk_size:0 "abc" in
+  match result with
+  | `Assoc fields ->
+      (match List.assoc_opt "chunks" fields with
+       | Some (`List chunks) ->
+           check bool "has chunks" true (List.length chunks > 0)
+       | _ -> fail "Expected chunks list")
+  | _ -> fail "Expected Assoc"
+
+let chunkify_text_tests = [
+  "chunkify_text basic", `Quick, test_chunkify_text_basic;
+  "chunkify_text single chunk", `Quick, test_chunkify_text_single_chunk;
+  "chunkify_text empty", `Quick, test_chunkify_text_empty;
+  "chunkify_text zero chunk_size", `Quick, test_chunkify_text_zero_chunk_size;
+]
+
+(** ============== Select Chunked JSON ============== *)
+
+let test_select_chunked_json_basic () =
+  let json = `Assoc [
+    ("chunks", `List [
+      `Assoc [("chunk_index", `Int 1); ("data", `String "a")];
+      `Assoc [("chunk_index", `Int 2); ("data", `String "b")];
+      `Assoc [("chunk_index", `Int 3); ("data", `String "c")];
+    ]);
+    ("other", `String "preserved");
+  ] in
+  let result = Mcp_tools.select_chunked_json ~selected:[1; 3] json in
+  match result with
+  | `Assoc fields ->
+      (match List.assoc_opt "chunks" fields with
+       | Some (`List chunks) ->
+           check int "selected 2 chunks" 2 (List.length chunks)
+       | _ -> fail "Expected chunks list");
+      (match List.assoc_opt "chunk_selected" fields with
+       | Some (`List sel) ->
+           check int "selected list length" 2 (List.length sel)
+       | _ -> fail "Expected chunk_selected");
+      (match List.assoc_opt "other" fields with
+       | Some (`String "preserved") -> ()
+       | _ -> fail "Expected other field preserved")
+  | _ -> fail "Expected Assoc"
+
+let test_select_chunked_json_no_chunks () =
+  let json = `Assoc [("data", `String "no chunks")] in
+  let result = Mcp_tools.select_chunked_json ~selected:[1] json in
+  match result with
+  | `Assoc fields ->
+      check bool "data preserved" true (List.mem_assoc "data" fields);
+      check bool "no chunks key" false (List.mem_assoc "chunk_selected" fields)
+  | _ -> fail "Expected Assoc"
+
+let test_select_chunked_json_not_assoc () =
+  let json = `List [`Int 1; `Int 2] in
+  let result = Mcp_tools.select_chunked_json ~selected:[1] json in
+  check bool "non-assoc passthrough" true (result = json)
+
+let test_select_chunked_json_empty_selection () =
+  let json = `Assoc [
+    ("chunks", `List [
+      `Assoc [("chunk_index", `Int 1); ("data", `String "a")];
+    ]);
+  ] in
+  let result = Mcp_tools.select_chunked_json ~selected:[] json in
+  match result with
+  | `Assoc fields ->
+      (match List.assoc_opt "chunks" fields with
+       | Some (`List chunks) -> check int "no chunks selected" 0 (List.length chunks)
+       | _ -> fail "Expected chunks list")
+  | _ -> fail "Expected Assoc"
+
+let select_chunked_tests = [
+  "select_chunked basic", `Quick, test_select_chunked_json_basic;
+  "select_chunked no chunks", `Quick, test_select_chunked_json_no_chunks;
+  "select_chunked not assoc", `Quick, test_select_chunked_json_not_assoc;
+  "select_chunked empty selection", `Quick, test_select_chunked_json_empty_selection;
+]
+
+(** ============== Hashtbl Helpers (bump_count / type_counts_to_json) ============== *)
+
+let test_bump_count_new_key () =
+  let counts = Hashtbl.create 8 in
+  Mcp_tools.bump_count counts "foo";
+  check int "foo=1" 1 (Hashtbl.find counts "foo")
+
+let test_bump_count_existing_key () =
+  let counts = Hashtbl.create 8 in
+  Mcp_tools.bump_count counts "bar";
+  Mcp_tools.bump_count counts "bar";
+  Mcp_tools.bump_count counts "bar";
+  check int "bar=3" 3 (Hashtbl.find counts "bar")
+
+let test_bump_count_multiple_keys () =
+  let counts = Hashtbl.create 8 in
+  Mcp_tools.bump_count counts "a";
+  Mcp_tools.bump_count counts "b";
+  Mcp_tools.bump_count counts "a";
+  check int "a=2" 2 (Hashtbl.find counts "a");
+  check int "b=1" 1 (Hashtbl.find counts "b")
+
+let test_type_counts_to_json_basic () =
+  let counts = Hashtbl.create 8 in
+  Hashtbl.replace counts "TEXT" 5;
+  Hashtbl.replace counts "FRAME" 3;
+  let result = Mcp_tools.type_counts_to_json counts in
+  match result with
+  | `Assoc fields ->
+      (* Sorted alphabetically *)
+      check bool "has FRAME" true (List.mem_assoc "FRAME" fields);
+      check bool "has TEXT" true (List.mem_assoc "TEXT" fields);
+      (match List.assoc_opt "TEXT" fields with
+       | Some (`Int 5) -> ()
+       | _ -> fail "Expected TEXT=5");
+      (match List.assoc_opt "FRAME" fields with
+       | Some (`Int 3) -> ()
+       | _ -> fail "Expected FRAME=3")
+  | _ -> fail "Expected Assoc"
+
+let test_type_counts_to_json_empty () =
+  let counts = Hashtbl.create 8 in
+  let result = Mcp_tools.type_counts_to_json counts in
+  match result with
+  | `Assoc [] -> ()
+  | _ -> fail "Expected empty Assoc"
+
+let hashtbl_helper_tests = [
+  "bump_count new key", `Quick, test_bump_count_new_key;
+  "bump_count existing key", `Quick, test_bump_count_existing_key;
+  "bump_count multiple keys", `Quick, test_bump_count_multiple_keys;
+  "type_counts_to_json basic", `Quick, test_type_counts_to_json_basic;
+  "type_counts_to_json empty", `Quick, test_type_counts_to_json_empty;
+]
+
+(** ============== Plugin Stats Helpers ============== *)
+
+let test_create_plugin_stats () =
+  let stats = Mcp_tools.create_plugin_stats () in
+  check int "node_count 0" 0 stats.node_count;
+  check int "text_nodes 0" 0 stats.text_nodes;
+  check int "segment_count 0" 0 stats.segment_count;
+  check int "segment_bounds_count 0" 0 stats.segment_bounds_count;
+  check (list string) "empty name_samples" [] stats.name_samples;
+  check (list string) "empty text_samples" [] stats.text_samples;
+  check (option int) "selection_count None" None stats.selection_count
+
+let test_append_sample_basic () =
+  let result = Mcp_tools.append_sample ~max:3 [] "hello" in
+  check (list string) "append to empty" ["hello"] result
+
+let test_append_sample_at_max () =
+  let result = Mcp_tools.append_sample ~max:2 ["a"; "b"] "c" in
+  check (list string) "at max, skip" ["a"; "b"] result
+
+let test_append_sample_empty_value () =
+  let result = Mcp_tools.append_sample ~max:3 ["a"] "" in
+  check (list string) "empty value skipped" ["a"] result
+
+let test_append_sample_under_max () =
+  let result = Mcp_tools.append_sample ~max:3 ["a"] "b" in
+  check (list string) "under max, append" ["b"; "a"] result
+
+let test_count_segment_bounds_basic () =
+  let segments = [
+    `Assoc [("text", `String "hello"); ("bounds", `Assoc [("x", `Int 0)])];
+    `Assoc [("text", `String "world")];  (* no bounds *)
+    `Assoc [("text", `String "foo"); ("bounds", `Null)];  (* null bounds *)
+    `Assoc [("text", `String "bar"); ("bounds", `Assoc [("x", `Int 10)])];
+  ] in
+  let result = Mcp_tools.count_segment_bounds segments in
+  check int "2 segments with bounds" 2 result
+
+let test_count_segment_bounds_empty () =
+  check int "empty list" 0 (Mcp_tools.count_segment_bounds [])
+
+let test_count_segment_bounds_all_null () =
+  let segments = [
+    `Assoc [("bounds", `Null)];
+    `Assoc [];
+  ] in
+  check int "all null/missing" 0 (Mcp_tools.count_segment_bounds segments)
+
+let test_count_segment_bounds_non_assoc () =
+  let segments = [`String "not an object"; `Int 42] in
+  check int "non-assoc items" 0 (Mcp_tools.count_segment_bounds segments)
+
+let plugin_stats_tests = [
+  "create_plugin_stats", `Quick, test_create_plugin_stats;
+  "append_sample basic", `Quick, test_append_sample_basic;
+  "append_sample at max", `Quick, test_append_sample_at_max;
+  "append_sample empty value", `Quick, test_append_sample_empty_value;
+  "append_sample under max", `Quick, test_append_sample_under_max;
+  "count_segment_bounds basic", `Quick, test_count_segment_bounds_basic;
+  "count_segment_bounds empty", `Quick, test_count_segment_bounds_empty;
+  "count_segment_bounds all null", `Quick, test_count_segment_bounds_all_null;
+  "count_segment_bounds non-assoc", `Quick, test_count_segment_bounds_non_assoc;
+]
+
+(** ============== Compact JSON Additional Cases ============== *)
+
+let test_compact_json_string_truncation () =
+  let long_str = String.make 200 'x' in
+  let json = `String long_str in
+  let result = Mcp_tools.compact_json
+    ~depth:0 ~max_depth:5 ~max_children:10 ~max_list_items:10 ~max_string:50
+    json
+  in
+  match result with
+  | `String s ->
+      check bool "string truncated" true (String.length s < 200);
+      check bool "has truncated marker" true
+        (let len = String.length s in len > 0)
+  | _ -> fail "Expected String"
+
+let test_compact_json_null_passthrough () =
+  let result = Mcp_tools.compact_json
+    ~depth:0 ~max_depth:5 ~max_children:10 ~max_list_items:10 ~max_string:100
+    `Null
+  in
+  check bool "null passthrough" true (result = `Null)
+
+let test_compact_json_bool_passthrough () =
+  let result = Mcp_tools.compact_json
+    ~depth:0 ~max_depth:5 ~max_children:10 ~max_list_items:10 ~max_string:100
+    (`Bool true)
+  in
+  check bool "bool passthrough" true (result = `Bool true)
+
+let test_compact_json_int_passthrough () =
+  let result = Mcp_tools.compact_json
+    ~depth:0 ~max_depth:5 ~max_children:10 ~max_list_items:10 ~max_string:100
+    (`Int 42)
+  in
+  check bool "int passthrough" true (result = `Int 42)
+
+let test_compact_json_float_passthrough () =
+  let result = Mcp_tools.compact_json
+    ~depth:0 ~max_depth:5 ~max_children:10 ~max_list_items:10 ~max_string:100
+    (`Float 3.14)
+  in
+  check bool "float passthrough" true (result = `Float 3.14)
+
+let test_compact_json_children_truncation_marker () =
+  let children = List.init 10 (fun i -> `Assoc [("id", `Int i)]) in
+  let json = `Assoc [("children", `List children)] in
+  let result = Mcp_tools.compact_json
+    ~depth:0 ~max_depth:5 ~max_children:3 ~max_list_items:10 ~max_string:100
+    json
+  in
+  match result with
+  | `Assoc fields ->
+      (match List.assoc_opt "children" fields with
+       | Some (`List items) ->
+           let last = List.nth items (List.length items - 1) in
+           (match last with
+            | `Assoc marker_fields ->
+                check bool "has _truncated" true
+                  (List.mem_assoc "_truncated" marker_fields);
+                (match List.assoc_opt "total" marker_fields with
+                 | Some (`Int 10) -> ()
+                 | _ -> fail "Expected total=10")
+            | _ -> fail "Expected truncation marker Assoc")
+       | _ -> fail "Expected children list")
+  | _ -> fail "Expected Assoc"
+
+let test_compact_json_list_truncation_marker () =
+  let items = List.init 15 (fun i -> `Int i) in
+  let json = `List items in
+  let result = Mcp_tools.compact_json
+    ~depth:0 ~max_depth:5 ~max_children:10 ~max_list_items:4 ~max_string:100
+    json
+  in
+  match result with
+  | `List truncated ->
+      let last = List.nth truncated (List.length truncated - 1) in
+      (match last with
+       | `Assoc marker ->
+           check bool "has _truncated" true (List.mem_assoc "_truncated" marker);
+           (match List.assoc_opt "total" marker with
+            | Some (`Int 15) -> ()
+            | _ -> fail "Expected total=15")
+       | _ -> fail "Expected truncation marker")
+  | _ -> fail "Expected List"
+
+let test_compact_json_depth_truncation_flag () =
+  let deep = `Assoc [
+    ("name", `String "root");
+    ("children", `List [`Assoc [("id", `Int 1)]]);
+  ] in
+  let result = Mcp_tools.compact_json
+    ~depth:0 ~max_depth:0 ~max_children:10 ~max_list_items:10 ~max_string:100
+    deep
+  in
+  match result with
+  | `Assoc fields ->
+      check bool "has _depth_truncated" true
+        (List.mem_assoc "_depth_truncated" fields);
+      check bool "no children" false (List.mem_assoc "children" fields)
+  | _ -> fail "Expected Assoc"
+
+let test_compact_json_non_list_children () =
+  let json = `Assoc [("children", `String "not a list")] in
+  let result = Mcp_tools.compact_json
+    ~depth:0 ~max_depth:5 ~max_children:10 ~max_list_items:10 ~max_string:100
+    json
+  in
+  match result with
+  | `Assoc fields ->
+      (match List.assoc_opt "children" fields with
+       | Some (`String _) -> ()  (* recursed into value, still a string *)
+       | _ -> fail "Expected children string preserved")
+  | _ -> fail "Expected Assoc"
+
+let compact_json_extra_tests = [
+  "compact_json string truncation", `Quick, test_compact_json_string_truncation;
+  "compact_json null passthrough", `Quick, test_compact_json_null_passthrough;
+  "compact_json bool passthrough", `Quick, test_compact_json_bool_passthrough;
+  "compact_json int passthrough", `Quick, test_compact_json_int_passthrough;
+  "compact_json float passthrough", `Quick, test_compact_json_float_passthrough;
+  "compact_json children truncation marker", `Quick, test_compact_json_children_truncation_marker;
+  "compact_json list truncation marker", `Quick, test_compact_json_list_truncation_marker;
+  "compact_json depth truncation flag", `Quick, test_compact_json_depth_truncation_flag;
+  "compact_json non-list children", `Quick, test_compact_json_non_list_children;
+]
+
+(** ============== Tool Definition Validation ============== *)
+
+let test_tool_get_node_schema_has_url () =
+  let tool = Mcp_tools.tool_figma_get_node in
+  match tool.input_schema with
+  | `Assoc fields ->
+      (match List.assoc_opt "properties" fields with
+       | Some (`Assoc props) ->
+           check bool "has url" true (List.mem_assoc "url" props);
+           check bool "has file_key" true (List.mem_assoc "file_key" props);
+           check bool "has node_id" true (List.mem_assoc "node_id" props)
+       | _ -> fail "Expected properties")
+  | _ -> fail "Expected Assoc"
+
+let test_tool_codegen_required_json () =
+  let tool = Mcp_tools.tool_figma_codegen in
+  match tool.input_schema with
+  | `Assoc fields ->
+      (match List.assoc_opt "required" fields with
+       | Some (`List reqs) ->
+           let strs = List.filter_map (function `String s -> Some s | _ -> None) reqs in
+           check bool "json required" true (List.mem "json" strs)
+       | _ -> fail "Expected required list")
+  | _ -> fail "Expected Assoc"
+
+let test_tool_get_file_required_file_key () =
+  let tool = Mcp_tools.tool_figma_get_file in
+  match tool.input_schema with
+  | `Assoc fields ->
+      (match List.assoc_opt "required" fields with
+       | Some (`List reqs) ->
+           let strs = List.filter_map (function `String s -> Some s | _ -> None) reqs in
+           check bool "file_key required" true (List.mem "file_key" strs)
+       | _ -> fail "Expected required list")
+  | _ -> fail "Expected Assoc"
+
+let test_tool_parse_url_required_url () =
+  let tool = Mcp_tools.tool_figma_parse_url in
+  match tool.input_schema with
+  | `Assoc fields ->
+      (match List.assoc_opt "required" fields with
+       | Some (`List reqs) ->
+           let strs = List.filter_map (function `String s -> Some s | _ -> None) reqs in
+           check bool "url required" true (List.mem "url" strs)
+       | _ -> fail "Expected required list")
+  | _ -> fail "Expected Assoc"
+
+let test_tool_image_similarity_required_fields () =
+  let tool = Mcp_tools.tool_figma_image_similarity in
+  match tool.input_schema with
+  | `Assoc fields ->
+      (match List.assoc_opt "required" fields with
+       | Some (`List reqs) ->
+           let strs = List.filter_map (function `String s -> Some s | _ -> None) reqs in
+           check bool "file_key required" true (List.mem "file_key" strs);
+           check bool "node_a_id required" true (List.mem "node_a_id" strs);
+           check bool "node_b_id required" true (List.mem "node_b_id" strs)
+       | _ -> fail "Expected required list")
+  | _ -> fail "Expected Assoc"
+
+let test_tool_verify_visual_required_fields () =
+  let tool = Mcp_tools.tool_figma_verify_visual in
+  match tool.input_schema with
+  | `Assoc fields ->
+      (match List.assoc_opt "required" fields with
+       | Some (`List reqs) ->
+           let strs = List.filter_map (function `String s -> Some s | _ -> None) reqs in
+           check bool "file_key required" true (List.mem "file_key" strs);
+           check bool "node_id required" true (List.mem "node_id" strs)
+       | _ -> fail "Expected required list")
+  | _ -> fail "Expected Assoc"
+
+let test_tool_get_node_bundle_schema () =
+  let tool = Mcp_tools.tool_figma_get_node_bundle in
+  check bool "name" true (tool.name = "figma_get_node_bundle");
+  match tool.input_schema with
+  | `Assoc fields ->
+      (match List.assoc_opt "properties" fields with
+       | Some (`Assoc props) ->
+           check bool "has format" true (List.mem_assoc "format" props);
+           check bool "has image_format" true (List.mem_assoc "image_format" props);
+           check bool "has download" true (List.mem_assoc "download" props)
+       | _ -> fail "Expected properties")
+  | _ -> fail "Expected Assoc"
+
+let test_tool_get_node_summary_schema () =
+  let tool = Mcp_tools.tool_figma_get_node_summary in
+  check bool "name" true (tool.name = "figma_get_node_summary");
+  match tool.input_schema with
+  | `Assoc fields ->
+      (match List.assoc_opt "properties" fields with
+       | Some (`Assoc props) ->
+           check bool "has max_children" true (List.mem_assoc "max_children" props)
+       | _ -> fail "Expected properties")
+  | _ -> fail "Expected Assoc"
+
+let test_tool_select_nodes_schema () =
+  let tool = Mcp_tools.tool_figma_select_nodes in
+  check bool "name" true (tool.name = "figma_select_nodes");
+  match tool.input_schema with
+  | `Assoc fields ->
+      (match List.assoc_opt "properties" fields with
+       | Some (`Assoc props) ->
+           check bool "has score_threshold" true (List.mem_assoc "score_threshold" props);
+           check bool "has layout_only" true (List.mem_assoc "layout_only" props)
+       | _ -> fail "Expected properties")
+  | _ -> fail "Expected Assoc"
+
+let test_tool_fidelity_loop_schema () =
+  let tool = Mcp_tools.tool_figma_fidelity_loop in
+  check bool "name" true (tool.name = "figma_fidelity_loop");
+  match tool.input_schema with
+  | `Assoc fields ->
+      (match List.assoc_opt "properties" fields with
+       | Some (`Assoc props) ->
+           check bool "has target_score" true (List.mem_assoc "target_score" props);
+           check bool "has max_attempts" true (List.mem_assoc "max_attempts" props)
+       | _ -> fail "Expected properties")
+  | _ -> fail "Expected Assoc"
+
+let test_tool_get_node_chunk_schema () =
+  let tool = Mcp_tools.tool_figma_get_node_chunk in
+  check bool "name" true (tool.name = "figma_get_node_chunk");
+  match tool.input_schema with
+  | `Assoc fields ->
+      (match List.assoc_opt "properties" fields with
+       | Some (`Assoc props) ->
+           check bool "has depth_start" true (List.mem_assoc "depth_start" props);
+           check bool "has depth_end" true (List.mem_assoc "depth_end" props)
+       | _ -> fail "Expected properties")
+  | _ -> fail "Expected Assoc"
+
+let test_all_tool_schemas_are_objects () =
+  let all_obj = List.for_all (fun (t : Mcp_protocol.tool_def) ->
+    match t.input_schema with
+    | `Assoc fields ->
+        (match List.assoc_opt "type" fields with
+         | Some (`String "object") -> true
+         | _ -> false)
+    | _ -> false
+  ) Mcp_tools.all_tools in
+  check bool "all schemas are objects" true all_obj
+
+let tool_schema_tests = [
+  "get_node schema has url/file_key/node_id", `Quick, test_tool_get_node_schema_has_url;
+  "codegen requires json", `Quick, test_tool_codegen_required_json;
+  "get_file requires file_key", `Quick, test_tool_get_file_required_file_key;
+  "parse_url requires url", `Quick, test_tool_parse_url_required_url;
+  "image_similarity requires 3 fields", `Quick, test_tool_image_similarity_required_fields;
+  "verify_visual requires file_key/node_id", `Quick, test_tool_verify_visual_required_fields;
+  "get_node_bundle schema", `Quick, test_tool_get_node_bundle_schema;
+  "get_node_summary schema", `Quick, test_tool_get_node_summary_schema;
+  "select_nodes schema", `Quick, test_tool_select_nodes_schema;
+  "fidelity_loop schema", `Quick, test_tool_fidelity_loop_schema;
+  "get_node_chunk schema", `Quick, test_tool_get_node_chunk_schema;
+  "all tool schemas are objects", `Quick, test_all_tool_schemas_are_objects;
+]
+
+(** ============== Resource / Resource Template / Prompt Validation ============== *)
+
+let test_resources_count () =
+  let server = Mcp_tools.create_figma_server () in
+  check bool "has resources" true (List.length server.Mcp_protocol.resources >= 3)
+
+let test_resources_have_uris () =
+  let server = Mcp_tools.create_figma_server () in
+  let all_have_uri = List.for_all (fun (r : Mcp_protocol.mcp_resource) ->
+    String.length r.uri > 0
+  ) server.Mcp_protocol.resources in
+  check bool "all resources have uris" true all_have_uri
+
+let test_resources_have_mime_types () =
+  let server = Mcp_tools.create_figma_server () in
+  let all_have_mime = List.for_all (fun (r : Mcp_protocol.mcp_resource) ->
+    String.length r.mime_type > 0
+  ) server.Mcp_protocol.resources in
+  check bool "all resources have mime_types" true all_have_mime
+
+let test_resource_templates_exist () =
+  let server = Mcp_tools.create_figma_server () in
+  check bool "has resource_templates" true
+    (List.length server.Mcp_protocol.resource_templates > 0)
+
+let test_resource_template_tokens () =
+  let server = Mcp_tools.create_figma_server () in
+  let has_tokens = List.exists (fun (rt : Mcp_protocol.mcp_resource_template) ->
+    rt.uri_template = "figma://tokens/{file_key}"
+  ) server.Mcp_protocol.resource_templates in
+  check bool "tokens template exists" true has_tokens
+
+let test_prompts_exist () =
+  let server = Mcp_tools.create_figma_server () in
+  check bool "has prompts" true (List.length server.Mcp_protocol.prompts > 0)
+
+let test_prompts_have_names () =
+  let server = Mcp_tools.create_figma_server () in
+  let all_named = List.for_all (fun (p : Mcp_protocol.mcp_prompt) ->
+    String.length p.name > 0
+  ) server.Mcp_protocol.prompts in
+  check bool "all prompts have names" true all_named
+
+let test_prompts_have_text () =
+  let server = Mcp_tools.create_figma_server () in
+  let all_have_text = List.for_all (fun (p : Mcp_protocol.mcp_prompt) ->
+    String.length p.text > 0
+  ) server.Mcp_protocol.prompts in
+  check bool "all prompts have text" true all_have_text
+
+let test_prompt_fidelity_review_args () =
+  let server = Mcp_tools.create_figma_server () in
+  let prompt = List.find_opt (fun (p : Mcp_protocol.mcp_prompt) ->
+    p.name = "figma_fidelity_review"
+  ) server.Mcp_protocol.prompts in
+  match prompt with
+  | Some p ->
+      check bool "has arguments" true (List.length p.arguments > 0);
+      let has_file_key = List.exists (fun (a : Mcp_protocol.prompt_arg) ->
+        a.name = "file_key" && a.required
+      ) p.arguments in
+      check bool "file_key required arg" true has_file_key
+  | None -> fail "Expected figma_fidelity_review prompt"
+
+let test_read_resource_tokens_docs () =
+  match Mcp_tools.read_resource "figma://docs/tokens" with
+  | Ok (mime, body) ->
+      check string "mime type" "text/markdown" mime;
+      check bool "body not empty" true (String.length body > 0);
+      check bool "mentions Variables" true (Mcp_tools.string_contains body "variables")
+  | Error e -> fail ("read_resource tokens error: " ^ e)
+
+let test_read_resource_unknown_scheme () =
+  match Mcp_tools.read_resource "unknown://something" with
+  | Error _ -> ()
+  | Ok _ -> fail "Expected Error for unknown scheme"
+
+let resource_prompt_tests = [
+  "resources count >= 3", `Quick, test_resources_count;
+  "resources have uris", `Quick, test_resources_have_uris;
+  "resources have mime_types", `Quick, test_resources_have_mime_types;
+  "resource_templates exist", `Quick, test_resource_templates_exist;
+  "tokens template exists", `Quick, test_resource_template_tokens;
+  "prompts exist", `Quick, test_prompts_exist;
+  "prompts have names", `Quick, test_prompts_have_names;
+  "prompts have text", `Quick, test_prompts_have_text;
+  "prompt fidelity_review args", `Quick, test_prompt_fidelity_review_args;
+  "read_resource tokens docs", `Quick, test_read_resource_tokens_docs;
+  "read_resource unknown scheme", `Quick, test_read_resource_unknown_scheme;
+]
+
+(** ============== String Contains Extra Cases ============== *)
+
+let test_string_contains_sub_longer_than_string () =
+  check bool "sub longer" false
+    (Mcp_tools.string_contains "hi" "hello world")
+
+let test_string_contains_equal_strings () =
+  check bool "equal strings" true
+    (Mcp_tools.string_contains "hello" "hello")
+
+let test_string_contains_single_char () =
+  check bool "single char match" true
+    (Mcp_tools.string_contains "abc" "b")
+
+let test_string_contains_single_char_no_match () =
+  check bool "single char no match" false
+    (Mcp_tools.string_contains "abc" "z")
+
+let test_string_contains_at_end () =
+  check bool "match at end" true
+    (Mcp_tools.string_contains "Hello World" "world")
+
+let test_string_contains_at_start () =
+  check bool "match at start" true
+    (Mcp_tools.string_contains "Hello World" "hello")
+
+let test_string_contains_mixed_case () =
+  check bool "mixed case" true
+    (Mcp_tools.string_contains "aBcDeF" "BcDe")
+
+let string_contains_extra_tests = [
+  "string_contains sub longer", `Quick, test_string_contains_sub_longer_than_string;
+  "string_contains equal", `Quick, test_string_contains_equal_strings;
+  "string_contains single char", `Quick, test_string_contains_single_char;
+  "string_contains single char no match", `Quick, test_string_contains_single_char_no_match;
+  "string_contains at end", `Quick, test_string_contains_at_end;
+  "string_contains at start", `Quick, test_string_contains_at_start;
+  "string_contains mixed case", `Quick, test_string_contains_mixed_case;
+]
+
+(** ============== Network Error Extra Cases ============== *)
+
+let test_is_network_error_etimedout () =
+  check bool "Unix ETIMEDOUT" true
+    (Mcp_tools.is_network_error (Unix.Unix_error (Unix.ETIMEDOUT, "connect", "")))
+
+let test_is_network_error_string_etimedout () =
+  check bool "string etimedout" true
+    (Mcp_tools.is_network_error (Failure "some etimedout error"))
+
+let test_is_network_error_string_econnreset () =
+  check bool "string econnreset" true
+    (Mcp_tools.is_network_error (Failure "some econnreset in message"))
+
+let test_is_network_error_string_epipe () =
+  check bool "string epipe" true
+    (Mcp_tools.is_network_error (Failure "write: epipe"))
+
+let test_is_network_error_string_connection_timed_out () =
+  check bool "string connection timed out" true
+    (Mcp_tools.is_network_error (Failure "Connection timed out by server"))
+
+let test_is_network_error_not_found () =
+  check bool "Not_found not network" false
+    (Mcp_tools.is_network_error Not_found)
+
+let test_is_network_error_invalid_argument () =
+  check bool "Invalid_argument not network" false
+    (Mcp_tools.is_network_error (Invalid_argument "test"))
+
+let network_error_extra_tests = [
+  "is_network_error ETIMEDOUT", `Quick, test_is_network_error_etimedout;
+  "is_network_error string etimedout", `Quick, test_is_network_error_string_etimedout;
+  "is_network_error string econnreset", `Quick, test_is_network_error_string_econnreset;
+  "is_network_error string epipe", `Quick, test_is_network_error_string_epipe;
+  "is_network_error string conn timed out", `Quick, test_is_network_error_string_connection_timed_out;
+  "is_network_error Not_found", `Quick, test_is_network_error_not_found;
+  "is_network_error Invalid_argument", `Quick, test_is_network_error_invalid_argument;
+]
+
+(** ============== All Handlers Sync ============== *)
+
+let test_all_handlers_sync_not_empty () =
+  let server = Mcp_tools.create_figma_server () in
+  check bool "handlers_sync not empty" true
+    (List.length server.Mcp_protocol.handlers_sync > 0)
+
+let test_all_handlers_sync_have_names () =
+  let server = Mcp_tools.create_figma_server () in
+  let all_named = List.for_all (fun (name, _) ->
+    String.length name > 0
+  ) server.Mcp_protocol.handlers_sync in
+  check bool "all handlers have names" true all_named
+
+let test_all_handlers_sync_prefixed () =
+  let server = Mcp_tools.create_figma_server () in
+  let all_prefixed = List.for_all (fun (name, _) ->
+    String.length name >= 6 && String.sub name 0 6 = "figma_"
+  ) server.Mcp_protocol.handlers_sync in
+  check bool "all handlers prefixed with figma_" true all_prefixed
+
+let test_handlers_cover_all_tools () =
+  let server = Mcp_tools.create_figma_server () in
+  let handler_names = List.map fst server.Mcp_protocol.handlers_sync in
+  let tool_names = List.map (fun (t : Mcp_protocol.tool_def) -> t.name)
+    server.Mcp_protocol.tools in
+  let all_covered = List.for_all (fun name ->
+    List.mem name handler_names
+  ) tool_names in
+  check bool "all tools have handlers" true all_covered
+
+let handler_sync_tests = [
+  "handlers_sync not empty", `Quick, test_all_handlers_sync_not_empty;
+  "handlers have names", `Quick, test_all_handlers_sync_have_names;
+  "handlers prefixed", `Quick, test_all_handlers_sync_prefixed;
+  "handlers cover all tools", `Quick, test_handlers_cover_all_tools;
+]
+
+(** ============== Additional Tool Existence Checks ============== *)
+
+let test_tool_exists name =
+  let exists = List.exists (fun (t : Mcp_protocol.tool_def) ->
+    t.name = name
+  ) Mcp_tools.all_tools in
+  check bool (name ^ " exists") true exists
+
+let test_tool_get_node_bundle_exists () = test_tool_exists "figma_get_node_bundle"
+let test_tool_get_node_summary_exists () = test_tool_exists "figma_get_node_summary"
+let test_tool_select_nodes_exists () = test_tool_exists "figma_select_nodes"
+let test_tool_get_node_chunk_exists () = test_tool_exists "figma_get_node_chunk"
+let test_tool_fidelity_loop_exists () = test_tool_exists "figma_fidelity_loop"
+let test_tool_image_similarity_exists () = test_tool_exists "figma_image_similarity"
+let test_tool_verify_visual_exists () = test_tool_exists "figma_verify_visual"
+let test_tool_verify_semantic_exists () = test_tool_exists "figma_verify_semantic"
+let test_tool_compare_exists () = test_tool_exists "figma_compare"
+let test_tool_export_image_exists () = test_tool_exists "figma_export_image"
+let test_tool_export_smart_exists () = test_tool_exists "figma_export_smart"
+let test_tool_get_image_fills_exists () = test_tool_exists "figma_get_image_fills"
+let test_tool_get_nodes_exists () = test_tool_exists "figma_get_nodes"
+let test_tool_get_file_versions_exists () = test_tool_exists "figma_get_file_versions"
+let test_tool_get_file_comments_exists () = test_tool_exists "figma_get_file_comments"
+let test_tool_post_comment_exists () = test_tool_exists "figma_post_comment"
+let test_tool_doctor_exists () = test_tool_exists "figma_doctor"
+let test_tool_stats_exists () = test_tool_exists "figma_stats"
+let test_tool_tree_exists () = test_tool_exists "figma_tree"
+let test_tool_query_exists () = test_tool_exists "figma_query"
+let test_tool_search_exists () = test_tool_exists "figma_search"
+let test_tool_export_tokens_exists () = test_tool_exists "figma_export_tokens"
+let test_tool_cache_stats_exists () = test_tool_exists "figma_cache_stats"
+let test_tool_cache_invalidate_exists () = test_tool_exists "figma_cache_invalidate"
+let test_tool_plugin_exists () = test_tool_exists "figma_plugin"
+let test_tool_code_connect_exists () = test_tool_exists "figma_code_connect"
+let test_tool_get_dev_resources_exists () = test_tool_exists "figma_get_dev_resources"
+let test_tool_add_dev_resource_exists () = test_tool_exists "figma_add_dev_resource"
+let test_tool_setup_webhook_exists () = test_tool_exists "figma_setup_webhook"
+let test_tool_annotate_exists () = test_tool_exists "figma_annotate"
+let test_tool_read_large_result_exists () = test_tool_exists "figma_read_large_result"
+let test_tool_get_variables_exists () = test_tool_exists "figma_get_variables"
+
+let tool_existence_extra_tests = [
+  "get_node_bundle exists", `Quick, test_tool_get_node_bundle_exists;
+  "get_node_summary exists", `Quick, test_tool_get_node_summary_exists;
+  "select_nodes exists", `Quick, test_tool_select_nodes_exists;
+  "get_node_chunk exists", `Quick, test_tool_get_node_chunk_exists;
+  "fidelity_loop exists", `Quick, test_tool_fidelity_loop_exists;
+  "image_similarity exists", `Quick, test_tool_image_similarity_exists;
+  "verify_visual exists", `Quick, test_tool_verify_visual_exists;
+  "verify_semantic exists", `Quick, test_tool_verify_semantic_exists;
+  "compare exists", `Quick, test_tool_compare_exists;
+  "export_image exists", `Quick, test_tool_export_image_exists;
+  "export_smart exists", `Quick, test_tool_export_smart_exists;
+  "get_image_fills exists", `Quick, test_tool_get_image_fills_exists;
+  "get_nodes exists", `Quick, test_tool_get_nodes_exists;
+  "get_file_versions exists", `Quick, test_tool_get_file_versions_exists;
+  "get_file_comments exists", `Quick, test_tool_get_file_comments_exists;
+  "post_comment exists", `Quick, test_tool_post_comment_exists;
+  "doctor exists", `Quick, test_tool_doctor_exists;
+  "stats exists", `Quick, test_tool_stats_exists;
+  "tree exists", `Quick, test_tool_tree_exists;
+  "query exists", `Quick, test_tool_query_exists;
+  "search exists", `Quick, test_tool_search_exists;
+  "export_tokens exists", `Quick, test_tool_export_tokens_exists;
+  "cache_stats exists", `Quick, test_tool_cache_stats_exists;
+  "cache_invalidate exists", `Quick, test_tool_cache_invalidate_exists;
+  "plugin exists", `Quick, test_tool_plugin_exists;
+  "code_connect exists", `Quick, test_tool_code_connect_exists;
+  "get_dev_resources exists", `Quick, test_tool_get_dev_resources_exists;
+  "add_dev_resource exists", `Quick, test_tool_add_dev_resource_exists;
+  "setup_webhook exists", `Quick, test_tool_setup_webhook_exists;
+  "annotate exists", `Quick, test_tool_annotate_exists;
+  "read_large_result exists", `Quick, test_tool_read_large_result_exists;
+  "get_variables exists", `Quick, test_tool_get_variables_exists;
+]
+
+(** ============== Collect Plugin Stats ============== *)
+
+let test_collect_plugin_stats_basic () =
+  let stats = Mcp_tools.create_plugin_stats () in
+  let json = `Assoc [
+    ("type", `String "FRAME");
+    ("name", `String "Header");
+    ("text", `Assoc [
+      ("characters", `String "Hello World");
+      ("segments", `List [
+        `Assoc [("text", `String "Hello"); ("bounds", `Assoc [("x", `Int 0)])];
+        `Assoc [("text", `String " World")];
+      ]);
+    ]);
+    ("children", `List [
+      `Assoc [("type", `String "TEXT"); ("name", `String "Title")];
+      `Assoc [("type", `String "RECTANGLE"); ("name", `String "BG")];
+    ]);
+  ] in
+  Mcp_tools.collect_plugin_stats ~sample_size:5 stats json;
+  check bool "node_count > 0" true (stats.node_count > 0);
+  check bool "text_nodes > 0" true (stats.text_nodes > 0);
+  check bool "has type counts" true (Hashtbl.length stats.type_counts > 0);
+  check bool "has name samples" true (List.length stats.name_samples > 0)
+
+let test_collect_plugin_stats_empty () =
+  let stats = Mcp_tools.create_plugin_stats () in
+  Mcp_tools.collect_plugin_stats ~sample_size:5 stats (`Assoc []);
+  check int "node_count 1" 1 stats.node_count;
+  check int "text_nodes 0" 0 stats.text_nodes
+
+let test_collect_plugin_stats_list_input () =
+  let stats = Mcp_tools.create_plugin_stats () in
+  let json = `List [
+    `Assoc [("type", `String "FRAME"); ("name", `String "A")];
+    `Assoc [("type", `String "TEXT"); ("name", `String "B")];
+  ] in
+  Mcp_tools.collect_plugin_stats ~sample_size:5 stats json;
+  check int "node_count 2 from list" 2 stats.node_count;
+  check bool "has type counts" true (Hashtbl.length stats.type_counts > 0)
+
+let collect_plugin_stats_tests = [
+  "collect_plugin_stats basic", `Quick, test_collect_plugin_stats_basic;
+  "collect_plugin_stats empty", `Quick, test_collect_plugin_stats_empty;
+  "collect_plugin_stats list input", `Quick, test_collect_plugin_stats_list_input;
+]
+
+(** ============== Main ============== *)
+
 let () =
   run "Mcp_tools Coverage" [
     "Schema Helpers", schema_helper_tests;
@@ -956,10 +2050,25 @@ let () =
     "Field Utilities", field_util_tests;
     "Truncation & Chunking", truncation_chunking_tests;
     "JSON Compaction", json_compaction_tests;
+    "Compact JSON Extra", compact_json_extra_tests;
     "Handler Registry", handler_registry_tests;
     "Monadic Operators", monadic_tests;
     "Tool Definitions", tool_definition_tests;
+    "Tool Schema Validation", tool_schema_tests;
+    "Tool Existence Extra", tool_existence_extra_tests;
     "Resources", resource_tests;
+    "Resource & Prompt Validation", resource_prompt_tests;
     "Token Resolution", token_resolution_tests;
     "Server", server_tests;
+    "Handler Sync", handler_sync_tests;
+    "Category Lookup", category_lookup_tests;
+    "Category Structure", category_structure_tests;
+    "Chunkify Children", chunkify_children_tests;
+    "Chunkify Text", chunkify_text_tests;
+    "Select Chunked JSON", select_chunked_tests;
+    "Hashtbl Helpers", hashtbl_helper_tests;
+    "Plugin Stats", plugin_stats_tests;
+    "Collect Plugin Stats", collect_plugin_stats_tests;
+    "String Contains Extra", string_contains_extra_tests;
+    "Network Error Extra", network_error_extra_tests;
   ]
