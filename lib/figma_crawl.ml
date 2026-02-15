@@ -369,19 +369,20 @@ let crawl_team ~token ~team_id ~neo4j_cfg
   on_progress (sprintf "🏢 Starting crawl for team: %s (%s)" team_name team_id);
   on_progress "─────────────────────────────────────────";
 
-  (* Neo4j 연결 테스트 *)
-  (match test_connection ~neo4j_cfg with
-   | Ok () -> on_progress "✅ Neo4j connection OK"
-   | Error err ->
-       on_progress (sprintf "❌ Neo4j connection failed: %s" err);
-       failwith err);
+  (* Neo4j 연결 테스트 — crawl cannot proceed without Neo4j *)
+  match test_connection ~neo4j_cfg with
+  | Error err ->
+      on_progress (sprintf "❌ Neo4j connection failed: %s" err);
+      Error err
+  | Ok () ->
+  on_progress "✅ Neo4j connection OK";
 
-  (* 팀 노드 생성 — fatal: crawl cannot proceed without team *)
-  (match create_figma_team ~neo4j_cfg ~team_id ~name:team_name with
-   | Ok _ -> ()
-   | Error msg ->
-       on_progress (sprintf "❌ create_figma_team(%s) failed: %s" team_id msg);
-       failwith (sprintf "Team creation failed: %s" msg));
+  (* 팀 노드 생성 — crawl cannot proceed without team *)
+  match create_figma_team ~neo4j_cfg ~team_id ~name:team_name with
+  | Error msg ->
+      on_progress (sprintf "❌ create_figma_team(%s) failed: %s" team_id msg);
+      Error (sprintf "Team creation failed: %s" msg)
+  | Ok _ ->
   progress.teams <- 1;
 
   (* 프로젝트 목록 가져오기 *)

@@ -21,6 +21,9 @@ let string_contains s sub =
 (** 타임아웃 예외 - 내부에서만 사용 *)
 exception Request_timeout
 
+(** 연결 실패 예외 - DNS 해석 실패, 비-TCP 주소 등 *)
+exception Connection_failed of string
+
 type api_error =
   | Http_error of int * string * float option  (** HTTP 상태 코드 + 메시지 + Retry-After *)
   | Json_error of string         (** JSON 파싱 에러 *)
@@ -598,19 +601,16 @@ let resolve_host_with_fallback ~sw ~net ~tls_config ~hostname ~port =
        | None -> None)
 
 let open_raw_connection ~sw ~net ~client ~hostname ~port =
-  let addr =
-    match resolve_host_with_fallback ~sw ~net ~tls_config:client.tls_config ~hostname ~port with
-    | Some addr ->
-        (match addr with
-         | `Tcp (ip, _) -> `Tcp (ip, port)
-         | _ -> failwith "Expected TCP address")
-    | None -> failwith (sprintf "DNS resolution failed for %s" hostname)
-  in
-  let tcp_flow = Eio.Net.connect ~sw net addr in
-  let host_domain = Domain_name.(host_exn (of_string_exn hostname)) in
-  let tls_flow = Tls_eio.client_of_flow client.tls_config ~host:host_domain tcp_flow in
-  let buf = Eio.Buf_read.of_flow ~max_size:max_body_size tls_flow in
-  { flow = tls_flow; buf; last_used = Unix.gettimeofday () }
+  match resolve_host_with_fallback ~sw ~net ~tls_config:client.tls_config ~hostname ~port with
+  | None -> Error (sprintf "DNS resolution failed for %s" hostname)
+  | Some (`Tcp (ip, _)) ->
+      let addr = `Tcp (ip, port) in
+      let tcp_flow = Eio.Net.connect ~sw net addr in
+      let host_domain = Domain_name.(host_exn (of_string_exn hostname)) in
+      let tls_flow = Tls_eio.client_of_flow client.tls_config ~host:host_domain tcp_flow in
+      let buf = Eio.Buf_read.of_flow ~max_size:max_body_size tls_flow in
+      Ok { flow = tls_flow; buf; last_used = Unix.gettimeofday () }
+  | Some _ -> Error (sprintf "Non-TCP address resolved for %s" hostname)
 
 (** Direct HTTPS GET 요청 - TCP 연결 + TLS + HTTP/1.1 *)
 let https_get_raw ~sw ~net ~client ~headers url =
@@ -650,12 +650,14 @@ let https_get_raw ~sw ~net ~client ~headers url =
         (match use_conn conn with
          | Ok res -> res
          | Error _ ->
-             let fresh = open_raw_connection ~sw ~net ~client ~hostname ~port in
+             let fresh = match open_raw_connection ~sw ~net ~client ~hostname ~port with
+               | Ok c -> c | Error msg -> raise (Connection_failed msg) in
              (match use_conn fresh with
               | Ok res -> res
               | Error exn -> raise exn))
     | None ->
-        let fresh = open_raw_connection ~sw ~net ~client ~hostname ~port in
+        let fresh = match open_raw_connection ~sw ~net ~client ~hostname ~port with
+          | Ok c -> c | Error msg -> raise (Connection_failed msg) in
         (match use_conn fresh with
          | Ok res -> res
          | Error exn -> raise exn)
@@ -701,12 +703,14 @@ let https_post_raw ~sw ~net ~client ~headers url body_content =
         (match use_conn conn with
          | Ok res -> res
          | Error _ ->
-             let fresh = open_raw_connection ~sw ~net ~client ~hostname ~port in
+             let fresh = match open_raw_connection ~sw ~net ~client ~hostname ~port with
+               | Ok c -> c | Error msg -> raise (Connection_failed msg) in
              (match use_conn fresh with
               | Ok res -> res
               | Error exn -> raise exn))
     | None ->
-        let fresh = open_raw_connection ~sw ~net ~client ~hostname ~port in
+        let fresh = match open_raw_connection ~sw ~net ~client ~hostname ~port with
+          | Ok c -> c | Error msg -> raise (Connection_failed msg) in
         (match use_conn fresh with
          | Ok res -> res
          | Error exn -> raise exn)

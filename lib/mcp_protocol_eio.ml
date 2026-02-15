@@ -1576,6 +1576,9 @@ let template_handler ~sw:_ ~eio_ctx:_ _request reqd =
         Response.json (Yojson.Safe.to_string result) reqd
   )
 
+(** Codegen HTTP 오류 — Claude/Ollama fallback chain에서 사용 *)
+exception Codegen_http_error of int * string
+
 (** Plugin codegen handler - calls llm-mcp for code generation *)
 let plugin_codegen_handler ~sw ~eio_ctx _request reqd =
   Request.read_body_async reqd (fun body_str ->
@@ -1623,7 +1626,8 @@ let plugin_codegen_handler ~sw ~eio_ctx _request reqd =
           let uri = Uri.of_string ollama_url in
           let resp, resp_body = Cohttp_eio.Client.post cohttp ~sw ~headers ~body:req_body uri in
           let status_code = Cohttp.Response.status resp |> Cohttp.Code.code_of_status in
-          if status_code < 200 || status_code >= 300 then failwith "Ollama HTTP error";
+          if status_code < 200 || status_code >= 300 then
+            raise (Codegen_http_error (status_code, "Ollama"));
           let ollama_resp_str = Eio.Buf_read.(parse_exn take_all) resp_body ~max_size:(10 * 1024 * 1024) in
           let ollama_resp = Yojson.Safe.from_string ollama_resp_str in
           let gen_code = member "response" ollama_resp |> to_string_option |> Option.value ~default:"" in
@@ -1663,7 +1667,7 @@ let plugin_codegen_handler ~sw ~eio_ctx _request reqd =
               if status_code < 200 || status_code >= 300 then begin
                 let err_body = try Eio.Buf_read.(parse_exn take_all) resp_body ~max_size:4096 with _ -> "" in
                 printf "[Codegen] Claude HTTP %d: %s\n%!" status_code err_body;
-                failwith (sprintf "Claude HTTP %d" status_code)
+                raise (Codegen_http_error (status_code, "Claude"))
               end;
               let claude_resp_str = Eio.Buf_read.(parse_exn take_all) resp_body ~max_size:(10 * 1024 * 1024) in
               let claude_resp = Yojson.Safe.from_string claude_resp_str in
