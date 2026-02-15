@@ -64,6 +64,11 @@
  (name test_cache_early_stop)
  (libraries figma_mcp alcotest yojson str unix))
 
+; Coverage: figma_early_stop.ml (206 LOC, pure logic — all branches)
+(test
+ (name test_early_stop)
+ (libraries figma_mcp alcotest yojson str fmt))
+
 ; OKLab 검증 테스트 (Björn Ottosson 2020 참조값)
 (test
  (name test_oklab)
@@ -263,6 +268,12 @@
 (test
  (name test_visual_verifier_extra)
  (libraries figma_mcp alcotest yojson str))
+
+; Coverage: mcp_resilience.ml (circuit breaker, retry, timeout — 90%+ target)
+(test
+ (name test_mcp_resilience)
+ (libraries figma_mcp alcotest eio_main str)
+ (action (run %{test} --color=always)))
 
 ; Coverage: mcp_api_handlers.ml (mock effect handler tests for all 26 handlers)
 (test

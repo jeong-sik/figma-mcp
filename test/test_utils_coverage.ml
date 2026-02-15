@@ -295,30 +295,639 @@ module Tokens_tests = struct
     let json_out = export_tokens tokens JSON in
     check bool "CSS output differs from JSON" true (css_out <> json_out)
 
+  (** Test export_tokens: all format dispatches *)
+  let test_export_tokens_all_formats () =
+    let tokens = {
+      colors = [{ name = "c"; hex = "#FF0000"; rgba = "rgba(255,0,0,1)" }];
+      typography = [{ name = "t"; font_family = "Inter"; font_size = 16.0;
+                      font_weight = 400; line_height = None; letter_spacing = None }];
+      spacing = [{ name = "s"; value = 8.0 }];
+      radii = [{ name = "r"; value = 4.0 }];
+    } in
+    let _tw = export_tokens tokens Tailwind in
+    let _sw = export_tokens tokens SwiftUI in
+    let _co = export_tokens tokens Compose in
+    let _fl = export_tokens tokens Flutter in
+    let _w3 = export_tokens tokens W3C_DTCG in
+    check pass "all formats dispatch" () ()
+
+  (** Test hex_to_rgb: basic conversion *)
+  let test_hex_to_rgb_with_hash () =
+    let rgb = hex_to_rgb "#FF0000" in
+    check (float 0.1) "r" 255.0 rgb.Ciede2000.r;
+    check (float 0.1) "g" 0.0 rgb.Ciede2000.g;
+    check (float 0.1) "b" 0.0 rgb.Ciede2000.b
+
+  (** Test hex_to_rgb: without hash prefix *)
+  let test_hex_to_rgb_no_hash () =
+    let rgb = hex_to_rgb "00FF00" in
+    check (float 0.1) "r" 0.0 rgb.Ciede2000.r;
+    check (float 0.1) "g" 255.0 rgb.Ciede2000.g;
+    check (float 0.1) "b" 0.0 rgb.Ciede2000.b
+
+  (** Test hex_to_rgb: arbitrary color *)
+  let test_hex_to_rgb_arbitrary () =
+    let rgb = hex_to_rgb "#8040C0" in
+    check (float 0.1) "r" 128.0 rgb.Ciede2000.r;
+    check (float 0.1) "g" 64.0 rgb.Ciede2000.g;
+    check (float 0.1) "b" 192.0 rgb.Ciede2000.b
+
+  (** Test color_delta_e: identical colors *)
+  let test_color_delta_e_identical () =
+    let de = color_delta_e "#FF0000" "#FF0000" in
+    check (float 0.01) "same color delta_e = 0" 0.0 de
+
+  (** Test color_delta_e: very different colors *)
+  let test_color_delta_e_different () =
+    let de = color_delta_e "#FF0000" "#0000FF" in
+    check bool "red vs blue delta_e > 30" true (de > 30.0)
+
+  (** Test color_delta_e: similar colors *)
+  let test_color_delta_e_similar () =
+    let de = color_delta_e "#FF0000" "#FE0100" in
+    check bool "near-identical delta_e < 3" true (de < 3.0)
+
+  (** Test find_similar_colors: finds similar pair *)
+  let test_find_similar_colors_found () =
+    let c1 = { name = "red-1"; hex = "#FF0000"; rgba = "rgba(255,0,0,1.00)" } in
+    let c2 = { name = "red-2"; hex = "#FE0100"; rgba = "rgba(254,1,0,1.00)" } in
+    let result = find_similar_colors ~existing_colors:[c1] ~new_color:c2 ~threshold:5.0 () in
+    check bool "found similar" true (List.length result > 0);
+    let w = List.hd result in
+    check string "color1 name" "red-1" w.color1.name;
+    check string "color2 name" "red-2" w.color2.name;
+    check bool "delta_e < threshold" true (w.delta_e < 5.0)
+
+  (** Test find_similar_colors: no similar pair *)
+  let test_find_similar_colors_none () =
+    let c1 = { name = "red"; hex = "#FF0000"; rgba = "rgba(255,0,0,1.00)" } in
+    let c2 = { name = "blue"; hex = "#0000FF"; rgba = "rgba(0,0,255,1.00)" } in
+    let result = find_similar_colors ~existing_colors:[c1] ~new_color:c2 ~threshold:5.0 () in
+    check int "no similar" 0 (List.length result)
+
+  (** Test find_similar_colors: identical hex excluded *)
+  let test_find_similar_colors_same_hex () =
+    let c1 = { name = "red"; hex = "#FF0000"; rgba = "rgba(255,0,0,1.00)" } in
+    let c2 = { name = "red-copy"; hex = "#FF0000"; rgba = "rgba(255,0,0,1.00)" } in
+    let result = find_similar_colors ~existing_colors:[c1] ~new_color:c2 ~threshold:5.0 () in
+    check int "same hex excluded" 0 (List.length result)
+
+  (** Test find_similar_colors: custom threshold *)
+  let test_find_similar_colors_threshold () =
+    let c1 = { name = "red-1"; hex = "#FF0000"; rgba = "rgba(255,0,0,1.00)" } in
+    let c2 = { name = "red-2"; hex = "#FE0100"; rgba = "rgba(254,1,0,1.00)" } in
+    (* Very tight threshold: delta_e must be < 0.1 to match *)
+    let result = find_similar_colors ~existing_colors:[c1] ~new_color:c2 ~threshold:0.1 () in
+    check int "tight threshold: no match" 0 (List.length result)
+
+  (** Test find_similar_colors: default threshold (no ~threshold arg) *)
+  let test_find_similar_colors_default_threshold () =
+    let c1 = { name = "red-1"; hex = "#FF0000"; rgba = "rgba(255,0,0,1.00)" } in
+    let c2 = { name = "red-2"; hex = "#FE0100"; rgba = "rgba(254,1,0,1.00)" } in
+    (* Call without ~threshold to exercise the default parameter path *)
+    let result = find_similar_colors ~existing_colors:[c1] ~new_color:c2 () in
+    check bool "default threshold finds similar" true (List.length result > 0)
+
+  (** Test check_color_duplicates: finds similar pair *)
+  let test_check_color_duplicates_found () =
+    let tokens = {
+      colors = [
+        { name = "red-1"; hex = "#FF0000"; rgba = "rgba(255,0,0,1.00)" };
+        { name = "red-2"; hex = "#FE0100"; rgba = "rgba(254,1,0,1.00)" };
+      ];
+      typography = []; spacing = []; radii = [];
+    } in
+    let warnings = check_color_duplicates ~threshold:5.0 tokens in
+    check bool "found duplicate pair" true (List.length warnings > 0)
+
+  (** Test check_color_duplicates: no similar pair *)
+  let test_check_color_duplicates_none () =
+    let tokens = {
+      colors = [
+        { name = "red"; hex = "#FF0000"; rgba = "rgba(255,0,0,1.00)" };
+        { name = "blue"; hex = "#0000FF"; rgba = "rgba(0,0,255,1.00)" };
+      ];
+      typography = []; spacing = []; radii = [];
+    } in
+    let warnings = check_color_duplicates ~threshold:5.0 tokens in
+    check int "no duplicates" 0 (List.length warnings)
+
+  (** Test check_color_duplicates: default threshold *)
+  let test_check_color_duplicates_default_threshold () =
+    let tokens = {
+      colors = [
+        { name = "red"; hex = "#FF0000"; rgba = "rgba(255,0,0,1.00)" };
+        { name = "green"; hex = "#00FF00"; rgba = "rgba(0,255,0,1.00)" };
+      ];
+      typography = []; spacing = []; radii = [];
+    } in
+    let warnings = check_color_duplicates tokens in
+    check int "no warnings with default threshold" 0 (List.length warnings)
+
+  (** Test check_color_duplicates: empty colors *)
+  let test_check_color_duplicates_empty () =
+    let tokens = {
+      colors = [];
+      typography = []; spacing = []; radii = [];
+    } in
+    let warnings = check_color_duplicates tokens in
+    check int "empty colors = no warnings" 0 (List.length warnings)
+
+  (** Test format_color_warnings: no warnings *)
+  let test_format_color_warnings_empty () =
+    let result = format_color_warnings [] in
+    check bool "contains 'No similar'" true
+      (try ignore (Str.search_forward (Str.regexp "No similar") result 0); true with Not_found -> false)
+
+  (** Test format_color_warnings: with warnings *)
+  let test_format_color_warnings_with_data () =
+    let warnings = [{
+      color1 = { name = "red-1"; hex = "#FF0000"; rgba = "" };
+      color2 = { name = "red-2"; hex = "#FE0100"; rgba = "" };
+      delta_e = 1.5;
+    }] in
+    let result = format_color_warnings warnings in
+    check bool "contains warning header" true
+      (try ignore (Str.search_forward (Str.regexp "Found 1") result 0); true with Not_found -> false);
+    check bool "contains red-1" true
+      (try ignore (Str.search_forward (Str.regexp "red-1") result 0); true with Not_found -> false);
+    check bool "contains red-2" true
+      (try ignore (Str.search_forward (Str.regexp "red-2") result 0); true with Not_found -> false);
+    check bool "contains delta_e" true
+      (try ignore (Str.search_forward (Str.regexp "1\\.50") result 0); true with Not_found -> false)
+
+  (** Test format_color_warnings: multiple warnings *)
+  let test_format_color_warnings_multiple () =
+    let warnings = [
+      { color1 = { name = "a"; hex = "#FF0000"; rgba = "" };
+        color2 = { name = "b"; hex = "#FE0100"; rgba = "" };
+        delta_e = 1.0 };
+      { color1 = { name = "c"; hex = "#00FF00"; rgba = "" };
+        color2 = { name = "d"; hex = "#01FE00"; rgba = "" };
+        delta_e = 2.0 };
+    ] in
+    let result = format_color_warnings warnings in
+    check bool "contains 'Found 2'" true
+      (try ignore (Str.search_forward (Str.regexp "Found 2") result 0); true with Not_found -> false)
+
+  (** Test color_warnings_to_json: empty warnings *)
+  let test_color_warnings_json_empty () =
+    let json_str = color_warnings_to_json [] in
+    let json = Yojson.Safe.from_string json_str in
+    match json with
+    | `Assoc fields ->
+        let count = List.assoc "warning_count" fields in
+        check bool "count is 0" true (count = `Int 0);
+        let pairs = List.assoc "similar_pairs" fields in
+        check bool "pairs is empty list" true (pairs = `List [])
+    | _ -> fail "expected JSON object"
+
+  (** Test color_warnings_to_json: with warnings *)
+  let test_color_warnings_json_with_data () =
+    let warnings = [{
+      color1 = { name = "red-1"; hex = "#FF0000"; rgba = "" };
+      color2 = { name = "red-2"; hex = "#FE0100"; rgba = "" };
+      delta_e = 1.5;
+    }] in
+    let json_str = color_warnings_to_json warnings in
+    let json = Yojson.Safe.from_string json_str in
+    match json with
+    | `Assoc fields ->
+        let count = List.assoc "warning_count" fields in
+        check bool "count is 1" true (count = `Int 1);
+        (match List.assoc "similar_pairs" fields with
+         | `List [pair] ->
+             (match pair with
+              | `Assoc pair_fields ->
+                  check bool "has color1" true (List.mem_assoc "color1" pair_fields);
+                  check bool "has color2" true (List.mem_assoc "color2" pair_fields);
+                  check bool "has delta_e" true (List.mem_assoc "delta_e" pair_fields);
+                  check bool "has suggestion" true (List.mem_assoc "suggestion" pair_fields)
+              | _ -> fail "expected pair assoc")
+         | _ -> fail "expected 1-item list")
+    | _ -> fail "expected JSON object"
+
+  (** Test extract_all_with_warnings: integration *)
+  let test_extract_all_with_warnings () =
+    let red1 = make_rgba 1.0 0.0 0.0 in
+    let red2 = make_rgba 0.996 0.004 0.0 in
+    let node1 = make_node ~id:"n1" ~fills:[make_solid_paint red1]
+      ~gap:8.0 ~border_radii:(Some (4., 4., 4., 4.)) () in
+    let node2 = make_node ~id:"n2" ~fills:[make_solid_paint red2] () in
+    let (tokens, warnings) = extract_all_with_warnings ~threshold:10.0 [node1; node2] in
+    check bool "has colors" true (List.length tokens.colors > 0);
+    check bool "has spacing" true (List.length tokens.spacing > 0);
+    check bool "has radii" true (List.length tokens.radii > 0);
+    (* Two near-identical reds should produce a warning at threshold 10.0 *)
+    check bool "has warnings for similar reds" true (List.length warnings > 0)
+
+  (** Test extract_all_with_warnings: default threshold *)
+  let test_extract_all_with_warnings_default () =
+    let red = make_rgba 1.0 0.0 0.0 in
+    let blue = make_rgba 0.0 0.0 1.0 in
+    let node1 = make_node ~id:"n1" ~fills:[make_solid_paint red] () in
+    let node2 = make_node ~id:"n2" ~fills:[make_solid_paint blue] () in
+    let (tokens, warnings) = extract_all_with_warnings [node1; node2] in
+    check int "two colors" 2 (List.length tokens.colors);
+    check int "no warnings for different colors" 0 (List.length warnings)
+
+  (** Test extract_colors: rgba format *)
+  let test_extract_colors_rgba_format () =
+    let c = make_rgba ~a:0.5 0.5 0.25 0.75 in
+    let node = make_node ~fills:[make_solid_paint c] () in
+    let colors = extract_colors [node] in
+    check int "one color" 1 (List.length colors);
+    let color = List.hd colors in
+    check bool "rgba contains rgba(" true
+      (try ignore (Str.search_forward (Str.regexp "rgba(") color.rgba 0); true with Not_found -> false)
+
+  (** Test extract_colors: name format *)
+  let test_extract_colors_name_format () =
+    let c = make_rgba 0.0 1.0 0.0 in
+    let node = make_node ~fills:[make_solid_paint c] () in
+    let colors = extract_colors [node] in
+    let color = List.hd colors in
+    check bool "name starts with color-" true
+      (String.length color.name >= 6 && String.sub color.name 0 6 = "color-")
+
+  (** Test extract_typography: with line_height and letter_spacing *)
+  let test_extract_typography_full () =
+    let typo = make_typography ~line_height:(Some 1.5) ~letter_spacing:(Some 0.5) 16.0 in
+    let node = make_node ~typography:(Some typo) () in
+    let result = extract_typography [node] in
+    let t = List.hd result in
+    check (float 0.01) "line_height" 1.5 (Option.get t.line_height);
+    check (float 0.01) "letter_spacing" 0.5 (Option.get t.letter_spacing)
+
+  (** Test extract_typography: name format with spaces *)
+  let test_extract_typography_name_format () =
+    let typo = make_typography ~font_family:"Noto Sans" 24.0 in
+    let node = make_node ~typography:(Some typo) () in
+    let result = extract_typography [node] in
+    let t = List.hd result in
+    check string "name" "text-noto-sans-24" t.name
+
+  (** Test extract_spacing: deduplication *)
+  let test_extract_spacing_dedup () =
+    let node1 = make_node ~id:"n1" ~gap:16.0 () in
+    let node2 = make_node ~id:"n2" ~gap:16.0 () in
+    let result = extract_spacing [node1; node2] in
+    let count_16 = List.length (List.filter (fun (s: spacing_token) -> s.value = 16.0) result) in
+    check int "deduped to 1" 1 count_16
+
+  (** Test extract_spacing: sorted output *)
+  let test_extract_spacing_sorted () =
+    let node = make_node ~padding:(32., 8., 16., 4.) () in
+    let result = extract_spacing [node] in
+    let values = List.map (fun (s: spacing_token) -> s.value) result in
+    let sorted = List.sort compare values in
+    check bool "output is sorted" true (values = sorted)
+
+  (** Test extract_radii: zero values filtered *)
+  let test_extract_radii_zero () =
+    let node = make_node ~border_radii:(Some (0., 0., 0., 0.)) () in
+    let result = extract_radii [node] in
+    check int "zero radii filtered" 0 (List.length result)
+
+  (** Test extract_radii: deduplication and sorting *)
+  let test_extract_radii_dedup_sorted () =
+    let node1 = make_node ~id:"n1" ~border_radii:(Some (16., 8., 16., 8.)) () in
+    let node2 = make_node ~id:"n2" ~border_radii:(Some (8., 4., 8., 4.)) () in
+    let result = extract_radii [node1; node2] in
+    let values = List.map (fun (r: radius_token) -> r.value) result in
+    let sorted = List.sort compare values in
+    check bool "sorted" true (values = sorted);
+    let unique = List.sort_uniq compare values in
+    check bool "unique" true (values = unique)
+
+  (** Test to_css: typography with letter_spacing *)
+  let test_to_css_letter_spacing () =
+    let tokens = {
+      colors = []; spacing = []; radii = [];
+      typography = [{ name = "text-inter-16"; font_family = "Inter"; font_size = 16.0;
+                      font_weight = 400; line_height = Some 1.5; letter_spacing = Some 0.5 }];
+    } in
+    let css = to_css tokens in
+    check bool "has letter-spacing" true
+      (try ignore (Str.search_forward (Str.regexp "letter-spacing") css 0); true with Not_found -> false);
+    check bool "has line-height" true
+      (try ignore (Str.search_forward (Str.regexp "line-height") css 0); true with Not_found -> false)
+
+  (** Test to_css: typography without optional fields *)
+  let test_to_css_no_optional () =
+    let tokens = {
+      colors = []; spacing = []; radii = [];
+      typography = [{ name = "text-inter-16"; font_family = "Inter"; font_size = 16.0;
+                      font_weight = 400; line_height = None; letter_spacing = None }];
+    } in
+    let css = to_css tokens in
+    check bool "no letter-spacing" false
+      (try ignore (Str.search_forward (Str.regexp "letter-spacing") css 0); true with Not_found -> false);
+    check bool "no line-height" false
+      (try ignore (Str.search_forward (Str.regexp "line-height") css 0); true with Not_found -> false)
+
+  (** Test to_css: content verification *)
+  let test_to_css_content () =
+    let tokens = {
+      colors = [{ name = "color-ff0000"; hex = "#FF0000"; rgba = "rgba(255,0,0,1.00)" }];
+      spacing = [{ name = "space-8"; value = 8.0 }];
+      radii = [{ name = "radius-4"; value = 4.0 }];
+      typography = [];
+    } in
+    let css = to_css tokens in
+    check bool "starts with :root" true (String.sub css 0 5 = ":root");
+    check bool "contains --color-ff0000" true
+      (try ignore (Str.search_forward (Str.regexp "--color-ff0000") css 0); true with Not_found -> false);
+    check bool "contains --space-8" true
+      (try ignore (Str.search_forward (Str.regexp "--space-8") css 0); true with Not_found -> false);
+    check bool "contains --radius-4" true
+      (try ignore (Str.search_forward (Str.regexp "--radius-4") css 0); true with Not_found -> false)
+
+  (** Test to_tailwind: content verification *)
+  let test_to_tailwind_content () =
+    let tokens = {
+      colors = [{ name = "color-ff0000"; hex = "#FF0000"; rgba = "rgba(255,0,0,1.00)" }];
+      spacing = [{ name = "space-8"; value = 8.0 }];
+      radii = [{ name = "radius-4"; value = 4.0 }];
+      typography = [];
+    } in
+    let tw = to_tailwind tokens in
+    check bool "has module.exports" true
+      (try ignore (Str.search_forward (Str.regexp "module.exports") tw 0); true with Not_found -> false);
+    check bool "has colors section" true
+      (try ignore (Str.search_forward (Str.regexp "colors:") tw 0); true with Not_found -> false);
+    check bool "has spacing section" true
+      (try ignore (Str.search_forward (Str.regexp "spacing:") tw 0); true with Not_found -> false);
+    check bool "has borderRadius section" true
+      (try ignore (Str.search_forward (Str.regexp "borderRadius:") tw 0); true with Not_found -> false)
+
+  (** Test to_json: with typography *)
+  let test_to_json_with_typography () =
+    let tokens = {
+      colors = [];
+      typography = [{ name = "heading"; font_family = "Inter"; font_size = 24.0;
+                      font_weight = 700; line_height = None; letter_spacing = None }];
+      spacing = [{ name = "s"; value = 8.0 }];
+      radii = [{ name = "r"; value = 4.0 }];
+    } in
+    let json_str = to_json tokens in
+    let json = Yojson.Safe.from_string json_str in
+    match json with
+    | `Assoc fields ->
+        check bool "has typography key" true (List.mem_assoc "typography" fields);
+        check bool "has spacing key" true (List.mem_assoc "spacing" fields);
+        check bool "has borderRadius key" true (List.mem_assoc "borderRadius" fields);
+        (match List.assoc "typography" fields with
+         | `List [item] ->
+             (match item with
+              | `Assoc typo_fields ->
+                  check bool "has fontFamily" true (List.mem_assoc "fontFamily" typo_fields);
+                  check bool "has fontSize" true (List.mem_assoc "fontSize" typo_fields);
+                  check bool "has fontWeight" true (List.mem_assoc "fontWeight" typo_fields)
+              | _ -> fail "expected typography assoc")
+         | _ -> fail "expected 1-item list")
+    | _ -> fail "expected JSON object"
+
+  (** Test to_swiftui: font weight branches *)
+  let test_to_swiftui_weights () =
+    let tokens = {
+      colors = [];
+      typography = [
+        { name = "text-bold"; font_family = "Inter"; font_size = 16.0;
+          font_weight = 700; line_height = None; letter_spacing = None };
+        { name = "text-medium"; font_family = "Inter"; font_size = 14.0;
+          font_weight = 500; line_height = None; letter_spacing = None };
+        { name = "text-regular"; font_family = "Inter"; font_size = 12.0;
+          font_weight = 400; line_height = None; letter_spacing = None };
+      ];
+      spacing = []; radii = [];
+    } in
+    let swift = to_swiftui tokens in
+    check bool "has .bold" true
+      (try ignore (Str.search_forward (Str.regexp "\\.bold") swift 0); true with Not_found -> false);
+    check bool "has .medium" true
+      (try ignore (Str.search_forward (Str.regexp "\\.medium") swift 0); true with Not_found -> false);
+    check bool "has .regular" true
+      (try ignore (Str.search_forward (Str.regexp "\\.regular") swift 0); true with Not_found -> false)
+
+  (** Test to_swiftui: content structure *)
+  let test_to_swiftui_content () =
+    let tokens = {
+      colors = [{ name = "color-ff0000"; hex = "#FF0000"; rgba = "" }];
+      spacing = [{ name = "space-8"; value = 8.0 }];
+      radii = [{ name = "radius-4"; value = 4.0 }];
+      typography = [];
+    } in
+    let swift = to_swiftui tokens in
+    check bool "has import SwiftUI" true
+      (try ignore (Str.search_forward (Str.regexp "import SwiftUI") swift 0); true with Not_found -> false);
+    check bool "has Color extension" true
+      (try ignore (Str.search_forward (Str.regexp "extension Color") swift 0); true with Not_found -> false);
+    check bool "has Spacing enum" true
+      (try ignore (Str.search_forward (Str.regexp "enum Spacing") swift 0); true with Not_found -> false);
+    check bool "has CornerRadius enum" true
+      (try ignore (Str.search_forward (Str.regexp "enum CornerRadius") swift 0); true with Not_found -> false)
+
+  (** Test to_compose: font weight branches *)
+  let test_to_compose_weights () =
+    let tokens = {
+      colors = [];
+      typography = [
+        { name = "text-bold"; font_family = "Inter"; font_size = 16.0;
+          font_weight = 700; line_height = None; letter_spacing = None };
+        { name = "text-medium"; font_family = "Inter"; font_size = 14.0;
+          font_weight = 500; line_height = None; letter_spacing = None };
+        { name = "text-normal"; font_family = "Inter"; font_size = 12.0;
+          font_weight = 400; line_height = None; letter_spacing = None };
+      ];
+      spacing = []; radii = [];
+    } in
+    let kt = to_compose tokens in
+    check bool "has FontWeight.Bold" true
+      (try ignore (Str.search_forward (Str.regexp "FontWeight\\.Bold") kt 0); true with Not_found -> false);
+    check bool "has FontWeight.Medium" true
+      (try ignore (Str.search_forward (Str.regexp "FontWeight\\.Medium") kt 0); true with Not_found -> false);
+    check bool "has FontWeight.Normal" true
+      (try ignore (Str.search_forward (Str.regexp "FontWeight\\.Normal") kt 0); true with Not_found -> false)
+
+  (** Test to_compose: content structure *)
+  let test_to_compose_content () =
+    let tokens = {
+      colors = [{ name = "color-ff0000"; hex = "#FF0000"; rgba = "" }];
+      spacing = [{ name = "space-8"; value = 8.0 }];
+      radii = [{ name = "radius-4"; value = 4.0 }];
+      typography = [];
+    } in
+    let kt = to_compose tokens in
+    check bool "has package" true
+      (try ignore (Str.search_forward (Str.regexp "package com.example") kt 0); true with Not_found -> false);
+    check bool "has AppColors" true
+      (try ignore (Str.search_forward (Str.regexp "AppColors") kt 0); true with Not_found -> false);
+    check bool "has AppSpacing" true
+      (try ignore (Str.search_forward (Str.regexp "AppSpacing") kt 0); true with Not_found -> false);
+    check bool "has AppCorners" true
+      (try ignore (Str.search_forward (Str.regexp "AppCorners") kt 0); true with Not_found -> false)
+
+  (** Test to_flutter: font weight branches *)
+  let test_to_flutter_weights () =
+    let tokens = {
+      colors = [];
+      typography = [
+        { name = "text-bold"; font_family = "Inter"; font_size = 16.0;
+          font_weight = 700; line_height = None; letter_spacing = None };
+        { name = "text-medium"; font_family = "Inter"; font_size = 14.0;
+          font_weight = 500; line_height = None; letter_spacing = None };
+        { name = "text-regular"; font_family = "Inter"; font_size = 12.0;
+          font_weight = 400; line_height = None; letter_spacing = None };
+      ];
+      spacing = []; radii = [];
+    } in
+    let dart = to_flutter tokens in
+    check bool "has FontWeight.w700" true
+      (try ignore (Str.search_forward (Str.regexp "FontWeight\\.w700") dart 0); true with Not_found -> false);
+    check bool "has FontWeight.w500" true
+      (try ignore (Str.search_forward (Str.regexp "FontWeight\\.w500") dart 0); true with Not_found -> false);
+    check bool "has FontWeight.w400" true
+      (try ignore (Str.search_forward (Str.regexp "FontWeight\\.w400") dart 0); true with Not_found -> false)
+
+  (** Test to_flutter: content structure *)
+  let test_to_flutter_content () =
+    let tokens = {
+      colors = [{ name = "color-ff0000"; hex = "#FF0000"; rgba = "" }];
+      spacing = [{ name = "space-8"; value = 8.0 }];
+      radii = [{ name = "radius-4"; value = 4.0 }];
+      typography = [];
+    } in
+    let dart = to_flutter tokens in
+    check bool "has flutter import" true
+      (try ignore (Str.search_forward (Str.regexp "package:flutter") dart 0); true with Not_found -> false);
+    check bool "has AppColors" true
+      (try ignore (Str.search_forward (Str.regexp "AppColors") dart 0); true with Not_found -> false);
+    check bool "has AppSpacing" true
+      (try ignore (Str.search_forward (Str.regexp "AppSpacing") dart 0); true with Not_found -> false);
+    check bool "has AppCorners" true
+      (try ignore (Str.search_forward (Str.regexp "AppCorners") dart 0); true with Not_found -> false);
+    check bool "has BorderRadius.circular" true
+      (try ignore (Str.search_forward (Str.regexp "BorderRadius.circular") dart 0); true with Not_found -> false)
+
+  (** Test to_w3c_dtcg: content structure *)
+  let test_to_w3c_dtcg_content () =
+    let tokens = {
+      colors = [{ name = "primary"; hex = "#FF0000"; rgba = "" }];
+      spacing = [{ name = "sm"; value = 8.0 }];
+      radii = [{ name = "md"; value = 8.0 }];
+      typography = [{ name = "heading"; font_family = "Inter"; font_size = 24.0;
+                      font_weight = 700; line_height = None; letter_spacing = None }];
+    } in
+    let json_str = to_w3c_dtcg tokens in
+    let json = Yojson.Safe.from_string json_str in
+    match json with
+    | `Assoc fields ->
+        check bool "has color" true (List.mem_assoc "color" fields);
+        check bool "has spacing" true (List.mem_assoc "spacing" fields);
+        check bool "has borderRadius" true (List.mem_assoc "borderRadius" fields);
+        check bool "has typography" true (List.mem_assoc "typography" fields);
+        (* Verify $type fields *)
+        (match List.assoc "color" fields with
+         | `Assoc [(_name, `Assoc token_fields)] ->
+             check bool "has $type" true (List.mem_assoc "$type" token_fields);
+             check bool "type is color" true (List.assoc "$type" token_fields = `String "color")
+         | _ -> fail "expected color token assoc")
+    | _ -> fail "expected JSON object"
+
+  (** Test to_css: spacing and radius output format *)
+  let test_to_css_spacing_format () =
+    let tokens = {
+      colors = [];
+      typography = [];
+      spacing = [{ name = "space-16"; value = 16.0 }];
+      radii = [{ name = "radius-8"; value = 8.0 }];
+    } in
+    let css = to_css tokens in
+    check bool "has 16px" true
+      (try ignore (Str.search_forward (Str.regexp "16px") css 0); true with Not_found -> false);
+    check bool "has 8px" true
+      (try ignore (Str.search_forward (Str.regexp "8px") css 0); true with Not_found -> false)
+
+  (** Test extract_colors: multiple paints per node, only first solid used *)
+  let test_extract_colors_multiple_paints () =
+    let red = make_rgba 1.0 0.0 0.0 in
+    let blue = make_rgba 0.0 0.0 1.0 in
+    let node = make_node ~fills:[make_solid_paint red; make_solid_paint blue] () in
+    let colors = extract_colors [node] in
+    (* find_map returns first match *)
+    check int "only first solid paint" 1 (List.length colors);
+    check string "first is red" "#FF0000" (List.hd colors).hex
+
   let tests = [
     "extract_colors_basic", `Quick, test_extract_colors_basic;
     "extract_colors_dedup", `Quick, test_extract_colors_dedup;
     "extract_colors_empty", `Quick, test_extract_colors_empty;
     "extract_colors_non_solid", `Quick, test_extract_colors_non_solid;
+    "extract_colors_rgba_format", `Quick, test_extract_colors_rgba_format;
+    "extract_colors_name_format", `Quick, test_extract_colors_name_format;
+    "extract_colors_multiple_paints", `Quick, test_extract_colors_multiple_paints;
     "extract_typography_basic", `Quick, test_extract_typography_basic;
     "extract_typography_dedup", `Quick, test_extract_typography_dedup;
     "extract_typography_none", `Quick, test_extract_typography_none;
+    "extract_typography_full", `Quick, test_extract_typography_full;
+    "extract_typography_name_format", `Quick, test_extract_typography_name_format;
     "extract_spacing_gap", `Quick, test_extract_spacing_gap;
     "extract_spacing_padding", `Quick, test_extract_spacing_padding;
     "extract_spacing_zero", `Quick, test_extract_spacing_zero;
+    "extract_spacing_dedup", `Quick, test_extract_spacing_dedup;
+    "extract_spacing_sorted", `Quick, test_extract_spacing_sorted;
     "extract_radii_basic", `Quick, test_extract_radii_basic;
     "extract_radii_mixed", `Quick, test_extract_radii_mixed;
     "extract_radii_none", `Quick, test_extract_radii_none;
+    "extract_radii_zero", `Quick, test_extract_radii_zero;
+    "extract_radii_dedup_sorted", `Quick, test_extract_radii_dedup_sorted;
     "extract_all", `Quick, test_extract_all;
     "to_css", `Quick, test_to_css;
+    "to_css_letter_spacing", `Quick, test_to_css_letter_spacing;
+    "to_css_no_optional", `Quick, test_to_css_no_optional;
+    "to_css_content", `Quick, test_to_css_content;
+    "to_css_spacing_format", `Quick, test_to_css_spacing_format;
     "to_tailwind", `Quick, test_to_tailwind;
+    "to_tailwind_content", `Quick, test_to_tailwind_content;
     "to_json", `Quick, test_to_json;
+    "to_json_with_typography", `Quick, test_to_json_with_typography;
     "to_swiftui", `Quick, test_to_swiftui;
+    "to_swiftui_weights", `Quick, test_to_swiftui_weights;
+    "to_swiftui_content", `Quick, test_to_swiftui_content;
     "to_compose", `Quick, test_to_compose;
+    "to_compose_weights", `Quick, test_to_compose_weights;
+    "to_compose_content", `Quick, test_to_compose_content;
     "to_flutter", `Quick, test_to_flutter;
+    "to_flutter_weights", `Quick, test_to_flutter_weights;
+    "to_flutter_content", `Quick, test_to_flutter_content;
     "to_w3c_dtcg", `Quick, test_to_w3c_dtcg;
+    "to_w3c_dtcg_content", `Quick, test_to_w3c_dtcg_content;
     "format_of_string", `Quick, test_format_of_string;
     "export_tokens", `Quick, test_export_tokens;
+    "export_tokens_all_formats", `Quick, test_export_tokens_all_formats;
+    "hex_to_rgb_with_hash", `Quick, test_hex_to_rgb_with_hash;
+    "hex_to_rgb_no_hash", `Quick, test_hex_to_rgb_no_hash;
+    "hex_to_rgb_arbitrary", `Quick, test_hex_to_rgb_arbitrary;
+    "color_delta_e_identical", `Quick, test_color_delta_e_identical;
+    "color_delta_e_different", `Quick, test_color_delta_e_different;
+    "color_delta_e_similar", `Quick, test_color_delta_e_similar;
+    "find_similar_colors_found", `Quick, test_find_similar_colors_found;
+    "find_similar_colors_none", `Quick, test_find_similar_colors_none;
+    "find_similar_colors_same_hex", `Quick, test_find_similar_colors_same_hex;
+    "find_similar_colors_threshold", `Quick, test_find_similar_colors_threshold;
+    "find_similar_colors_default_threshold", `Quick, test_find_similar_colors_default_threshold;
+    "check_color_duplicates_found", `Quick, test_check_color_duplicates_found;
+    "check_color_duplicates_none", `Quick, test_check_color_duplicates_none;
+    "check_color_duplicates_default", `Quick, test_check_color_duplicates_default_threshold;
+    "check_color_duplicates_empty", `Quick, test_check_color_duplicates_empty;
+    "format_color_warnings_empty", `Quick, test_format_color_warnings_empty;
+    "format_color_warnings_with_data", `Quick, test_format_color_warnings_with_data;
+    "format_color_warnings_multiple", `Quick, test_format_color_warnings_multiple;
+    "color_warnings_json_empty", `Quick, test_color_warnings_json_empty;
+    "color_warnings_json_with_data", `Quick, test_color_warnings_json_with_data;
+    "extract_all_with_warnings", `Quick, test_extract_all_with_warnings;
+    "extract_all_with_warnings_default", `Quick, test_extract_all_with_warnings_default;
   ]
 end
 
