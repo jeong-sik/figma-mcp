@@ -399,3 +399,8 @@
 (test
  (name test_protocol_api_w7)
  (libraries figma_mcp alcotest yojson str unix uri))
+
+; Coverage Wave 8: final push to 70%+ (mcp_tools, effects, visual_handlers, server_metrics)
+(test
+ (name test_final_push_w8)
+ (libraries figma_mcp alcotest yojson str unix eio_main))
