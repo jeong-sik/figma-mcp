@@ -309,3 +309,28 @@
 (test
  (name test_mcp_tools_extra)
  (libraries figma_mcp alcotest yojson str unix))
+
+; Coverage Wave 4: mcp_helpers + figma_effects + server_metrics (remaining branches)
+(test
+ (name test_helpers_effects_w4)
+ (libraries figma_mcp alcotest yojson str unix eio_main httpun))
+
+; Coverage Wave 4: visual_verifier + semantic_verifier + figma_image_similarity (85%+ target)
+(test
+ (name test_verifiers_coverage_w4)
+ (libraries figma_mcp alcotest yojson str unix))
+
+; Coverage Wave 4: mcp_api_handlers.ml (uncovered handler branches — 78%+ target)
+(test
+ (name test_api_handlers_w4)
+ (libraries figma_mcp alcotest yojson str unix))
+
+; Coverage Wave 4: mcp_visual_handlers.ml (uncovered handler paths — 75%+ target)
+(test
+ (name test_visual_handlers_w4)
+ (libraries figma_mcp alcotest yojson str unix))
+
+; Coverage Wave 4: plugin handlers + features + bridge (60%+ / 80%+ / 45%+ targets)
+(test
+ (name test_plugin_w4)
+ (libraries figma_mcp alcotest yojson str unix))
