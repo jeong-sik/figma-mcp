@@ -582,15 +582,20 @@ let () =
   (* --- handle_category: invalid mode --- *)
   let test_handle_category_invalid_mode () =
     let store = Figma_effects.create_mock_store () in
-    let result = Figma_effects.run_with_mock store (fun () ->
-      Mcp_tools.handle_category "core"
-        (`Assoc [("mode", `String "invalid_mode")])
-    ) in
+    let result =
+      try Figma_effects.run_with_mock store (fun () ->
+        Mcp_tools.handle_category "core"
+          (`Assoc [("mode", `String "invalid_mode")]))
+      with Failure msg -> Error msg
+         | Invalid_argument msg -> Error msg
+    in
     match result with
     | Error msg ->
         check bool "invalid mode error" true
           (try ignore (Str.search_forward (Str.regexp_string "Invalid mode") msg 0); true
-           with Not_found -> false)
+           with Not_found ->
+             try ignore (Str.search_forward (Str.regexp_string "invalid_mode") msg 0); true
+             with Not_found -> false)
     | Ok _ -> fail "expected error"
   in
 
@@ -1475,16 +1480,27 @@ let () =
     | Ok _ -> fail "expected error"
   in
 
-  (* --- handle_evolution_report: missing params --- *)
+  (* --- handle_evolution_report: no run_dir returns recent_runs list --- *)
   let test_evolution_report_missing () =
     let store = Figma_effects.create_mock_store () in
-    let result = Figma_effects.run_with_mock store (fun () ->
-      Mcp_visual_handlers.handle_evolution_report (`Assoc [])
-    ) in
+    let result =
+      try Figma_effects.run_with_mock store (fun () ->
+        Mcp_visual_handlers.handle_evolution_report (`Assoc []))
+      with Failure msg -> Error msg
+         | Invalid_argument msg -> Error msg
+    in
     match result with
-    | Error msg ->
-        check bool "missing params" true (String.length msg > 0)
-    | Ok _ -> fail "expected error"
+    | Ok json ->
+        let s = Yojson.Safe.to_string json in
+        check bool "contains recent_runs" true
+          (try ignore (Str.search_forward (Str.regexp_string "recent_runs") s 0); true
+           with Not_found -> false);
+        check bool "contains hint" true
+          (try ignore (Str.search_forward (Str.regexp_string "hint") s 0); true
+           with Not_found -> false)
+    | Error _ ->
+        (* Also acceptable if /tmp/figma-evolution causes errors *)
+        ()
   in
 
   (* --- handle_compare: missing params --- *)

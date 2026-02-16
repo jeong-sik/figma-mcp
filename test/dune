@@ -404,3 +404,28 @@
 (test
  (name test_final_push_w8)
  (libraries figma_mcp alcotest yojson str unix eio_main))
+
+; Coverage Wave 9: mcp_protocol_eio.ml pure helpers, CORS branches, agent_request_json, webhook validation
+(test
+ (name test_protocol_eio_w9)
+ (libraries figma_mcp alcotest yojson str unix uri))
+
+; Coverage Wave 9: figma_api_eio.ml + mcp_protocol.ml (retry_after, logging, JSON serializers, edge cases)
+(test
+ (name test_api_protocol_w9)
+ (libraries figma_mcp alcotest yojson str unix uri))
+
+; Coverage Wave 9: figma_crawl.ml extra (render_node_tree, sanitize, progress_to_json)
+(test
+ (name test_crawl_extra_w9)
+ (libraries figma_mcp alcotest yojson str unix))
+
+; Coverage Wave 9: mcp_tools.ml + mcp_api_handlers.ml (handler branches, tool dispatch)
+(test
+ (name test_tools_handlers_w9)
+ (libraries figma_mcp alcotest yojson str unix))
+
+; Coverage Wave 9: visual_verifier.ml + figma_effects.ml + misc modules
+(test
+ (name test_verifier_misc_w9)
+ (libraries figma_mcp alcotest yojson str unix eio_main fmt))
