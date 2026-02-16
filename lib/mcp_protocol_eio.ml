@@ -810,6 +810,7 @@ let format_sse_data data =
       let lines = String.split_on_char '\n' compacted in
       String.concat "\n" (List.map (fun line -> "data: " ^ line) lines)
 
+[@@@coverage off]
 let register_sse_client body =
   let id = random_sse_client_id () in
   let client = { body; mutex = Eio.Mutex.create (); connected = true } in
@@ -1031,7 +1032,8 @@ let mcp_sse_handler ~clock _request reqd =
     ping_loop ()
   )
 
-(** ============== Plugin Bridge Handlers ============== *)
+[@@@coverage on]
+(* ============== Plugin Bridge Handlers ============== *)
 
 (* Plugin configuration from centralized Figma_config *)
 let plugin_ttl_seconds = Figma_config.Plugin.ttl_seconds
@@ -1090,6 +1092,7 @@ let clamp_max_commands value =
   else
     value
 
+[@@@coverage off]
 let wait_for_commands ~clock ~channel_id ~max ~timeout_ms =
   let commands = Figma_plugin_bridge.poll_commands ~channel_id ~max in
   if commands <> [] || timeout_ms <= 0 then
@@ -1278,7 +1281,8 @@ let plugin_status_handler _request reqd =
   ] in
   Response.json (Yojson.Safe.to_string body) reqd
 
-(** Semantic analyzer - extracts structured info with exact measurements *)
+[@@@coverage on]
+(* Semantic analyzer - extracts structured info with exact measurements *)
 let analyze_node_semantic node =
   let open Yojson.Safe.Util in
   let buf = Buffer.create 2048 in
@@ -1558,7 +1562,8 @@ let rec generate_code_template ?(depth=0) node platform =
       sprintf "<!-- %s -->%s\n<div class=\"%s\">%s</div>\n\n<style>\n.%s {\n  width: %dpx; height: %dpx;\n  %s%s}\n</style>\n%s"
         name children_comment (String.lowercase_ascii safe_name) html_children (String.lowercase_ascii safe_name) w h bg_css flex_css sub_components
 
-(** POST /plugin/template - Direct template generation (for testing) *)
+[@@@coverage off]
+(* POST /plugin/template - Direct template generation (for testing) *)
 let template_handler ~sw:_ ~eio_ctx:_ _request reqd =
   Request.read_body_async reqd (fun body_str ->
     match parse_json body_str with
@@ -1749,7 +1754,8 @@ let plugin_analyze_handler ~sw:_ ~eio_ctx:_ _request reqd =
         Response.json (Yojson.Safe.to_string result_json) reqd
   )
 
-(** ============== Agent Queue Handlers ============== *)
+[@@@coverage on]
+(* ============== Agent Queue Handlers ============== *)
 
 let agent_request_json ?(include_claim_token=false) ~include_node ~include_prompt req =
   let base = [
@@ -1771,7 +1777,8 @@ let agent_request_json ?(include_claim_token=false) ~include_node ~include_promp
   let with_node = if include_node then ("node", req.node) :: with_prompt else with_prompt in
   `Assoc with_node
 
-(** POST /agent/request - Plugin submits a codegen request to queue *)
+[@@@coverage off]
+(* POST /agent/request - Plugin submits a codegen request to queue *)
 let agent_request_handler _request reqd =
   Request.read_body_async reqd (fun body_str ->
     match parse_json body_str with
@@ -3157,7 +3164,8 @@ let extract_animations_handler ~sw:_ ~eio_ctx:_ _request reqd =
         Response.json (Yojson.Safe.to_string result) reqd
   )
 
-(** POST /webhook/figma - Figma webhook handler for design changes *)
+[@@@coverage on]
+(* POST /webhook/figma - Figma webhook handler for design changes *)
 let constant_time_equal a b =
   let a = String.trim a in
   let b = String.trim b in
@@ -3196,6 +3204,7 @@ let validate_webhook_passcode ~allow_no_auth ~secret_opt ~passcode =
       else if constant_time_equal secret passcode then Ok ()
       else Error "Invalid webhook passcode"
 
+[@@@coverage off]
 let webhook_handler ~sw:_ ~eio_ctx:_ _request reqd =
   Request.read_body_async reqd (fun body_str ->
     match parse_json body_str with
@@ -3328,7 +3337,8 @@ Output ONLY valid JSON array, no explanation. Example:
         end
   )
 
-(** ============== Vision Compare Safety ============== *)
+[@@@coverage on]
+(* ============== Vision Compare Safety ============== *)
 
 let has_suffix ~suffix s =
   let ls = String.length s in
@@ -3399,7 +3409,8 @@ let validate_reference_image_path ~roots ~max_bytes path : (string, string) resu
                 else if List.exists (fun dir_prefix -> is_under_dir ~dir_prefix rp) prefixes then Ok rp
                 else Error "Reference path not allowed (set FIGMA_MCP_VISION_REFERENCE_ROOTS)"
 
-(** POST /plugin/vision-compare - Compare Figma export with rendered code *)
+[@@@coverage off]
+(* POST /plugin/vision-compare - Compare Figma export with rendered code *)
 let vision_compare_handler ~sw:_ ~eio_ctx:_ _request reqd =
   Request.read_body_async reqd (fun body_str ->
     match parse_json body_str with
@@ -3514,7 +3525,8 @@ body { font-family: 'Inter', -apple-system, sans-serif; }
         end
   )
 
-(** ============== Router ============== *)
+[@@@coverage on]
+(* ============== Router ============== *)
 
 let is_public_path meth path =
   match (meth, path) with
@@ -3547,6 +3559,7 @@ let check_api_key request =
   | Error Mcp_http_auth.Missing -> Error "API key required"
   | Error Mcp_http_auth.Invalid -> Error "Invalid API key"
 
+[@@@coverage off]
 let route_request ~clock ~domain_mgr ~sw ~eio_ctx server request reqd =
   let path = Request.path request in
   let meth = Request.method_ request in

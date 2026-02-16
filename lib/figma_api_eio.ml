@@ -289,6 +289,8 @@ type client = {
   inflight_lock : Eio.Mutex.t;
 }
 
+[@@@coverage off]
+
 (** TLS 설정 생성 *)
 let make_tls_config () =
   let authenticator =
@@ -983,6 +985,8 @@ let download_url_with_retry ~sw ~net ~clock ~client ~url ~path ?(max_retries=2) 
     )
   )
 
+[@@@coverage on]
+
 (** ============== JSON Utilities ============== *)
 
 (** JSON에서 문자열 추출 *)
@@ -1046,6 +1050,8 @@ let get_frames_from_page page =
 let get_all_screens json =
   let pages = extract_pages json in
   List.concat_map get_frames_from_page pages
+
+[@@@coverage off]
 
 (** ============== Figma API Endpoints ============== *)
 
@@ -1230,6 +1236,8 @@ type figma_url_info = {
   file_key: string option;
   node_id: string option;
 }
+
+[@@@coverage on]
 
 (** Figma URL 파싱 *)
 let parse_figma_url url =

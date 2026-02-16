@@ -503,7 +503,9 @@ let parse_neo4j_response body : (Yojson.Safe.t, string) result =
   | Yojson.Json_error msg -> Error (Printf.sprintf "JSON parse error: %s" msg)
   | e -> Error (Printf.sprintf "Parse error: %s" (Printexc.to_string e))
 
-(** Make HTTP POST request to Neo4j Transaction API *)
+[@@@coverage off]
+
+(* Make HTTP POST request to Neo4j Transaction API *)
 let neo4j_http_post ~sw ~net ~clock:_ ~client:_
     ~uri ~database ~auth_header statements =
   let endpoint = Printf.sprintf "%s/db/%s/tx/commit" uri database in

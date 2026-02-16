@@ -45,7 +45,7 @@ let read_available ~fd ~buf ~limit ~truncated ~closed =
           Buffer.add_subbytes buf tmp 0 (min remaining n);
         if n > remaining then truncated := true
     with
-    | Unix.Unix_error ((Unix.EAGAIN | Unix.EWOULDBLOCK), _, _) -> ()
+    | Unix.Unix_error ((Unix.EAGAIN | Unix.EWOULDBLOCK | Unix.EINTR), _, _) -> ()
 
 let waitpid_nohang pid =
   try
@@ -93,15 +93,18 @@ let run ?(timeout_ms=default_timeout_ms) ?(output_limit=default_output_limit) cm
         (if !stderr_closed then [] else [stderr_r])
       in
       if fds <> [] then begin
-        let readable, _, _ = Unix.select fds [] [] timeout in
-        List.iter (fun fd ->
-          if fd = stdout_r then
-            read_available ~fd:stdout_r ~buf:stdout_buf ~limit:output_limit ~truncated:stdout_truncated ~closed:stdout_closed
-          else if fd = stderr_r then
-            read_available ~fd:stderr_r ~buf:stderr_buf ~limit:output_limit ~truncated:stderr_truncated ~closed:stderr_closed
-        ) readable
+        (try
+          let readable, _, _ = Unix.select fds [] [] timeout in
+          List.iter (fun fd ->
+            if fd = stdout_r then
+              read_available ~fd:stdout_r ~buf:stdout_buf ~limit:output_limit ~truncated:stdout_truncated ~closed:stdout_closed
+            else if fd = stderr_r then
+              read_available ~fd:stderr_r ~buf:stderr_buf ~limit:output_limit ~truncated:stderr_truncated ~closed:stderr_closed
+          ) readable
+        with Unix.Unix_error (Unix.EINTR, _, _) -> ())
       end else
-        ignore (Unix.select [] [] [] timeout);
+        (try ignore (Unix.select [] [] [] timeout)
+         with Unix.Unix_error (Unix.EINTR, _, _) -> ());
 
       (match !status with
        | None -> status := waitpid_nohang pid

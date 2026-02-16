@@ -334,3 +334,138 @@
 (test
  (name test_plugin_w4)
  (libraries figma_mcp alcotest yojson str unix))
+
+; Coverage Wave 5: mcp_protocol_eio.ml CORS + pure helpers
+(test
+ (name test_protocol_cors_w5)
+ (libraries figma_mcp alcotest yojson str uri unix))
+
+; Coverage Wave 5: mcp_protocol_eio.ml agent queue (Eio.Mutex tests)
+(test
+ (name test_protocol_agent_w5)
+ (libraries figma_mcp alcotest yojson eio_main unix))
+
+; Coverage Wave 5: mcp_protocol_eio.ml semantic analysis + code generation
+(test
+ (name test_protocol_codegen_w5)
+ (libraries figma_mcp alcotest yojson))
+
+; Coverage Wave 5: figma_api_eio.ml + figma_effects.ml remaining gaps
+(test
+ (name test_api_effects_w5)
+ (libraries figma_mcp alcotest yojson str))
+
+; Coverage Wave 5B: Small gap closers (visual_verifier, common, telemetry)
+(test
+ (name test_misc_coverage_w5b)
+ (libraries figma_mcp alcotest yojson unix))
+
+; Coverage Wave 6: mcp_plugin_handlers.ml (success paths, deep branches)
+(test
+ (name test_plugin_handlers_w6)
+ (libraries figma_mcp alcotest yojson unix str base64))
+
+; Coverage Wave 6: mcp_tools.ml (uncovered branches — compact_json, chunkify, plugin stats, etc.)
+(test
+ (name test_mcp_tools_w6)
+ (libraries figma_mcp alcotest yojson str unix))
+
+; Coverage Wave 6: visual_verifier.ml (result_to_json, cleanup, SSIM logging, hints)
+(test
+ (name test_visual_w6)
+ (libraries figma_mcp alcotest yojson unix str))
+
+; Coverage Wave 6: figma_effects.ml (effect parsing, CSS generation, edge cases)
+(test
+ (name test_effects_w6)
+ (libraries figma_mcp alcotest yojson str))
+
+; Coverage Wave 7: figma_plugin_bridge.ml (protocol branches, message formatting)
+(test
+ (name test_plugin_bridge_w7)
+ (libraries figma_mcp alcotest yojson str unix))
+
+; Coverage Wave 7: server_metrics.ml + figma_effects.ml + figma_image_similarity.ml
+(test
+ (name test_metrics_effects_w7)
+ (libraries figma_mcp alcotest yojson str unix eio_main))
+
+; Coverage Wave 7: mcp_visual_handlers.ml (deep success paths, 80+ points)
+(test
+ (name test_visual_handlers_w7)
+ (libraries figma_mcp alcotest yojson unix str))
+
+; Coverage Wave 7: mcp_protocol.ml + figma_api.ml (pure JSON-RPC + URL helpers)
+(test
+ (name test_protocol_api_w7)
+ (libraries figma_mcp alcotest yojson str unix uri))
+
+; Coverage Wave 8: final push to 70%+ (mcp_tools, effects, visual_handlers, server_metrics)
+(test
+ (name test_final_push_w8)
+ (libraries figma_mcp alcotest yojson str unix eio_main))
+
+; Coverage Wave 9: mcp_protocol_eio.ml pure helpers, CORS branches, agent_request_json, webhook validation
+(test
+ (name test_protocol_eio_w9)
+ (libraries figma_mcp alcotest yojson str unix uri))
+
+; Coverage Wave 9: figma_api_eio.ml + mcp_protocol.ml (retry_after, logging, JSON serializers, edge cases)
+(test
+ (name test_api_protocol_w9)
+ (libraries figma_mcp alcotest yojson str unix uri))
+
+; Coverage Wave 9: figma_crawl.ml extra (render_node_tree, sanitize, progress_to_json)
+(test
+ (name test_crawl_extra_w9)
+ (libraries figma_mcp alcotest yojson str unix))
+
+; Coverage Wave 9: mcp_tools.ml + mcp_api_handlers.ml (handler branches, tool dispatch)
+(test
+ (name test_tools_handlers_w9)
+ (libraries figma_mcp alcotest yojson str unix))
+
+; Coverage Wave 9: visual_verifier.ml + figma_effects.ml + misc modules
+(test
+ (name test_verifier_misc_w9)
+ (libraries figma_mcp alcotest yojson str unix eio_main fmt))
+
+; Coverage Wave 10: figma_effects.ml (pure functions + effect handler branches)
+(test
+ (name test_effects_w10)
+ (libraries figma_mcp alcotest yojson str))
+
+; Coverage Wave 10: visual_verifier.ml (deep branch coverage — 189 missing points)
+(test
+ (name test_visual_verifier_w10)
+ (libraries figma_mcp alcotest yojson str unix))
+
+; Coverage Wave 10: mcp_visual_handlers.ml (remaining gaps — 237 missing points)
+(test
+ (name test_visual_handlers_w10)
+ (libraries figma_mcp alcotest yojson str unix))
+
+; Coverage Wave 10: Small gap closers (server_metrics, figma_cache, mcp_progress, safe_exec, image_similarity, mcp_protocol)
+(test
+ (name test_misc_w10)
+ (libraries figma_mcp alcotest yojson str unix eio_main))
+
+; Coverage Wave 11: figma_api_eio.ml (pure functions only — no HTTP I/O)
+(test
+ (name test_api_eio_w11)
+ (libraries figma_mcp alcotest yojson str))
+
+; Coverage Wave 11: figma_crawl.ml (pure JSON helpers + flatten_nodes)
+(test
+ (name test_crawl_w11)
+ (libraries figma_mcp alcotest yojson str))
+
+; Coverage Wave 11: mcp_protocol_eio.ml (pure helpers — CORS, SSE, CSV, validation)
+(test
+ (name test_protocol_eio_w11)
+ (libraries figma_mcp alcotest yojson str uri unix))
+
+; Coverage Wave 11: visual_verifier.ml + figma_effects.ml (remaining pure gaps)
+(test
+ (name test_verifier_effects_w11)
+ (libraries figma_mcp alcotest yojson str unix))

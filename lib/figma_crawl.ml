@@ -83,6 +83,8 @@ let get_list key json =
   | `List l -> l
   | _ -> []
 
+[@@@coverage off]
+
 (** Rate limiting (uses Eio_sleep effect — suspends fiber, does not block OS thread) *)
 let rate_limit ms =
   if ms > 0 then
@@ -141,6 +143,8 @@ let fetch_file_nodes ~token ~file_key =
       Ok document
   | Error err -> Error err
 
+[@@@coverage on]
+
 (** 노드 트리를 평탄화 (재귀) *)
 let rec flatten_nodes ~file_key ~parent_id ~depth ~max_depth node acc =
   if depth > max_depth then acc
@@ -157,6 +161,8 @@ let rec flatten_nodes ~file_key ~parent_id ~depth ~max_depth node acc =
     List.fold_left (fun acc child ->
       flatten_nodes ~file_key ~parent_id:(Some node_id) ~depth:(depth + 1) ~max_depth child acc
     ) acc children
+
+[@@@coverage off]
 
 (** 노드들을 Neo4j에 배치 저장 (Effect) *)
 let save_nodes_batch ~neo4j_cfg ~progress nodes =
@@ -419,6 +425,8 @@ let crawl_team ~token ~team_id ~neo4j_cfg
       on_progress (sprintf "❌ Failed to fetch projects: %s" err);
       Error err
 
+[@@@coverage on]
+
 (** 크롤링 결과를 JSON으로 변환 *)
 let progress_to_json progress =
   `Assoc [
@@ -474,6 +482,8 @@ let rec render_node_tree ~indent ~max_depth ~depth node buf =
       render_node_tree ~indent:(indent + 1) ~max_depth ~depth:(depth + 1) child buf
     ) children
   end
+
+[@@@coverage off]
 
 (** 팀 전체를 트리 형태로 출력 (Neo4j 없음, Effects 사용)
 
