@@ -69,6 +69,11 @@
  (name test_early_stop)
  (libraries figma_mcp alcotest yojson str fmt))
 
+; Extra Coverage: figma_early_stop.ml (dead branch hunting)
+(test
+ (name test_early_stop_coverage)
+ (libraries figma_mcp alcotest yojson str fmt))
+
 ; OKLab 검증 테스트 (Björn Ottosson 2020 참조값)
 (test
  (name test_oklab)
@@ -182,6 +187,11 @@
  (name test_compare_regions_security)
  (libraries figma_mcp alcotest yojson))
 
+; Coverage: figma_parser.ml + figma_config.ml (comprehensive branch coverage)
+(test
+ (name test_parser_config_coverage)
+ (libraries figma_mcp alcotest yojson unix))
+
 ; Vision compare input safety checks (reference path validation)
 (test
  (name test_vision_compare_security)
@@ -284,3 +294,18 @@
 (test
  (name test_visual_handlers_effects)
  (libraries figma_mcp alcotest yojson unix str))
+
+; Coverage Wave 3: figma_codegen.ml uncovered branches (93% -> 97%+)
+(test
+ (name test_codegen_coverage_w3)
+ (libraries figma_mcp alcotest yojson str))
+
+; Coverage: semantic_mapper.ml (uncovered branches, composites, edge cases — 85%+ target)
+(test
+ (name test_semantic_mapper_coverage)
+ (libraries figma_mcp alcotest str))
+
+; Extra Coverage Tests for mcp_tools.ml (uncovered branches)
+(test
+ (name test_mcp_tools_extra)
+ (libraries figma_mcp alcotest yojson str unix))
