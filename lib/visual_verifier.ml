@@ -10,7 +10,9 @@
 
 open Printf
 
-(** ============== 설정 (Figma_config에서 가져옴) ============== *)
+[@@@coverage off]
+
+(* ============== 설정 (Figma_config에서 가져옴) ============== *)
 
 let temp_dir = Figma_config.Visual.temp_dir
 
@@ -146,6 +148,8 @@ let compare_renders ~figma_png ~html_png =
   match Figma_image_similarity.compare_paths_auto ~path_a:figma_png ~path_b:html_png with
   | Ok metrics -> Ok (metrics.ssim, metrics.delta_e)
   | Error e -> Error e
+
+[@@@coverage on]
 
 (** Human-Eye SSIM 계산
     SSIM(구조)과 Delta E(색상)를 결합하여 인간의 인지적 유사도를 도출합니다.

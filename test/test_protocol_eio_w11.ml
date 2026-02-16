@@ -159,22 +159,22 @@ let test_mp_exact_default_port () =
   check_b "exact default" true
     (Cors.matches_pattern
        (Origin {scheme="https";host="e.com";port=None})
-       (Exact {scheme="https";host="e.com";port=443}))
+       (Exact {scheme="https";host="e.com";port=Some 443}))
 let test_mp_exact_host_mismatch () =
   check_b "host" false
     (Cors.matches_pattern
        (Origin {scheme="https";host="other.com";port=None})
-       (Exact {scheme="https";host="e.com";port=443}))
+       (Exact {scheme="https";host="e.com";port=Some 443}))
 let test_mp_exact_scheme_mismatch () =
   check_b "scheme" false
     (Cors.matches_pattern
        (Origin {scheme="http";host="e.com";port=None})
-       (Exact {scheme="https";host="e.com";port=443}))
+       (Exact {scheme="https";host="e.com";port=Some 443}))
 let test_mp_exact_port_mismatch () =
   check_b "port" false
     (Cors.matches_pattern
        (Origin {scheme="https";host="e.com";port=Some 8080})
-       (Exact {scheme="https";host="e.com";port=443}))
+       (Exact {scheme="https";host="e.com";port=Some 443}))
 let test_mp_any_port_match () =
   check_b "any_port ok" true
     (Cors.matches_pattern
@@ -364,19 +364,19 @@ let with_env name value f =
   result
 
 let test_coa_star () =
-  with_env "FIGMA_MCP_CORS_ORIGINS" "*" (fun () ->
+  with_env "FIGMA_MCP_CORS_ALLOWED_ORIGINS" "*" (fun () ->
     check_b "star" true (Cors.origin_allowed "https://example.com"))
 
 let test_coa_specific () =
-  with_env "FIGMA_MCP_CORS_ORIGINS" "https://example.com" (fun () ->
+  with_env "FIGMA_MCP_CORS_ALLOWED_ORIGINS" "https://example.com" (fun () ->
     check_b "specific" true (Cors.origin_allowed "https://example.com"))
 
 let test_coa_mismatch () =
-  with_env "FIGMA_MCP_CORS_ORIGINS" "https://example.com" (fun () ->
+  with_env "FIGMA_MCP_CORS_ALLOWED_ORIGINS" "https://example.com" (fun () ->
     check_b "mismatch" false (Cors.origin_allowed "https://other.com"))
 
 let test_coa_invalid () =
-  with_env "FIGMA_MCP_CORS_ORIGINS" "*" (fun () ->
+  with_env "FIGMA_MCP_CORS_ALLOWED_ORIGINS" "*" (fun () ->
     check_b "invalid" false (Cors.origin_allowed "not-a-url"))
 
 (* ---- Cors.parse_origin_value ---- *)
@@ -410,7 +410,7 @@ let test_cpp_any_port () =
    | Some (Any_port {scheme="https";host="e.com"}) -> () | _ -> Alcotest.fail "any_port")
 let test_cpp_exact () =
   (match Cors.parse_pattern "https://e.com:443" with
-   | Some (Exact {scheme="https";host="e.com";port=443}) -> () | _ -> Alcotest.fail "exact")
+   | Some (Exact {scheme="https";host="e.com";port=Some 443}) -> () | _ -> Alcotest.fail "exact")
 let test_cpp_invalid () =
   (match Cors.parse_pattern "not valid" with None -> () | _ -> Alcotest.fail "invalid")
 
