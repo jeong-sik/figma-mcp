@@ -449,3 +449,23 @@
 (test
  (name test_misc_w10)
  (libraries figma_mcp alcotest yojson str unix eio_main))
+
+; Coverage Wave 11: figma_api_eio.ml (pure functions only — no HTTP I/O)
+(test
+ (name test_api_eio_w11)
+ (libraries figma_mcp alcotest yojson str))
+
+; Coverage Wave 11: figma_crawl.ml (pure JSON helpers + flatten_nodes)
+(test
+ (name test_crawl_w11)
+ (libraries figma_mcp alcotest yojson str))
+
+; Coverage Wave 11: mcp_protocol_eio.ml (pure helpers — CORS, SSE, CSV, validation)
+(test
+ (name test_protocol_eio_w11)
+ (libraries figma_mcp alcotest yojson str uri unix))
+
+; Coverage Wave 11: visual_verifier.ml + figma_effects.ml (remaining pure gaps)
+(test
+ (name test_verifier_effects_w11)
+ (libraries figma_mcp alcotest yojson str unix))
