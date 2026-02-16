@@ -380,4 +380,22 @@
  (name test_effects_w6)
  (libraries figma_mcp alcotest yojson str))
 
+; Coverage Wave 7: figma_plugin_bridge.ml (protocol branches, message formatting)
+(test
+ (name test_plugin_bridge_w7)
+ (libraries figma_mcp alcotest yojson str unix))
 
+; Coverage Wave 7: server_metrics.ml + figma_effects.ml + figma_image_similarity.ml
+(test
+ (name test_metrics_effects_w7)
+ (libraries figma_mcp alcotest yojson str unix eio_main))
+
+; Coverage Wave 7: mcp_visual_handlers.ml (deep success paths, 80+ points)
+(test
+ (name test_visual_handlers_w7)
+ (libraries figma_mcp alcotest yojson unix str))
+
+; Coverage Wave 7: mcp_protocol.ml + figma_api.ml (pure JSON-RPC + URL helpers)
+(test
+ (name test_protocol_api_w7)
+ (libraries figma_mcp alcotest yojson str unix uri))
