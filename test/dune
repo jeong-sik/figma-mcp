@@ -334,3 +334,28 @@
 (test
  (name test_plugin_w4)
  (libraries figma_mcp alcotest yojson str unix))
+
+; Coverage Wave 5: mcp_protocol_eio.ml CORS + pure helpers
+(test
+ (name test_protocol_cors_w5)
+ (libraries figma_mcp alcotest yojson str uri unix))
+
+; Coverage Wave 5: mcp_protocol_eio.ml agent queue (Eio.Mutex tests)
+(test
+ (name test_protocol_agent_w5)
+ (libraries figma_mcp alcotest yojson eio_main unix))
+
+; Coverage Wave 5: mcp_protocol_eio.ml semantic analysis + code generation
+(test
+ (name test_protocol_codegen_w5)
+ (libraries figma_mcp alcotest yojson))
+
+; Coverage Wave 5: figma_api_eio.ml + figma_effects.ml remaining gaps
+(test
+ (name test_api_effects_w5)
+ (libraries figma_mcp alcotest yojson str))
+
+; Coverage Wave 5B: Small gap closers (visual_verifier, common, telemetry)
+(test
+ (name test_misc_coverage_w5b)
+ (libraries figma_mcp alcotest yojson unix))
