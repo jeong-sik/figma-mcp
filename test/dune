@@ -359,3 +359,25 @@
 (test
  (name test_misc_coverage_w5b)
  (libraries figma_mcp alcotest yojson unix))
+
+; Coverage Wave 6: mcp_plugin_handlers.ml (success paths, deep branches)
+(test
+ (name test_plugin_handlers_w6)
+ (libraries figma_mcp alcotest yojson unix str base64))
+
+; Coverage Wave 6: mcp_tools.ml (uncovered branches — compact_json, chunkify, plugin stats, etc.)
+(test
+ (name test_mcp_tools_w6)
+ (libraries figma_mcp alcotest yojson str unix))
+
+; Coverage Wave 6: visual_verifier.ml (result_to_json, cleanup, SSIM logging, hints)
+(test
+ (name test_visual_w6)
+ (libraries figma_mcp alcotest yojson unix str))
+
+; Coverage Wave 6: figma_effects.ml (effect parsing, CSS generation, edge cases)
+(test
+ (name test_effects_w6)
+ (libraries figma_mcp alcotest yojson str))
+
+
