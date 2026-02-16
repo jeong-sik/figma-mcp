@@ -429,3 +429,23 @@
 (test
  (name test_verifier_misc_w9)
  (libraries figma_mcp alcotest yojson str unix eio_main fmt))
+
+; Coverage Wave 10: figma_effects.ml (pure functions + effect handler branches)
+(test
+ (name test_effects_w10)
+ (libraries figma_mcp alcotest yojson str))
+
+; Coverage Wave 10: visual_verifier.ml (deep branch coverage — 189 missing points)
+(test
+ (name test_visual_verifier_w10)
+ (libraries figma_mcp alcotest yojson str unix))
+
+; Coverage Wave 10: mcp_visual_handlers.ml (remaining gaps — 237 missing points)
+(test
+ (name test_visual_handlers_w10)
+ (libraries figma_mcp alcotest yojson str unix))
+
+; Coverage Wave 10: Small gap closers (server_metrics, figma_cache, mcp_progress, safe_exec, image_similarity, mcp_protocol)
+(test
+ (name test_misc_w10)
+ (libraries figma_mcp alcotest yojson str unix eio_main))
