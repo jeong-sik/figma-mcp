@@ -469,3 +469,26 @@
 (test
  (name test_verifier_effects_w11)
  (libraries figma_mcp alcotest yojson str unix))
+
+; Coverage A5 push: server_metrics, protocol_eio, similarity
+(test
+ (name test_server_metrics_a5)
+ (libraries figma_mcp alcotest yojson str))
+
+(test
+ (name test_protocol_a5)
+ (libraries figma_mcp alcotest yojson str))
+
+(test
+ (name test_similarity_a5)
+ (libraries figma_mcp alcotest))
+
+; Coverage A5 push: mcp_tools.ml handler functions (270 uncovered points)
+(test
+ (name test_tools_a5)
+ (libraries figma_mcp alcotest yojson str unix))
+
+; Coverage A5 push: html_metrics.ml (remaining branch coverage — malformed CSS, parse bg_nodes)
+(test
+ (name test_html_metrics_a5)
+ (libraries figma_mcp alcotest yojson unix))
