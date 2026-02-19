@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-02-19
+
+### Changed
+- Decompose `mcp_protocol_eio.ml` into 5 modules: `mcp_cors.ml`, `mcp_http_helpers.ml`, `mcp_agent_queue.ml`, `mcp_sse_transport.ml`, `mcp_figma_tool_handlers.ml` — main module reduced from 4,007 to 1,074 LOC (#114)
+- Replace 6 runtime `failwith` calls with typed `Result.Error` values (#110)
+
+### Added
+- Phase A5 coverage push: 261 new tests across 5 files (#115)
+- bisect_ppx campaign: coverage from 51.1% to 87.99% (#113)
+- Coverage wave 3: 5 test files, 5,186 lines, 165 new tests (#111)
+- Coverage wave 4: 5 test files, 4,613 lines, 276 new tests (#112)
+- README updated to reflect v0.7.3 state (#242c03d)
+
+### Fixed
+- Flaky test fixes and resilience/early_stop coverage improvements (#109)
+
 ## [0.7.3] - 2026-02-14
 
 ### Added
