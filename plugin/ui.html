@@ -575,6 +575,189 @@
       }
       .stat-v { font-size: 12px; font-weight: 600; display: block; }
       .stat-l { font-size: 8px; color: var(--text-muted); text-transform: uppercase; }
+
+      /* Quality Panel Styles */
+      .quality-panel {
+        background: var(--bg);
+        border: 1px solid var(--border);
+        border-radius: 4px;
+        padding: 8px;
+        margin-top: 8px;
+      }
+      .quality-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 8px;
+      }
+      .quality-title {
+        font-size: 10px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        color: var(--text-muted);
+      }
+      .quality-score {
+        font-size: 16px;
+        font-weight: 700;
+        color: var(--success);
+      }
+      .quality-metrics {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+      .quality-metric {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+      }
+      .quality-metric-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        font-size: 9px;
+      }
+      .quality-metric-name { color: var(--text-muted); }
+      .quality-metric-value { font-weight: 600; }
+      .quality-bar {
+        height: 4px;
+        background: var(--border);
+        border-radius: 2px;
+        overflow: hidden;
+      }
+      .quality-bar-fill {
+        height: 100%;
+        border-radius: 2px;
+        transition: width 0.3s ease;
+      }
+      .quality-bar-fill.excellent { background: var(--success); }
+      .quality-bar-fill.good { background: #22c55e; }
+      .quality-bar-fill.moderate { background: var(--warning); }
+      .quality-bar-fill.poor { background: var(--error); }
+
+      /* Code Preview Styles */
+      .code-preview {
+        background: var(--bg);
+        border: 1px solid var(--border);
+        border-radius: 4px;
+        margin-top: 8px;
+        overflow: hidden;
+      }
+      .code-preview-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 6px 8px;
+        background: var(--bg-secondary);
+        border-bottom: 1px solid var(--border);
+      }
+      .code-preview-title {
+        font-size: 10px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        color: var(--text-muted);
+      }
+      .code-preview-actions {
+        display: flex;
+        gap: 4px;
+      }
+      .code-preview-content {
+        max-height: 200px;
+        overflow: auto;
+        background: #1e1e1e;
+        color: #d4d4d4;
+      }
+      .code-block {
+        font-family: "SF Mono", Monaco, "Cascadia Code", monospace;
+        font-size: 10px;
+        line-height: 1.5;
+        padding: 8px;
+        margin: 0;
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+      .code-block:empty::before {
+        content: "/* CSS will appear here... */";
+        color: #6b7280;
+      }
+      /* Basic syntax highlighting */
+      .code-keyword { color: #c586c0; }
+      .code-property { color: #9cdcfe; }
+      .code-value { color: #ce9178; }
+      .code-comment { color: #6a9955; }
+      .code-selector { color: #d7ba7d; }
+
+      /* Export Tokens Styles */
+      .export-tokens {
+        background: var(--bg);
+        border: 1px solid var(--border);
+        border-radius: 4px;
+        padding: 8px;
+        margin-top: 8px;
+      }
+      .export-tokens-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 8px;
+      }
+      .export-tokens-title {
+        font-size: 10px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        color: var(--text-muted);
+      }
+      .export-format-select {
+        font-size: 9px;
+        padding: 2px 4px;
+        border: 1px solid var(--border);
+        border-radius: 3px;
+        background: var(--bg-secondary);
+        color: var(--text);
+      }
+      .export-tokens-content {
+        max-height: 150px;
+        overflow: auto;
+        background: var(--bg-secondary);
+        border-radius: 4px;
+        padding: 6px;
+        font-family: "SF Mono", Monaco, monospace;
+        font-size: 9px;
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+      .export-tokens-content:empty::before {
+        content: "Tokens will appear here...";
+        color: var(--text-muted);
+      }
+      .export-tokens-actions {
+        display: flex;
+        gap: 6px;
+        margin-top: 8px;
+      }
+      .token-category {
+        margin-bottom: 8px;
+      }
+      .token-category-title {
+        font-size: 9px;
+        font-weight: 600;
+        color: var(--text-muted);
+        margin-bottom: 4px;
+        text-transform: uppercase;
+      }
+      .token-item {
+        display: flex;
+        justify-content: space-between;
+        padding: 2px 0;
+        font-size: 9px;
+        border-bottom: 1px solid var(--border);
+      }
+      .token-item:last-child { border-bottom: none; }
+      .token-name { color: var(--text-muted); }
+      .token-value { font-weight: 500; }
     </style>
   </head>
   <body>
@@ -934,6 +1117,119 @@
         </div>
       </div>
 
+      <!-- Quality Panel (SSIM/IoU/Color) -->
+      <div class="section" id="qualitySection" style="display:none;">
+        <div class="section-header" id="qualityHeader">
+          <span class="section-left">
+            <span>📊 Quality Metrics</span>
+            <span class="badge" id="qualityBadge">-</span>
+          </span>
+          <div class="section-actions">
+            <span class="section-action" id="refreshQuality" title="Refresh">🔄</span>
+            <span class="section-action" id="toggleQuality">▼</span>
+          </div>
+        </div>
+        <div class="section-content" id="qualityContent">
+          <div class="quality-panel">
+            <div class="quality-header">
+              <span class="quality-title">Overall Quality</span>
+              <span class="quality-score" id="overallQualityScore">--%</span>
+            </div>
+            <div class="quality-metrics">
+              <div class="quality-metric">
+                <div class="quality-metric-header">
+                  <span class="quality-metric-name">SSIM (Structure)</span>
+                  <span class="quality-metric-value" id="ssimValue">--</span>
+                </div>
+                <div class="quality-bar">
+                  <div class="quality-bar-fill" id="ssimBar" style="width:0%"></div>
+                </div>
+              </div>
+              <div class="quality-metric">
+                <div class="quality-metric-header">
+                  <span class="quality-metric-name">IoU (Layout)</span>
+                  <span class="quality-metric-value" id="iouValue">--</span>
+                </div>
+                <div class="quality-bar">
+                  <div class="quality-bar-fill" id="iouBar" style="width:0%"></div>
+                </div>
+              </div>
+              <div class="quality-metric">
+                <div class="quality-metric-header">
+                  <span class="quality-metric-name">Color Similarity</span>
+                  <span class="quality-metric-value" id="colorValue">--</span>
+                </div>
+                <div class="quality-bar">
+                  <div class="quality-bar-fill" id="colorBar" style="width:0%"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Code Preview (CSS) -->
+      <div class="section" id="codePreviewSection" style="display:none;">
+        <div class="section-header" id="codePreviewHeader">
+          <span class="section-left">
+            <span>💻 Code Preview</span>
+          </span>
+          <div class="section-actions">
+            <select id="codePreviewFormat" class="platform-select" style="font-size:9px;padding:2px 4px;">
+              <option value="css">CSS</option>
+              <option value="scss">SCSS</option>
+              <option value="tailwind">Tailwind</option>
+            </select>
+            <span class="section-action" id="toggleCodePreview">▼</span>
+          </div>
+        </div>
+        <div class="section-content" id="codePreviewContent">
+          <div class="code-preview">
+            <div class="code-preview-header">
+              <span class="code-preview-title">Generated CSS</span>
+              <div class="code-preview-actions">
+                <button class="btn-sm btn-secondary" id="copyCodePreviewBtn" title="Copy">📋</button>
+                <button class="btn-sm btn-primary" id="refreshCodePreviewBtn" title="Refresh">🔄</button>
+              </div>
+            </div>
+            <div class="code-preview-content">
+              <pre class="code-block" id="codePreviewBlock"></pre>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Export Tokens -->
+      <div class="section" id="exportTokensSection" style="display:none;">
+        <div class="section-header" id="exportTokensHeader">
+          <span class="section-left">
+            <span>📦 Export Tokens</span>
+            <span class="badge" id="exportTokensCount">0</span>
+          </span>
+          <div class="section-actions">
+            <select id="exportFormat" class="export-format-select">
+              <option value="json">JSON</option>
+              <option value="css">CSS Variables</option>
+              <option value="scss">SCSS Variables</option>
+            </select>
+            <span class="section-action" id="toggleExportTokens">▼</span>
+          </div>
+        </div>
+        <div class="section-content" id="exportTokensContent">
+          <div class="export-tokens">
+            <div class="export-tokens-header">
+              <span class="export-tokens-title">Extracted Tokens</span>
+            </div>
+            <div class="export-tokens-content" id="exportTokensPreview"></div>
+            <div class="export-tokens-actions">
+              <button class="btn-sm btn-secondary" id="refreshTokensBtn">🔄 Refresh</button>
+              <button class="btn-sm btn-primary" id="downloadTokensBtn">📥 Download</button>
+              <button class="btn-sm btn-secondary" id="copyTokensBtn">📋 Copy</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
     </div><!-- /tab-tools -->
 
     <!-- Tab: Direct AI -->
@@ -1062,6 +1358,8 @@
       var historyData = $("historyData"), historyCountBadge = $("historyCount");
       var tokenGrid = $("tokenGrid"), tokenCountBadge = $("tokenCount");
       var quickSection = $("quickSection"), layoutSection = $("layoutSection"), historySection = $("historySection"), tokensSection = $("tokensSection");
+      // New sections
+      var qualitySection = $("qualitySection"), codePreviewSection = $("codePreviewSection"), exportTokensSection = $("exportTokensSection");
       var llmUseSelectionImageToggle = $("llmUseSelectionImage"), llmAutoApplyToggle = $("llmAutoApply");
       var llmCaptureScaleInput = $("llmCaptureScale"), llmFeedbackLoopsInput = $("llmFeedbackLoops");
       var llmStatus = $("llmStatus");
@@ -1757,6 +2055,10 @@
         if (typeof multiPlatformSection !== "undefined") multiPlatformSection.style.display = connected ? "block" : "none";
         if (typeof visionSection !== "undefined") visionSection.style.display = connected ? "block" : "none";
         if (typeof storybookSection !== "undefined") storybookSection.style.display = connected ? "block" : "none";
+        // New sections
+        if (typeof qualitySection !== "undefined") qualitySection.style.display = connected ? "block" : "none";
+        if (typeof codePreviewSection !== "undefined") codePreviewSection.style.display = connected ? "block" : "none";
+        if (typeof exportTokensSection !== "undefined") exportTokensSection.style.display = connected ? "block" : "none";
         sessionBar.style.display = connected ? "flex" : "none";
         if (connected) {
           sessionStart = Date.now();
@@ -3061,6 +3363,435 @@
           syncLlmStateFromInputs(true);
         };
       }
+
+      // ============== Quality Panel Functions ==============
+      var currentQualityMetrics = { ssim: 0, iou: 0, color: 0 };
+
+      function updateQualityPanel(metrics) {
+        if (!metrics) return;
+        currentQualityMetrics = {
+          ssim: metrics.ssim || 0,
+          iou: metrics.iou || 0,
+          color: metrics.color || 0
+        };
+
+        var ssimValue = $("ssimValue");
+        var iouValue = $("iouValue");
+        var colorValue = $("colorValue");
+        var ssimBar = $("ssimBar");
+        var iouBar = $("iouBar");
+        var colorBar = $("colorBar");
+        var overallScore = $("overallQualityScore");
+        var qualityBadge = $("qualityBadge");
+
+        if (ssimValue) ssimValue.textContent = (currentQualityMetrics.ssim * 100).toFixed(1) + "%";
+        if (iouValue) iouValue.textContent = (currentQualityMetrics.iou * 100).toFixed(1) + "%";
+        if (colorValue) colorValue.textContent = (currentQualityMetrics.color * 100).toFixed(1) + "%";
+
+        if (ssimBar) {
+          ssimBar.style.width = (currentQualityMetrics.ssim * 100) + "%";
+          ssimBar.className = "quality-bar-fill " + getQualityClass(currentQualityMetrics.ssim);
+        }
+        if (iouBar) {
+          iouBar.style.width = (currentQualityMetrics.iou * 100) + "%";
+          iouBar.className = "quality-bar-fill " + getQualityClass(currentQualityMetrics.iou);
+        }
+        if (colorBar) {
+          colorBar.style.width = (currentQualityMetrics.color * 100) + "%";
+          colorBar.className = "quality-bar-fill " + getQualityClass(currentQualityMetrics.color);
+        }
+
+        var overall = (currentQualityMetrics.ssim + currentQualityMetrics.iou + currentQualityMetrics.color) / 3;
+        if (overallScore) {
+          overallScore.textContent = (overall * 100).toFixed(0) + "%";
+          overallScore.style.color = overall >= 0.9 ? "var(--success)" : overall >= 0.7 ? "var(--warning)" : "var(--error)";
+        }
+        if (qualityBadge) {
+          qualityBadge.textContent = (overall * 100).toFixed(0) + "%";
+        }
+      }
+
+      function getQualityClass(value) {
+        if (value >= 0.95) return "excellent";
+        if (value >= 0.85) return "good";
+        if (value >= 0.7) return "moderate";
+        return "poor";
+      }
+
+      function fetchQualityMetrics() {
+        if (!channelId || !serverUrl) return;
+        postCommandAndWait({ name: "get_quality_metrics", payload: {} }, 10000)
+          .then(function(response) {
+            if (response && response.ok && response.payload) {
+              updateQualityPanel(response.payload);
+              addLog("quality", "Metrics updated", true);
+            }
+          })
+          .catch(function(e) {
+            addLog("quality", "Failed: " + e.message, false);
+          });
+      }
+
+      // ============== Code Preview Functions ==============
+      function generateCSS(node) {
+        if (!node) return "/* No node selected */";
+        var css = [];
+        var className = node.name.toLowerCase().replace(/[^a-z0-9]/g, "-").replace(/-+/g, "-");
+
+        css.push("." + className + " {");
+        css.push("  /* Dimensions */");
+        css.push("  width: " + Math.round(node.width) + "px;");
+        css.push("  height: " + Math.round(node.height) + "px;");
+
+        if (node.x !== undefined || node.y !== undefined) {
+          css.push("  position: absolute;");
+          if (node.x !== undefined) css.push("  left: " + Math.round(node.x) + "px;");
+          if (node.y !== undefined) css.push("  top: " + Math.round(node.y) + "px;");
+        }
+
+        if (node.fills && Array.isArray(node.fills) && node.fills.length > 0) {
+          var fill = node.fills[0];
+          if (fill.color) {
+            css.push("\n  /* Background */");
+            css.push("  background-color: " + fill.color + ";");
+          }
+          if (fill.opacity !== undefined && fill.opacity < 1) {
+            css.push("  opacity: " + fill.opacity.toFixed(2) + ";");
+          }
+        }
+
+        if (node.cornerRadius) {
+          css.push("\n  /* Border Radius */");
+          css.push("  border-radius: " + node.cornerRadius + "px;");
+        }
+
+        if (node.strokes && Array.isArray(node.strokes) && node.strokes.length > 0) {
+          var stroke = node.strokes[0];
+          if (stroke.color) {
+            css.push("\n  /* Border */");
+            css.push("  border: 1px solid " + stroke.color + ";");
+          }
+        }
+
+        if (node.autoLayout) {
+          css.push("\n  /* Layout */");
+          css.push("  display: flex;");
+          css.push("  flex-direction: " + (node.autoLayout.mode === "HORIZONTAL" ? "row" : "column") + ";");
+          if (node.autoLayout.spacing) {
+            css.push("  gap: " + node.autoLayout.spacing + "px;");
+          }
+        }
+
+        if (node.opacity !== undefined && node.opacity < 1) {
+          css.push("\n  /* Opacity */");
+          css.push("  opacity: " + node.opacity.toFixed(2) + ";");
+        }
+
+        css.push("}");
+        return css.join("\n");
+      }
+
+      function generateSCSS(node) {
+        var css = generateCSS(node);
+        // Convert to SCSS format (add nesting hints, variables)
+        return "// Design Tokens\n$color-primary: #0d99ff;\n\n" + css;
+      }
+
+      function generateTailwind(node) {
+        if (!node) return "<!-- No node selected -->";
+        var classes = [];
+
+        classes.push("w-" + Math.round(node.width / 4));
+        classes.push("h-" + Math.round(node.height / 4));
+
+        if (node.cornerRadius) {
+          var radius = node.cornerRadius;
+          if (radius <= 4) classes.push("rounded");
+          else if (radius <= 8) classes.push("rounded-lg");
+          else if (radius <= 16) classes.push("rounded-xl");
+          else classes.push("rounded-2xl");
+        }
+
+        if (node.fills && Array.isArray(node.fills) && node.fills.length > 0) {
+          var fill = node.fills[0];
+          if (fill.color) {
+            classes.push("bg-[" + fill.color + "]");
+          }
+        }
+
+        return '<div class="' + classes.join(" ") + '">\n  <!-- ' + node.name + ' -->\n</div>';
+      }
+
+      function updateCodePreview() {
+        var format = $("codePreviewFormat") ? $("codePreviewFormat").value : "css";
+        var block = $("codePreviewBlock");
+        if (!block) return;
+
+        if (!lastSelection || !lastSelection.nodes || lastSelection.nodes.length === 0) {
+          block.textContent = "/* Select a node to generate CSS */";
+          return;
+        }
+
+        var node = lastSelection.nodes[0];
+        var code;
+        switch (format) {
+          case "scss":
+            code = generateSCSS(node);
+            break;
+          case "tailwind":
+            code = generateTailwind(node);
+            break;
+          default:
+            code = generateCSS(node);
+        }
+        block.textContent = code;
+        addLog("code", "Preview updated (" + format + ")", true);
+      }
+
+      // ============== Export Tokens Functions ==============
+      var extractedTokens = { colors: [], typography: [], spacing: [], radii: [] };
+
+      function extractTokensFromSelection() {
+        extractedTokens = { colors: [], typography: [], spacing: [], radii: [] };
+        var colorSet = {};
+        var spacingSet = {};
+        var radiusSet = {};
+
+        function processNode(node) {
+          // Colors
+          if (node.fills && Array.isArray(node.fills)) {
+            node.fills.forEach(function(fill) {
+              if (fill.color && !colorSet[fill.color]) {
+                colorSet[fill.color] = true;
+                extractedTokens.colors.push({
+                  name: "color-" + extractedTokens.colors.length,
+                  value: fill.color
+                });
+              }
+            });
+          }
+
+          // Spacing
+          if (node.autoLayout && node.autoLayout.spacing) {
+            var sp = node.autoLayout.spacing;
+            if (!spacingSet[sp]) {
+              spacingSet[sp] = true;
+              extractedTokens.spacing.push({
+                name: "space-" + sp,
+                value: sp
+              });
+            }
+          }
+
+          // Radii
+          if (node.cornerRadius) {
+            var r = node.cornerRadius;
+            if (!radiusSet[r]) {
+              radiusSet[r] = true;
+              extractedTokens.radii.push({
+                name: "radius-" + r,
+                value: r
+              });
+            }
+          }
+
+          // Process children
+          if (node.children && Array.isArray(node.children)) {
+            node.children.forEach(processNode);
+          }
+        }
+
+        if (lastSelection && lastSelection.nodes) {
+          lastSelection.nodes.forEach(processNode);
+        }
+
+        updateExportTokensPreview();
+        return extractedTokens;
+      }
+
+      function tokensToJSON(tokens) {
+        return JSON.stringify(tokens, null, 2);
+      }
+
+      function tokensToCSS(tokens) {
+        var lines = [":root {"];
+        tokens.colors.forEach(function(c) {
+          lines.push("  --" + c.name + ": " + c.value + ";");
+        });
+        tokens.spacing.forEach(function(s) {
+          lines.push("  --" + s.name + ": " + s.value + "px;");
+        });
+        tokens.radii.forEach(function(r) {
+          lines.push("  --" + r.name + ": " + r.value + "px;");
+        });
+        lines.push("}");
+        return lines.join("\n");
+      }
+
+      function tokensToSCSS(tokens) {
+        var lines = [];
+        tokens.colors.forEach(function(c) {
+          lines.push("$" + c.name + ": " + c.value + ";");
+        });
+        tokens.spacing.forEach(function(s) {
+          lines.push("$" + s.name + ": " + s.value + "px;");
+        });
+        tokens.radii.forEach(function(r) {
+          lines.push("$" + r.name + ": " + r.value + "px;");
+        });
+        return lines.join("\n");
+      }
+
+      function updateExportTokensPreview() {
+        var format = $("exportFormat") ? $("exportFormat").value : "json";
+        var preview = $("exportTokensPreview");
+        var countBadge = $("exportTokensCount");
+        var total = extractedTokens.colors.length + extractedTokens.spacing.length + extractedTokens.radii.length;
+
+        if (countBadge) countBadge.textContent = total;
+
+        if (!preview) return;
+
+        if (total === 0) {
+          preview.textContent = "No tokens extracted. Select nodes and click Refresh.";
+          return;
+        }
+
+        var content;
+        switch (format) {
+          case "css":
+            content = tokensToCSS(extractedTokens);
+            break;
+          case "scss":
+            content = tokensToSCSS(extractedTokens);
+            break;
+          default:
+            content = tokensToJSON(extractedTokens);
+        }
+        preview.textContent = content;
+      }
+
+      function downloadTokens() {
+        var format = $("exportFormat") ? $("exportFormat").value : "json";
+        var content, filename, mimeType;
+
+        switch (format) {
+          case "css":
+            content = tokensToCSS(extractedTokens);
+            filename = "design-tokens.css";
+            mimeType = "text/css";
+            break;
+          case "scss":
+            content = tokensToSCSS(extractedTokens);
+            filename = "_design-tokens.scss";
+            mimeType = "text/x-scss";
+            break;
+          default:
+            content = tokensToJSON(extractedTokens);
+            filename = "design-tokens.json";
+            mimeType = "application/json";
+        }
+
+        var blob = new Blob([content], { type: mimeType });
+        var url = URL.createObjectURL(blob);
+        var a = document.createElement("a");
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        addLog("tokens", "Downloaded " + filename, true);
+      }
+
+      function copyTokens() {
+        var format = $("exportFormat") ? $("exportFormat").value : "json";
+        var content;
+
+        switch (format) {
+          case "css":
+            content = tokensToCSS(extractedTokens);
+            break;
+          case "scss":
+            content = tokensToSCSS(extractedTokens);
+            break;
+          default:
+            content = tokensToJSON(extractedTokens);
+        }
+
+        navigator.clipboard.writeText(content).then(function() {
+          addLog("tokens", "Copied to clipboard", true);
+        }).catch(function(e) {
+          addLog("tokens", "Copy failed: " + e.message, false);
+        });
+      }
+
+      // ============== Event Handlers for New Features ==============
+      // Quality Panel
+      if ($("refreshQuality")) {
+        $("refreshQuality").onclick = fetchQualityMetrics;
+      }
+      if ($("toggleQuality")) {
+        $("toggleQuality").onclick = function() {
+          var content = $("qualityContent");
+          if (content) content.classList.toggle("collapsed");
+        };
+      }
+
+      // Code Preview
+      if ($("copyCodePreviewBtn")) {
+        $("copyCodePreviewBtn").onclick = function() {
+          var code = $("codePreviewBlock") ? $("codePreviewBlock").textContent : "";
+          navigator.clipboard.writeText(code).then(function() {
+            addLog("code", "CSS copied to clipboard", true);
+          }).catch(function(e) {
+            addLog("code", "Copy failed: " + e.message, false);
+          });
+        };
+      }
+      if ($("refreshCodePreviewBtn")) {
+        $("refreshCodePreviewBtn").onclick = updateCodePreview;
+      }
+      if ($("toggleCodePreview")) {
+        $("toggleCodePreview").onclick = function() {
+          var content = $("codePreviewContent");
+          if (content) content.classList.toggle("collapsed");
+        };
+      }
+      if ($("codePreviewFormat")) {
+        $("codePreviewFormat").onchange = updateCodePreview;
+      }
+
+      // Export Tokens
+      if ($("refreshTokensBtn")) {
+        $("refreshTokensBtn").onclick = function() {
+          extractTokensFromSelection();
+          addLog("tokens", "Tokens extracted from selection", true);
+        };
+      }
+      if ($("downloadTokensBtn")) {
+        $("downloadTokensBtn").onclick = downloadTokens;
+      }
+      if ($("copyTokensBtn")) {
+        $("copyTokensBtn").onclick = copyTokens;
+      }
+      if ($("toggleExportTokens")) {
+        $("toggleExportTokens").onclick = function() {
+          var content = $("exportTokensContent");
+          if (content) content.classList.toggle("collapsed");
+        };
+      }
+      if ($("exportFormat")) {
+        $("exportFormat").onchange = updateExportTokensPreview;
+      }
+
+      // Update code preview when selection changes
+      var originalUpdateInspector = updateInspector;
+      updateInspector = function(nodes) {
+        originalUpdateInspector(nodes);
+        updateCodePreview();
+        extractTokensFromSelection();
+      };
 
       // Auto-connect if we have a saved server URL
       if (state.serverUrl) {
