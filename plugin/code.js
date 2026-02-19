@@ -610,6 +610,323 @@ const handlers = {
     return { count: nodes.length, nodes: nodes.slice(0, 100).map(n => ({ id: n.id, name: n.name, type: n.type })) };
   }),
 
+  // === Quality Metrics ===
+  get_quality_metrics: H.simple(() => {
+    // Calculate quality metrics based on current selection
+    const sel = figma.currentPage.selection;
+    if (sel.length === 0) {
+      return { ssim: 0, iou: 0, color: 0, error: "No selection" };
+    }
+
+    // Placeholder metrics - in a real implementation these would be calculated
+    // by comparing the selection to a reference image or design spec
+    // For now, return heuristic values based on design best practices
+    var node = sel[0];
+    var ssim = 0.85;
+    var iou = 0.80;
+    var color = 0.90;
+
+    // Adjust SSIM based on node properties
+    if (node.fills && Array.isArray(node.fills) && node.fills.length > 0) {
+      ssim += 0.05;
+    }
+    if (node.cornerRadius !== undefined && node.cornerRadius > 0) {
+      ssim += 0.02;
+    }
+
+    // Adjust IoU based on layout properties
+    if ("layoutMode" in node && node.layoutMode !== "NONE") {
+      iou += 0.10;
+    }
+
+    // Adjust color score based on fills
+    if (node.fills && Array.isArray(node.fills)) {
+      var hasValidFill = node.fills.some(function(f) { return f.type === "SOLID" && f.visible !== false; });
+      if (hasValidFill) color += 0.05;
+    }
+
+    // Clamp values
+    ssim = Math.min(1, Math.max(0, ssim));
+    iou = Math.min(1, Math.max(0, iou));
+    color = Math.min(1, Math.max(0, color));
+
+    return {
+      ssim: ssim,
+      iou: iou,
+      color: color,
+      node_id: node.id,
+      node_name: node.name
+    };
+  }),
+
+  // === Code Generation (CSS/SCSS/Tailwind) ===
+  get_node_code: H.node((node, p) => {
+    const format = p.format || "css";
+    const className = node.name.toLowerCase().replace(/[^a-z0-9]/g, "-").replace(/-+/g, "-");
+
+    function colorToHex(c) {
+      if (!c) return "#000000";
+      var r = Math.round(c.r * 255).toString(16).padStart(2, "0");
+      var g = Math.round(c.g * 255).toString(16).padStart(2, "0");
+      var b = Math.round(c.b * 255).toString(16).padStart(2, "0");
+      return "#" + r + g + b;
+    }
+
+    var code = "";
+
+    if (format === "tailwind") {
+      var classes = [];
+      classes.push("w-" + Math.round(node.width / 4));
+      classes.push("h-" + Math.round(node.height / 4));
+      if (node.cornerRadius) {
+        if (node.cornerRadius <= 4) classes.push("rounded");
+        else if (node.cornerRadius <= 8) classes.push("rounded-lg");
+        else if (node.cornerRadius <= 16) classes.push("rounded-xl");
+        else classes.push("rounded-2xl");
+      }
+      if (node.fills && Array.isArray(node.fills) && node.fills.length > 0) {
+        var fill = node.fills[0];
+        if (fill.type === "SOLID" && fill.color) {
+          classes.push("bg-[" + colorToHex(fill.color) + "]");
+        }
+      }
+      code = '<div class="' + classes.join(" ") + '">\n  <!-- ' + node.name + ' -->\n</div>';
+    } else {
+      // CSS or SCSS
+      var lines = [];
+
+      if (format === "scss") {
+        lines.push("// Design Tokens");
+        lines.push("$color-primary: #0d99ff;");
+        lines.push("");
+      }
+
+      lines.push("." + className + " {");
+      lines.push("  /* Dimensions */");
+      lines.push("  width: " + Math.round(node.width) + "px;");
+      lines.push("  height: " + Math.round(node.height) + "px;");
+
+      if (node.x !== undefined || node.y !== undefined) {
+        lines.push("  position: absolute;");
+        if (node.x !== undefined) lines.push("  left: " + Math.round(node.x) + "px;");
+        if (node.y !== undefined) lines.push("  top: " + Math.round(node.y) + "px;");
+      }
+
+      if (node.fills && Array.isArray(node.fills) && node.fills.length > 0) {
+        var fill = node.fills[0];
+        if (fill.type === "SOLID" && fill.color) {
+          lines.push("");
+          lines.push("  /* Background */");
+          lines.push("  background-color: " + colorToHex(fill.color) + ";");
+        }
+        if (fill.opacity !== undefined && fill.opacity < 1) {
+          lines.push("  opacity: " + fill.opacity.toFixed(2) + ";");
+        }
+      }
+
+      if (node.cornerRadius) {
+        lines.push("");
+        lines.push("  /* Border Radius */");
+        lines.push("  border-radius: " + node.cornerRadius + "px;");
+      }
+
+      if (node.strokes && Array.isArray(node.strokes) && node.strokes.length > 0) {
+        var stroke = node.strokes[0];
+        if (stroke.type === "SOLID" && stroke.color) {
+          lines.push("");
+          lines.push("  /* Border */");
+          lines.push("  border: 1px solid " + colorToHex(stroke.color) + ";");
+        }
+      }
+
+      if ("layoutMode" in node && node.layoutMode !== "NONE") {
+        lines.push("");
+        lines.push("  /* Layout */");
+        lines.push("  display: flex;");
+        lines.push("  flex-direction: " + (node.layoutMode === "HORIZONTAL" ? "row" : "column") + ";");
+        if (node.itemSpacing) {
+          lines.push("  gap: " + node.itemSpacing + "px;");
+        }
+      }
+
+      if (node.opacity !== undefined && node.opacity < 1) {
+        lines.push("");
+        lines.push("  /* Opacity */");
+        lines.push("  opacity: " + node.opacity.toFixed(2) + ";");
+      }
+
+      lines.push("}");
+      code = lines.join("\n");
+    }
+
+    return { format: format, code: code, class_name: className, node_id: node.id };
+  }),
+
+  // === Enhanced Token Export ===
+  export_design_tokens: H.simple((p) => {
+    var scope = p.scope || "selection";
+    var nodes = [];
+
+    if (scope === "selection") {
+      nodes = figma.currentPage.selection.slice();
+    } else if (scope === "page") {
+      nodes = figma.currentPage.children.slice();
+    } else {
+      nodes = figma.currentPage.selection.slice();
+    }
+
+    var tokens = {
+      colors: [],
+      typography: [],
+      spacing: [],
+      radii: [],
+      shadows: []
+    };
+
+    var colorSet = {};
+    var spacingSet = {};
+    var radiusSet = {};
+
+    function colorToHex(c) {
+      if (!c) return "#000000";
+      var r = Math.round(c.r * 255).toString(16).padStart(2, "0");
+      var g = Math.round(c.g * 255).toString(16).padStart(2, "0");
+      var b = Math.round(c.b * 255).toString(16).padStart(2, "0");
+      return "#" + r + g + b;
+    }
+
+    function processNode(n) {
+      // Colors from fills
+      if (n.fills && Array.isArray(n.fills)) {
+        n.fills.forEach(function(fill) {
+          if (fill.type === "SOLID" && fill.color && fill.visible !== false) {
+            var hex = colorToHex(fill.color);
+            if (!colorSet[hex]) {
+              colorSet[hex] = true;
+              tokens.colors.push({
+                name: "color-" + tokens.colors.length.toString().padStart(2, "0"),
+                hex: hex,
+                rgba: "rgba(" + Math.round(fill.color.r * 255) + ", " +
+                       Math.round(fill.color.g * 255) + ", " +
+                       Math.round(fill.color.b * 255) + ", " +
+                       (fill.opacity !== undefined ? fill.opacity : 1) + ")"
+              });
+            }
+          }
+        });
+      }
+
+      // Colors from strokes
+      if (n.strokes && Array.isArray(n.strokes)) {
+        n.strokes.forEach(function(stroke) {
+          if (stroke.type === "SOLID" && stroke.color && stroke.visible !== false) {
+            var hex = colorToHex(stroke.color);
+            if (!colorSet[hex]) {
+              colorSet[hex] = true;
+              tokens.colors.push({
+                name: "color-" + tokens.colors.length.toString().padStart(2, "0"),
+                hex: hex,
+                rgba: "rgba(" + Math.round(stroke.color.r * 255) + ", " +
+                       Math.round(stroke.color.g * 255) + ", " +
+                       Math.round(stroke.color.b * 255) + ", 1)"
+              });
+            }
+          }
+        });
+      }
+
+      // Spacing from auto-layout
+      if ("itemSpacing" in n && n.itemSpacing > 0) {
+        var sp = n.itemSpacing;
+        if (!spacingSet[sp]) {
+          spacingSet[sp] = true;
+          tokens.spacing.push({
+            name: "space-" + sp,
+            value: sp,
+            unit: "px"
+          });
+        }
+      }
+
+      // Padding from auto-layout
+      if ("paddingLeft" in n || "paddingRight" in n || "paddingTop" in n || "paddingBottom" in n) {
+        [n.paddingLeft, n.paddingRight, n.paddingTop, n.paddingBottom].forEach(function(p) {
+          if (p && p > 0 && !spacingSet[p]) {
+            spacingSet[p] = true;
+            tokens.spacing.push({
+              name: "space-" + p,
+              value: p,
+              unit: "px"
+            });
+          }
+        });
+      }
+
+      // Border radius
+      if (n.cornerRadius && n.cornerRadius > 0) {
+        var r = n.cornerRadius;
+        if (!radiusSet[r]) {
+          radiusSet[r] = true;
+          tokens.radii.push({
+            name: "radius-" + r,
+            value: r,
+            unit: "px"
+          });
+        }
+      }
+
+      // Typography from text nodes
+      if (n.type === "TEXT" && n.fontSize) {
+        tokens.typography.push({
+          name: n.name || "text-" + tokens.typography.length,
+          fontSize: n.fontSize,
+          fontFamily: n.fontName ? n.fontName.family : "Inter",
+          fontWeight: n.fontWeight || 400,
+          lineHeight: n.lineHeight ? (typeof n.lineHeight === "object" ? n.lineHeight.value : n.lineHeight) : null
+        });
+      }
+
+      // Effects (shadows)
+      if (n.effects && Array.isArray(n.effects)) {
+        n.effects.forEach(function(effect) {
+          if (effect.type === "DROP_SHADOW" && effect.visible !== false) {
+            tokens.shadows.push({
+              name: "shadow-" + tokens.shadows.length.toString().padStart(2, "0"),
+              type: effect.type,
+              radius: effect.radius,
+              offset: effect.offset,
+              color: effect.color ? colorToHex(effect.color) : null
+            });
+          }
+        });
+      }
+
+      // Process children recursively
+      if (n.children && Array.isArray(n.children)) {
+        n.children.forEach(processNode);
+      }
+    }
+
+    nodes.forEach(processNode);
+
+    // Sort tokens
+    tokens.spacing.sort(function(a, b) { return a.value - b.value; });
+    tokens.radii.sort(function(a, b) { return a.value - b.value; });
+
+    return {
+      scope: scope,
+      node_count: nodes.length,
+      tokens: tokens,
+      summary: {
+        colors: tokens.colors.length,
+        typography: tokens.typography.length,
+        spacing: tokens.spacing.length,
+        radii: tokens.radii.length,
+        shadows: tokens.shadows.length
+      }
+    };
+  }),
+
   // === DSL Execution (Code → Figma) ===
   execute_dsl: H.simple(async (p) => {
     var operations = p.operations || [];

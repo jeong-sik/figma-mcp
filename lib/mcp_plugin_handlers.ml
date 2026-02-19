@@ -544,7 +544,43 @@ let handle_plugin_delete_nodes args : (Yojson.Safe.t, string) result =
         Ok (make_text_content (Yojson.Safe.pretty_to_string response))
       end
 
-(** Subscribe to plugin events *)
+(** figma_get_quality_metrics 핸들러 - Plugin Bridge 통해 품질 메트릭 조회 *)
+let handle_get_quality_metrics args : (Yojson.Safe.t, string) result =
+  plugin_custom ~name:"get_quality_metrics" ~default_timeout:10000
+    ~validate:(fun args ->
+      (* node_id is optional - if not provided, plugin will use current selection *)
+      Ok ())
+    ~build_payload:(fun () args ->
+      let node_id = get_string "node_id" args in
+      `Assoc (match node_id with
+        | Some id -> [("node_id", `String id)]
+        | None -> []))
+    args
+
+(** figma_get_node_code 핸들러 - Plugin Bridge 통해 CSS/SCSS/Tailwind 코드 생성 *)
+let handle_get_node_code args : (Yojson.Safe.t, string) result =
+  plugin_custom ~name:"get_node_code" ~default_timeout:10000
+    ~validate:(fun args ->
+      (* node_id is optional - if not provided, plugin will use current selection *)
+      Ok ())
+    ~build_payload:(fun () args ->
+      let node_id = get_string "node_id" args in
+      let format = get_string "format" args |> Option.value ~default:"css" in
+      `Assoc ([
+        ("format", `String format);
+      ] @ match node_id with
+        | Some id -> [("node_id", `String id)]
+        | None -> []))
+    args
+
+(** figma_export_tokens_plugin 핸들러 - Plugin Bridge 통해 디자인 토큰 추출 *)
+let handle_export_tokens_plugin args : (Yojson.Safe.t, string) result =
+  plugin_simple ~name:"export_design_tokens" ~default_timeout:20000
+    ~build_payload:(fun args ->
+      let format = get_string "format" args |> Option.value ~default:"json" in
+      `Assoc [("format", `String format)])
+    args
+
 let handle_plugin_subscribe_events args : (Yojson.Safe.t, string) result =
   match resolve_channel_id args with
   | Error msg -> Error msg
