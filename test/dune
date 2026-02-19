@@ -492,3 +492,8 @@
 (test
  (name test_html_metrics_a5)
  (libraries figma_mcp alcotest yojson unix))
+
+; B2 IoU Integration Tests (academic reference values — CVPR 2019, AAAI 2020)
+(test
+ (name test_iou)
+ (libraries figma_mcp alcotest))
