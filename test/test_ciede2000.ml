@@ -10,8 +10,14 @@
 
 open Figma_similarity
 
-(** CIE 공식 테스트 데이터 (Lab 값, 기대 ΔE) *)
-let cie_test_data = [
+(** 허용 오차 (CIE 권장: 0.0001, 실용적 여유: 0.001) *)
+let tolerance = 0.001
+
+(** ============================================================
+    B1: CIE 공식 테스트 데이터 (Lab 값, 기대 ΔE)
+    Sharma et al. (2005) - 34 테스트 케이스
+    ============================================================ *)
+let cie_official_test_data = [
   (* L1, a1, b1, L2, a2, b2, expected ΔE00 *)
   (* 테스트 쌍 1-10: 기본 케이스 *)
   (50.0, 2.6772, -79.7751, 50.0, 0.0, -82.7485, 2.0425);
@@ -54,8 +60,56 @@ let cie_test_data = [
   (2.0776, 0.0795, -1.135, 0.9033, -0.0636, -0.5514, 0.9082);
 ]
 
-(** 허용 오차 (CIE 권장: 0.0001) *)
-let tolerance = 0.001
+(** ============================================================
+    B1: 동일 색상 테스트 (ΔE = 0)
+    ============================================================ *)
+let identical_color_tests = [
+  (* 중간 회색 *)
+  (50.0, 0.0, 0.0, 50.0, 0.0, 0.0, 0.0);
+  (* 흰색 *)
+  (100.0, 0.0, 0.0, 100.0, 0.0, 0.0, 0.0);
+  (* 검정 *)
+  (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
+  (* 빨강 *)
+  (53.23, 80.11, 67.22, 53.23, 80.11, 67.22, 0.0);
+  (* 녹색 *)
+  (87.74, -86.18, 83.18, 87.74, -86.18, 83.18, 0.0);
+  (* 파랑 *)
+  (32.30, 79.20, -107.86, 32.30, 79.20, -107.86, 0.0);
+]
+
+(** ============================================================
+    B1: JND (Just Noticeable Difference) 임계값 테스트
+    ΔE ≈ 2.3이 일반적인 JND 임계값으로 알려져 있음
+
+    참고: 아래 값들은 실제 CIEDE2000 계산 결과입니다.
+    Sharma 2005 테이블 2에 따르면 ΔE ≈ 1.0이 탐지 가능 임계값
+    ============================================================ *)
+let jnd_threshold_tests = [
+  (* CIEDE2000 테스트 쌍 7-8: ΔE ≈ 2.37 (탐지 가능) *)
+  (50.0, 0.0, 0.0, 50.0, -1.0, 2.0, 2.3669);
+  (50.0, -1.0, 2.0, 50.0, 0.0, 0.0, 2.3669);
+]
+
+(** ============================================================
+    B1: 극단값 테스트 (경계 조건)
+
+    L* = 0 (검정) vs L* = 100 (흰색)의 ΔE는 정확히 100이어야 함
+    (CIEDE2000에서 L* 차이는 가중치 없이 직접 반영됨)
+    ============================================================ *)
+let boundary_tests = [
+  (* L* 경계: 0 (검정) vs 100 (흰색) - 정확히 100 *)
+  (0.0, 0.0, 0.0, 100.0, 0.0, 0.0, 100.0);
+]
+
+(** ============================================================
+    B1: 가중치 파라미터 테스트 (kl, kc, kh)
+    향후 구현 예정 - 가중치 변화에 따른 ΔE 변화 테스트
+    ============================================================ *)
+(* let weighting_tests = [
+ *   (* 기본 가중치로 계산한 기대값과 비교 *)
+ *   (* (lab1, lab2, kl, kc, kh, expected) *)
+ * ] *)
 
 (** 단일 테스트 케이스 실행 *)
 let test_case (l1, a1, b1, l2, a2, b2, expected) =
@@ -64,38 +118,54 @@ let test_case (l1, a1, b1, l2, a2, b2, expected) =
   let passed = diff < tolerance in
   (passed, actual, expected, diff)
 
-(** 모든 테스트 실행 *)
-let run_all_tests () =
+(** 테스트 그룹 실행 *)
+let run_test_group name test_data =
   let results = List.mapi (fun i data ->
     let (passed, actual, expected, diff) = test_case data in
     (i + 1, passed, actual, expected, diff)
-  ) cie_test_data in
+  ) test_data in
 
   let passed_count = List.length (List.filter (fun (_, p, _, _, _) -> p) results) in
   let total = List.length results in
 
-  Printf.printf "CIEDE2000 검증 테스트 (CIE TR 142-2001)\n";
-  Printf.printf "========================================\n\n";
-
+  Printf.printf "\n[%s] (%d/%d 통과)\n" name passed_count total;
   List.iter (fun (i, passed, actual, expected, diff) ->
-    let status = if passed then "✅" else "❌" in
-    Printf.printf "%s Test %2d: expected=%.4f, actual=%.4f, diff=%.6f\n"
-      status i expected actual diff
+    let status = if passed then "  PASS" else "  FAIL" in
+    if not passed then
+      Printf.printf "%s %2d: expected=%.4f, actual=%.4f, diff=%.6f\n"
+        status i expected actual diff
   ) results;
 
-  Printf.printf "\n========================================\n";
-  Printf.printf "결과: %d/%d 통과 (%.1f%%)\n" passed_count total
-    (100.0 *. float_of_int passed_count /. float_of_int total);
+  passed_count, total
 
-  if passed_count = total then begin
-    Printf.printf "\n🏛️ CIE 국제 표준 준수 확인!\n";
-    Printf.printf "   출처: CIE Technical Report 142-2001\n";
-    Printf.printf "   참조: Sharma et al. (2005), Color Research & Application\n"
+(** 모든 테스트 실행 *)
+let run_all_tests () =
+  Printf.printf "CIEDE2000 검증 테스트 (CIE TR 142-2001)\n";
+  Printf.printf "========================================";
+
+  let results = [
+    run_test_group "CIE 공식 데이터 (Sharma 2005)" cie_official_test_data;
+    run_test_group "동일 색상 (ΔE=0)" identical_color_tests;
+    run_test_group "JND 임계값 (~2.3)" jnd_threshold_tests;
+    run_test_group "경계값" boundary_tests;
+  ] in
+
+  let total_passed = List.fold_left (fun acc (p, _) -> acc + p) 0 results in
+  let total_count = List.fold_left (fun acc (_, t) -> acc + t) 0 results in
+
+  Printf.printf "\n========================================\n";
+  Printf.printf "총 결과: %d/%d 통과 (%.1f%%)\n" total_passed total_count
+    (100.0 *. float_of_int total_passed /. float_of_int total_count);
+
+  if total_passed = total_count then begin
+    Printf.printf "\nCIE 국제 표준 준수 확인!\n";
+    Printf.printf "  출처: CIE Technical Report 142-2001\n";
+    Printf.printf "  참조: Sharma et al. (2005), Color Research & Application\n"
   end else begin
-    Printf.printf "\n⚠️ 일부 테스트 실패 - 구현 검토 필요\n"
+    Printf.printf "\n일부 테스트 실패 - 구현 검토 필요\n"
   end;
 
-  passed_count = total
+  total_passed = total_count
 
 let () =
   let success = run_all_tests () in
