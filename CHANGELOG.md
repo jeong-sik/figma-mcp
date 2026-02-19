@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.1] - 2026-02-19
+
+### Added
+- B1: CIEDE2000 tests with CIE official formula verification (#117)
+- B2: IoU integration tests with academic references (#118)
+- README updated with academic foundation, vs official MCP, and B1/B2 progress (#119)
+
 ## [0.8.0] - 2026-02-19
 
 ### Changed
