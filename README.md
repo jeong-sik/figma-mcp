@@ -1,7 +1,7 @@
 # Figma MCP Server
 
-[![Version](https://img.shields.io/badge/version-0.7.3-blue.svg)](https://github.com/jeong-sik/figma-mcp)
-[![Coverage](https://img.shields.io/badge/coverage-51.1%25-yellow.svg)]()
+[![Version](https://img.shields.io/badge/version-0.8.0-blue.svg)](https://github.com/jeong-sik/figma-mcp)
+[![Coverage](https://img.shields.io/badge/coverage-87.99%25-brightgreen.svg)]()
 [![OCaml](https://img.shields.io/badge/OCaml-5.x-orange.svg)](https://ocaml.org/)
 [![MCP](https://img.shields.io/badge/MCP-2025--11--25-blue.svg)](https://spec.modelcontextprotocol.io/)
 [![Status](https://img.shields.io/badge/status-Personal%20Project-lightgrey.svg)]()
@@ -396,6 +396,67 @@ PlanTasks 응답 추가 필드:
 
 프로토콜 정의는 `proto/figma.proto`를 참고하세요.
 
+## vs Official Figma Dev Mode MCP
+
+공식 Figma Dev Mode MCP와 비교한 차별화 포인트:
+
+| 기능 | figma-mcp (본 프로젝트) | Official Figma Dev Mode MCP |
+|------|------------------------|----------------------------|
+| **Fidelity DSL** | ✅ 레이아웃/페인트/보더/타이포 보존 | ❌ 데이터 전송만 |
+| **Multi-Metric Similarity** | ✅ 5개 지표 (Color, Layout, Structure, Visual, Embedding) | ❌ 없음 |
+| **HTML/CSS Code Generation** | ✅ Flexbox, Effects, Gradient | ❌ 없음 |
+| **Visual Verification** | ✅ SSIM 기반 렌더 비교 | ❌ 없음 |
+| **Plugin Bridge** | ✅ 실시간 동기화 + 드로잉 | ❌ 없음 |
+| **gRPC Streaming** | ✅ 대용량 응답 청크 스트리밍 | ❌ HTTP만 |
+| **Design Tokens** | ✅ Variable export | ✅ 지원 |
+| **프로토콜** | stdio, HTTP+SSE, gRPC | HTTP+SSE |
+
+**요약**: 공식 MCP는 Figma 데이터를 AI 모델에 전달하는 데 중점을 둡니다. figma-mcp는 **디자인-코드 변환 충실도**와 **정량적 유사도 측정**에 특화되어 있습니다.
+
+---
+
+## Academic Foundation
+
+본 프로젝트는 다음 학술 연구와 표준을 기반으로 합니다:
+
+### Color Difference: CIEDE2000
+- **출처**: CIE (Commission Internationale de l'Eclairage) 표준
+- **용도**: 인간 색지각 모델 기반 색상 차이 계산 (ΔE*₀₀)
+- **참고**: [CIEDE2000 Formula](https://en.wikipedia.org/wiki/Color_difference#CIEDE2000)
+- **JND (Just Noticeable Difference)**: ΔE < 2.3이면 인간이 차이를 인지하기 어려움
+
+### Layout Similarity: IoU Family
+- **IoU (Intersection over Union)**: 객체 탐지 표준 메트릭
+- **GIoU (Generalized IoU)**: 비겹침 영역 고려 (Rezatofighi et al., CVPR 2019)
+- **DIoU (Distance IoU)**: 중심점 거리 고려 (Zheng et al., AAAI 2020)
+- **용도**: Figma 노드의 bounding box 위치 유사도 측정
+
+### Structure Similarity: Tree Edit Distance
+- **알고리즘**: Zhang-Shasha (1989)
+- **용도**: Figma 노드 트리 구조의 편집 거리 계산
+- **확장**: Robust Tree Edit Distance (RTED) for ordered trees
+
+### Visual Similarity: SSIM
+- **출처**: Wang et al., "Image Quality Assessment: From Error Visibility to Structural Similarity" (IEEE TIP 2004)
+- **용도**: 렌더링된 디자인의 구조적 유사도 측정
+- **범위**: 0~1 (1 = 완전 동일)
+- **구현**: ImageMagick `compare -metric SSIM` 활용
+- **실측값**: 90.1% (배경색 통일 후, `docs/DISCOVERIES.md` 참고)
+
+### UI Embedding: Rico Dataset
+- **출처**: Deka et al., "Rico: A Mobile App Dataset for Building Data-Driven Design Applications" (UIST 2017)
+- **용도**: UI 스크린의 벡터 임베딩 유사도 (cosine similarity)
+- **차원**: 64-dim embedding
+
+### Code Generation: UIFormer Inspiration
+- **출처**: Semantic DSL mapper for UI code generation
+- **Tier 구조**:
+  - Tier 1 (SSIM 80%+): Layout, Size, Gap, Padding, bg, radius
+  - Tier 2 (SSIM +10%): Alignment, Typography basics
+  - Tier 3 (SSIM +5%): Font details, Letter spacing
+
+---
+
 ## Fidelity DSL 포맷 (정확도 우선)
 
 `format: fidelity`는 JSON 기반의 구조화 출력입니다.
@@ -418,7 +479,7 @@ PlanTasks 응답 추가 필드:
 
 ## 테스트
 
-커버리지: 51.1% (v0.7.3 기준, 13개 테스트 파일).
+커버리지: 87.99% (v0.8.0 기준, bisect_ppx 측정).
 
 ```bash
 # 유닛 테스트 실행
@@ -542,21 +603,50 @@ git push -u origin feature/your-branch
 
 ---
 
-## Future Work: 다중 유사도 측정 시스템
+## Multi-Metric Similarity System (다중 유사도 측정)
 
-현재 `figma_compare`는 실용적 휴리스틱 기반입니다. 아래 학술적 기반 개선을 계획 중:
+`figma_compare`는 5개 학술적 지표를 기반으로 디자인-코드 변환 충실도를 정량화합니다:
 
-### 다중 유사도 지표 (Multi-Metric Similarity)
+### 지표 구성
 
-| 지표 | 공식/알고리즘 | 출처 |
-|------|--------------|------|
-| **Color** | CIEDE2000 (ΔE*₀₀) | CIE 표준, 인간 색지각 모델 |
-| **Layout** | IoU (Intersection over Union) | 객체 탐지 표준 메트릭 |
-| **Structure** | Tree Edit Distance (TED) | Zhang-Shasha 알고리즘 |
-| **Visual** | SSIM (Structural Similarity Index) | Wang et al. 2004, IEEE TIP |
-| **Embedding** | Cosine Similarity on UI Embedding | Rico (Google, UIST 2017) |
+| 지표 | 공식/알고리즘 | 출처 | 구현 상태 |
+|------|--------------|------|----------|
+| **Color** | CIEDE2000 (ΔE*₀₀) | CIE 표준 | ✅ B1 완료 |
+| **Layout** | IoU / GIoU / DIoU | 객체 탐지 표준 | ✅ B2 완료 |
+| **Structure** | Tree Edit Distance | Zhang-Shasha | 🔜 B3 |
+| **Visual** | SSIM | Wang et al. 2004 | ✅ 실험 완료 (90.1%) |
+| **Embedding** | Cosine Similarity | Rico (UIST 2017) | 🔜 B4 |
 
-### 출력 예시 (계획)
+### B1: Color Similarity (CIEDE2000)
+
+색상 차이를 인간 색지각 모델로 계산합니다:
+
+```
+ΔE*₀₀ < 2.3  → 100% (JND 이하, 차이 인지 불가)
+ΔE*₀₀ < 5    → 90%  (미세한 차이)
+ΔE*₀₀ < 10   → 70%  (인지 가능한 차이)
+ΔE*₀₀ >= 10  → 50%  (명확한 차이)
+```
+
+### B2: Layout Similarity (IoU Family)
+
+노드 bounding box의 위치/크기 유사도를 측정합니다:
+
+- **IoU**: `intersection / union` (0~1)
+- **GIoU**: IoU + 비겹침 영역 페널티
+- **DIoU**: IoU + 중심점 거리 페널티
+
+### Visual SSIM 실험 결과
+
+`docs/DISCOVERIES.md`에 기록된 실측값:
+
+| 조건 | SSIM |
+|------|------|
+| 크기 불일치 | 23.1% |
+| 크기 맞춤 | 85.8% |
+| 배경색 통일 | 90.1% |
+
+### 출력 예시
 
 ```
 비교: "B2C 홈 (Web)" vs "B2C 홈 (Mobile)"
@@ -574,20 +664,23 @@ git push -u origin feature/your-branch
 └─────────────────┴────────┴─────────────────────────────┘
 ```
 
+### 구현 로드맵
+
+| Phase | 내용 | 상태 |
+|-------|------|------|
+| B1 | CIEDE2000 색상 유사도 | ✅ 완료 |
+| B2 | IoU/GIoU/DIoU 레이아웃 유사도 | ✅ 완료 |
+| B3 | Tree Edit Distance 구조 유사도 | 🔜 예정 |
+| B4 | Rico-style UI Embedding | 🔜 예정 (ML 필요) |
+
 ### 참고 논문
 
 - [Rico: A Mobile App Dataset](https://dl.acm.org/doi/10.1145/3126594.3126651) (UIST 2017)
+- [GIoU: Generalized Intersection over Union](https://arxiv.org/abs/1902.09630) (CVPR 2019)
+- [DIoU: Distance-IoU Loss](https://arxiv.org/abs/1911.08287) (AAAI 2020)
 - [LTSim: Layout Transportation-based Similarity](https://arxiv.org/html/2407.12356v1) (2024)
 - [SSIM: Image Quality Assessment](https://ieeexplore.ieee.org/document/1284395) (IEEE TIP 2004)
 - [CIEDE2000 Color Difference](https://en.wikipedia.org/wiki/Color_difference#CIEDE2000)
-
-### 구현 우선순위
-
-1. ✅ 현재: 휴리스틱 가중치 (Critical/Major/Minor)
-2. 🔜 Phase 1: CIEDE2000 색상 거리 적용
-3. 🔜 Phase 2: IoU 레이아웃 유사도 추가
-4. 🔜 Phase 3: SSIM 시각적 유사도 (렌더링 필요)
-5. 🔜 Phase 4: Rico-style Embedding (ML 모델 필요)
 
 ## 라이선스
 
