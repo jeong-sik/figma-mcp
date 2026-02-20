@@ -1,0 +1,88 @@
+name: Auto Merge Ready PR
+
+on:
+  pull_request:
+    types:
+      - reopened
+      - synchronize
+      - ready_for_review
+  pull_request_review:
+    types:
+      - submitted
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+jobs:
+  auto-merge:
+    if: >-
+      contains(fromJson('["jeong-sik/masc-mcp","jeong-sik/figma-mcp","jeong-sik/llm-mcp"]'), github.repository)
+      && github.event.pull_request.draft == false
+      && github.event.pull_request.base.ref == github.event.repository.default_branch
+      && github.event.pull_request.user.login == 'jeong-sik'
+      && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - name: Evaluate PR readiness
+        id: eval
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          owner="${REPO%%/*}"
+          name="${REPO#*/}"
+
+          data="$(gh api graphql \
+            -f query='query($owner:String!, $name:String!, $number:Int!) { repository(owner:$owner, name:$name) { pullRequest(number:$number) { reviewDecision mergeStateStatus isDraft baseRefName url autoMergeRequest { enabledAt } reviewThreads(first:100) { nodes { isResolved } } } } }' \
+            -f owner="$owner" \
+            -f name="$name" \
+            -F number="$PR_NUMBER")"
+
+          review_decision="$(echo "$data" | jq -r '.data.repository.pullRequest.reviewDecision // "NONE"')"
+          merge_state="$(echo "$data" | jq -r '.data.repository.pullRequest.mergeStateStatus // "UNKNOWN"')"
+          unresolved_threads="$(echo "$data" | jq -r '[.data.repository.pullRequest.reviewThreads.nodes[]? | select(.isResolved == false)] | length')"
+          auto_merge_enabled="$(echo "$data" | jq -r '.data.repository.pullRequest.autoMergeRequest != null')"
+
+          echo "review_decision=$review_decision" >> "$GITHUB_OUTPUT"
+          echo "merge_state=$merge_state" >> "$GITHUB_OUTPUT"
+          echo "unresolved_threads=$unresolved_threads" >> "$GITHUB_OUTPUT"
+          echo "auto_merge_enabled=$auto_merge_enabled" >> "$GITHUB_OUTPUT"
+
+      - name: Enable auto-merge
+        if: >-
+          steps.eval.outputs.review_decision == 'APPROVED'
+          && steps.eval.outputs.merge_state == 'CLEAN'
+          && steps.eval.outputs.unresolved_threads == '0'
+          && steps.eval.outputs.auto_merge_enabled != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          gh pr merge "$PR_NUMBER" --repo "$REPO" --auto --squash
+
+      - name: Comment auto-merge enabled
+        if: >-
+          steps.eval.outputs.review_decision == 'APPROVED'
+          && steps.eval.outputs.merge_state == 'CLEAN'
+          && steps.eval.outputs.unresolved_threads == '0'
+          && steps.eval.outputs.auto_merge_enabled != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          marker='[AUTO-MERGE]'
+          existing="$(gh api "repos/$REPO/issues/$PR_NUMBER/comments" --paginate --jq ".[] | select(.user.login == \"github-actions[bot]\" and (.body | contains(\"$marker\"))) | .id" | head -n1 || true)"
+          if [ -n "$existing" ]; then
+            exit 0
+          fi
+
+          gh api "repos/$REPO/issues/$PR_NUMBER/comments" \
+            -f body="$marker 승인/체크/스레드 조건이 충족되어 auto-merge(squash)를 활성화했습니다."
