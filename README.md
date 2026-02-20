@@ -1,7 +1,7 @@
 # Figma MCP Server
 
-[![Version](https://img.shields.io/badge/version-0.8.0-blue.svg)](https://github.com/jeong-sik/figma-mcp)
-[![Coverage](https://img.shields.io/badge/coverage-87.99%25-brightgreen.svg)]()
+[![Version](https://img.shields.io/badge/version-0.8.2-blue.svg)](https://github.com/jeong-sik/figma-mcp)
+[![Coverage](https://img.shields.io/badge/coverage-87.54%25-brightgreen.svg)]()
 [![OCaml](https://img.shields.io/badge/OCaml-5.x-orange.svg)](https://ocaml.org/)
 [![MCP](https://img.shields.io/badge/MCP-2025--11--25-blue.svg)](https://spec.modelcontextprotocol.io/)
 [![Status](https://img.shields.io/badge/status-Personal%20Project-lightgrey.svg)]()
@@ -43,6 +43,7 @@ export FIGMA_TOKEN="YOUR_TOKEN"
 - **동시성 제한** - Eio.Semaphore 기반 API rate limiting (Figma API 동시 호출 수 제한)
 - **SSE compact JSON** - multi-line data 버그 수정, 단일 라인 JSON 프레이밍 보장
 - **모듈 분리** - mcp_tools.ml에서 handler별 모듈(.ml + .mli)로 분리 (mcp_api_handlers, mcp_plugin_handlers, mcp_visual_handlers, mcp_helpers 등)
+- **Phase A4 모듈 분해 완료** - mcp_protocol_eio.ml을 4,007 LOC에서 1,074 LOC로 축소 (-73%). 5개 모듈 추출: mcp_cors, mcp_http_helpers, mcp_agent_queue, mcp_sse_transport, mcp_figma_tool_handlers
 - **캐시 TTL 8시간** - 노드 캐시 TTL을 24h에서 8h로 변경 (FIGMA_MCP_CACHE_TTL_HOURS로 조정 가능)
 
 ## Capabilities
@@ -53,7 +54,7 @@ Capabilities: tools ✅ · resources ✅ · prompts ✅
 
 | Capability | 상태 | 설명 |
 |------------|------|------|
-| **tools** | ✅ 지원 | 58개 도구 (5개 카테고리 라우터 + 14개 직접 도구로 노출, `tools/list` 참고) |
+| **tools** | ✅ 지원 | 61개 내부 도구 (5개 카테고리 라우터 + 15개 직접 도구 = 20개 항목으로 `tools/list`에 노출) |
 | **resources** | ✅ 지원 | `figma://docs/*` 가이드 |
 | **prompts** | ✅ 지원 | Fidelity 리뷰 프롬프트 |
 
@@ -90,9 +91,9 @@ echo '{"jsonrpc":"2.0","id":5,"method":"prompts/get","params":{"name":"figma_fid
 - `docs/plugin-workflow.md` - 플러그인 워크플로우와 호출 흐름
 - `docs/DISCOVERIES.md` - 실험적 발견 사항
 
-## 도구 개요 (2026-01-27 기준)
+## 도구 개요 (2026-02-20 기준)
 
-- 코드상 `all_detailed_tools`에 등록된 도구는 58개입니다. `tools/list`에서는 5개 카테고리 라우터 + 14개 직접 도구 = 19개 항목으로 노출됩니다.
+- 코드상 `all_detailed_tools`에 등록된 도구는 61개입니다. `tools/list`에서는 5개 카테고리 라우터 + 15개 직접 도구 = 20개 항목으로 노출됩니다.
 - 전체 목록 확인:
 
 ```bash
@@ -116,7 +117,7 @@ echo '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}' | ./start-figm
 
 ## 설치
 
-OCaml >= 5.1 필요.
+전제 조건: OCaml >= 5.1, dune >= 3.13, macOS Keychain (토큰 저장에 사용).
 
 ```bash
 # opam 환경
@@ -206,7 +207,7 @@ export SSL_CERT_FILE="/etc/ssl/certs/ca-certificates.crt"
 
 ## Figma Plugin Bridge (실시간 동기화 + 드로잉)
 
-### 🚀 Quick Setup (3단계)
+### Quick Setup (3단계)
 
 ```bash
 # Step 1: 서버 시작
@@ -221,7 +222,7 @@ export SSL_CERT_FILE="/etc/ssl/certs/ca-certificates.crt"
 
 이제 MCP에서 `figma_plugin action=connect`로 연결하세요.
 
-### 📝 Drawing 예시 (vectorPaths)
+### Drawing 예시 (vectorPaths)
 
 ```json
 {
@@ -479,7 +480,7 @@ PlanTasks 응답 추가 필드:
 
 ## 테스트
 
-커버리지: 87.99% (v0.8.0 기준, bisect_ppx 측정).
+커버리지: 87.54% (v0.8.2 기준, bisect_ppx 측정). bisect_ppx 커버리지 캠페인의 테스트 작성에 AI 에이전트를 활용.
 
 ```bash
 # 유닛 테스트 실행
