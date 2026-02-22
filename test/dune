@@ -497,3 +497,8 @@
 (test
  (name test_iou)
  (libraries figma_mcp alcotest))
+
+; Multi-Metric Similarity Proof Experiment (manual execution, not auto-test)
+(executable
+ (name proof_experiment)
+ (libraries figma_mcp))
