@@ -233,45 +233,23 @@ Protocol definition: `proto/figma.proto`.
 
 ## Multi-Metric Similarity
 
-`figma_compare` measures design-to-code fidelity using academic metrics:
+`figma_compare` measures design-to-code fidelity:
 
-| Metric | Method | Source | Status |
-|--------|--------|--------|--------|
-| **Color** | CIEDE2000 (ΔE\*₀₀) | CIE standard | Done (B1) |
-| **Layout** | IoU / GIoU / DIoU | Rezatofighi 2019, Zheng 2020 | Done (B2) |
-| **Structure** | Tree Edit Distance | Zhang-Shasha 1989 | Planned (B3) |
-| **Visual** | SSIM | Wang et al. 2004 | Experimental |
-| **Embedding** | Cosine Similarity | Rico (UIST 2017) | Planned (B4) |
+| Metric | Method | Source |
+|--------|--------|--------|
+| **Color** | CIEDE2000 (ΔE\*₀₀) | CIE standard |
+| **Layout** | IoU / GIoU / DIoU | Rezatofighi 2019, Zheng 2020 |
+| **Structure** | Tree Edit Distance | Zhang-Shasha 1989 |
+| **Visual** | SSIM | Wang et al. 2004 |
 
-### Color (CIEDE2000)
-
-Maps perceptual color difference to similarity score:
-
-```
-ΔE*₀₀ < 2.3  -> 100% (below JND, indistinguishable)
-ΔE*₀₀ < 5    ->  90% (subtle difference)
-ΔE*₀₀ < 10   ->  70% (noticeable)
-ΔE*₀₀ >= 10  ->  50% (obvious)
-```
-
-### Layout (IoU Family)
-
-Bounding box overlap between Figma nodes and rendered elements:
-- **IoU**: intersection / union (0-1)
-- **GIoU**: IoU + penalty for non-overlapping area
-- **DIoU**: IoU + center distance penalty
-
-### Visual (SSIM)
-
-Structural similarity between Figma render and HTML render. Implemented via ImageMagick `compare -metric SSIM`. Measured results: 90.1% with background normalization (`docs/DISCOVERIES.md`).
+Color comparison uses CIEDE2000 with JND threshold (ΔE\*₀₀ < 2.3 = indistinguishable). Layout comparison uses IoU, GIoU (non-overlap penalty), and DIoU (center distance penalty). SSIM compares Figma renders against HTML renders via ImageMagick. Experiment log in `docs/DISCOVERIES.md`.
 
 ### References
 
-- [CIEDE2000 Color Difference](https://en.wikipedia.org/wiki/Color_difference#CIEDE2000) -- CIE standard
+- [CIEDE2000](https://en.wikipedia.org/wiki/Color_difference#CIEDE2000) -- CIE standard
 - [GIoU](https://arxiv.org/abs/1902.09630) -- CVPR 2019
 - [DIoU](https://arxiv.org/abs/1911.08287) -- AAAI 2020
 - [SSIM](https://ieeexplore.ieee.org/document/1284395) -- IEEE TIP 2004
-- [Rico](https://dl.acm.org/doi/10.1145/3126594.3126651) -- UIST 2017
 
 ## Fidelity DSL
 
