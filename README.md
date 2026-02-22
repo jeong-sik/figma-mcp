@@ -291,7 +291,7 @@ Structural similarity between Figma render and HTML render. Implemented via Imag
 
 ### Image Download
 
-`figma_export_image` and `figma_get_node_bundle` support `download: true` with optional `save_dir`. Default: `$ME_ROOT/download/figma-assets`.
+`figma_export_image` and `figma_get_node_bundle` support `download: true` with optional `save_dir`. Default path fallback: `FIGMA_MCP_ASSET_DIR` env var, then `$ME_ROOT/workspace/yousleepwhen/figma-mcp/assets`, then `$HOME/.figma-mcp/assets`, then `/tmp/figma-mcp/assets`.
 
 ## Testing
 
