@@ -1,0 +1,38 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+language: en-US
+early_access: false
+
+reviews:
+  poem: false
+  path_filters:
+    - "!_build/**"
+    - "!_coverage/**"
+    - "!node_modules/**"
+    - "!.worktrees/**"
+    - "!logs/**"
+    - "!figma-mcp-macos-arm64/**"
+    - "!**/*.min.js"
+  auto_review:
+    enabled: true
+    drafts: true
+    auto_incremental_review: true
+  path_instructions:
+    - path: "lib/**/*.{ml,mli}"
+      instructions: >
+        Prioritize MCP request/response contract safety, robust error handling for malformed Figma
+        payloads, and OCaml interface consistency.
+    - path: "plugin-src/**/*.{ts,tsx,js}"
+      instructions: >
+        Validate Figma plugin API usage, typed message contracts between plugin and MCP layer,
+        and guardrails for null/undefined node data.
+    - path: "**/*.proto"
+      instructions: >
+        Check protobuf backward compatibility, stable field numbering, reserved fields,
+        and safe default values.
+    - path: "scripts/**/*.{sh,bash,zsh}"
+      instructions: >
+        Flag unsafe shell patterns (unquoted variables, brittle pipes, missing strict mode),
+        and portability issues.
+    - path: ".github/workflows/**/*.yml"
+      instructions: >
+        Validate workflow correctness, permission scope minimization, and cache/security risks.
