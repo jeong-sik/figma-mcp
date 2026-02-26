@@ -639,29 +639,6 @@ let tool_figma_plugin_subscribe_events : tool_def = {
   ] [];
 }
 
-(** ============== Plugin Enhancement Tools (Phase A4) ============== *)
-
-let tool_figma_get_quality_metrics : tool_def = {
-  name = "figma_get_quality_metrics";
-  description = "🔌 PLUGIN QUALITY: 선택된 노드의 디자인 품질 메트릭 반환. SSIM 근사치, 레이아웃 일관성, 색상 조화 점수.";
-  input_schema = object_schema [
-    ("channel_id", string_prop "채널 ID (옵션)");
-    ("node_id", string_prop "노드 ID (옵션, 기본: 현재 선택)");
-    ("timeout_ms", number_prop "응답 대기 시간 (기본값: 10000)");
-  ] [];
-}
-
-let tool_figma_get_node_code : tool_def = {
-  name = "figma_get_node_code";
-  description = "🔌 PLUGIN CODE: 선택된 노드의 CSS/SCSS/Tailwind 코드 생성. syntax highlighting 지원.";
-  input_schema = object_schema [
-    ("channel_id", string_prop "채널 ID (옵션)");
-    ("node_id", string_prop "노드 ID (옵션, 기본: 현재 선택)");
-    ("format", enum_prop ["css"; "scss"; "tailwind"] "출력 포맷 (기본값: css)");
-    ("timeout_ms", number_prop "응답 대기 시간 (기본값: 10000)");
-  ] [];
-}
-
 let tool_figma_export_tokens_plugin : tool_def = {
   name = "figma_export_tokens_plugin";
   description = "🔌 PLUGIN TOKENS: Plugin Bridge를 통한 디자인 토큰 추출. 색상, 타이포, 간격, 그림자 등.";
@@ -1182,9 +1159,7 @@ let all_detailed_tools = [
   tool_figma_plugin_batch;
   tool_figma_plugin_subscribe_events;
   tool_figma_plugin;
-  (* Plugin Enhancement Tools (Phase A4) *)
-  tool_figma_get_quality_metrics;
-  tool_figma_get_node_code;
+  (* Plugin Enhancement Tools *)
   tool_figma_export_tokens_plugin;
   (* Phase 1: 탐색 도구 *)
   tool_figma_parse_url;
@@ -2729,9 +2704,7 @@ let all_handlers_sync : (string * tool_handler_sync) list = [
   ("figma_plugin_delete_nodes", wrap_sync_pure handle_plugin_delete_nodes);
   ("figma_plugin_batch", wrap_sync_pure handle_plugin_batch);
   ("figma_plugin_subscribe_events", wrap_sync_pure handle_plugin_subscribe_events);
-  (* Plugin Enhancement Tools (Phase A4) *)
-  ("figma_get_quality_metrics", wrap_sync_pure handle_get_quality_metrics);
-  ("figma_get_node_code", wrap_sync_pure handle_get_node_code);
+  (* Plugin Enhancement Tools *)
   ("figma_export_tokens_plugin", wrap_sync_pure handle_export_tokens_plugin);
   (* Phase 1: 탐색 도구 *)
   ("figma_parse_url", wrap_sync_pure handle_parse_url);

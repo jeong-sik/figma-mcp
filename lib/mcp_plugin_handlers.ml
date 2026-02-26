@@ -544,35 +544,6 @@ let handle_plugin_delete_nodes args : (Yojson.Safe.t, string) result =
         Ok (make_text_content (Yojson.Safe.pretty_to_string response))
       end
 
-(** figma_get_quality_metrics 핸들러 - Plugin Bridge 통해 품질 메트릭 조회 *)
-let handle_get_quality_metrics args : (Yojson.Safe.t, string) result =
-  plugin_custom ~name:"get_quality_metrics" ~default_timeout:10000
-    ~validate:(fun args ->
-      (* node_id is optional - if not provided, plugin will use current selection *)
-      Ok ())
-    ~build_payload:(fun () args ->
-      let node_id = get_string "node_id" args in
-      `Assoc (match node_id with
-        | Some id -> [("node_id", `String id)]
-        | None -> []))
-    args
-
-(** figma_get_node_code 핸들러 - Plugin Bridge 통해 CSS/SCSS/Tailwind 코드 생성 *)
-let handle_get_node_code args : (Yojson.Safe.t, string) result =
-  plugin_custom ~name:"get_node_code" ~default_timeout:10000
-    ~validate:(fun args ->
-      (* node_id is optional - if not provided, plugin will use current selection *)
-      Ok ())
-    ~build_payload:(fun () args ->
-      let node_id = get_string "node_id" args in
-      let format = get_string "format" args |> Option.value ~default:"css" in
-      `Assoc ([
-        ("format", `String format);
-      ] @ match node_id with
-        | Some id -> [("node_id", `String id)]
-        | None -> []))
-    args
-
 (** figma_export_tokens_plugin 핸들러 - Plugin Bridge 통해 디자인 토큰 추출 *)
 let handle_export_tokens_plugin args : (Yojson.Safe.t, string) result =
   plugin_simple ~name:"export_design_tokens" ~default_timeout:20000
@@ -659,27 +630,79 @@ let known_plugin_actions = [
   "get_stroke_details"; "set_stroke_weight"; "collapse_layer"; "execute_dsl";
   "export_tokens"; "export_viewport"; "export_selection"; "watch_start"; "watch_stop";
   "get_changes"; "create_instance"; "annotate"
+  ; "batch"; "subscribe_events"
 ]
 
+let levenshtein_distance a b =
+  let a = String.lowercase_ascii a in
+  let b = String.lowercase_ascii b in
+  let n = String.length a in
+  let m = String.length b in
+  let prev = Array.make (m + 1) 0 in
+  let curr = Array.make (m + 1) 0 in
+  for j = 0 to m do
+    prev.(j) <- j
+  done;
+  for i = 1 to n do
+    curr.(0) <- i;
+    for j = 1 to m do
+      let cost = if a.[i - 1] = b.[j - 1] then 0 else 1 in
+      curr.(j) <-(
+        min
+          (curr.(j - 1) + 1)
+          (min (prev.(j) + 1) (prev.(j - 1) + cost)
+          )
+    done;
+    for j = 0 to m do
+      prev.(j) <- curr.(j)
+    done
+  done;
+  prev.(m)
+
 let suggest_action unknown =
-  let scored = List.filter_map (fun action ->
-    let d = String.length action in (* Simple placeholder for edit distance *)
-    if d > 0 then Some (d, action) else None
-  ) known_plugin_actions in
-  match List.sort compare scored with
-  | (_, suggestion) :: _ -> Printf.sprintf " Did you mean '%s'?" suggestion
-  | [] -> ""
+  let unknown = String.lowercase_ascii (String.trim unknown) in
+  let best_distance = Int.max_int in
+  let best =
+    List.fold_left (fun (best_d, best_action) action ->
+      let d = levenshtein_distance unknown action in
+      if d < best_d then (d, Some action) else (best_d, best_action))
+      (best_distance, None) known_plugin_actions
+  in
+  match best with
+  | (_, None) -> ""
+  | (dist, Some action) when dist <= 3 -> Printf.sprintf " Did you mean '%s'?" action
+  | _ -> ""
+
+let dispatch_unknown_plugin_action action args =
+  match resolve_channel_id args with
+  | Error msg -> Error msg
+  | Ok channel_id ->
+      let payload =
+        match args with
+        | `Assoc fields ->
+            `Assoc (List.filter (fun (key, _) -> key <> "action" && key <> "channel_id") fields)
+        | _ -> `Assoc []
+      in
+      let timeout_ms = get_int "timeout_ms" args |> Option.value ~default:10000 in
+      plugin_exec ~channel_id ~name:action ~payload ~timeout_ms
 
 let handle_figma_plugin args : (Yojson.Safe.t, string) result =
   match get_string "action" args with
   | None -> Error "Missing action"
   | Some action ->
+      let action = String.lowercase_ascii (String.trim action) in
       match action with
       | "connect" -> handle_plugin_connect args
       | "use_channel" -> handle_plugin_use_channel args
       | "status" -> handle_plugin_status args
       | "read_selection" -> handle_plugin_read_selection args
       | "get_node" -> handle_plugin_get_node args
+      | "export_image" -> handle_plugin_export_node_image args
+      | "get_variables" -> handle_plugin_get_variables args
+      | "apply_ops" -> handle_plugin_apply_ops args
       | "batch" -> handle_plugin_batch args
       | "annotate" -> handle_annotate args
-      | _ -> Ok (`Assoc [("status", `String "Action routed (placeholder)")])
+      | "subscribe_events" -> handle_plugin_subscribe_events args
+      | "export_tokens" -> handle_export_tokens_plugin args
+      | action when List.mem action known_plugin_actions -> dispatch_unknown_plugin_action action args
+      | _ -> Error (Printf.sprintf "Unknown plugin action '%s'.%s" action (suggest_action action))

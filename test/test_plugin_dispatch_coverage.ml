@@ -79,15 +79,17 @@ let () =
     | Ok _ -> fail "should error on missing action"
   in
 
-  (* --- handle_figma_plugin: unknown action → placeholder Ok --- *)
+  (* --- handle_figma_plugin: unknown action -> strict Error with suggestion --- *)
 
   let test_dispatch_unknown_action () =
-    let args = `Assoc [("action", `String "nonexistent_xyz_action")] in
+    let args = `Assoc [("action", `String "export_imag")] in
     match Mcp_plugin_handlers.handle_figma_plugin args with
-    | Ok json ->
-        let s = Yojson.Safe.to_string json in
-        check bool "placeholder response" true (String.length s > 0)
-    | Error _ -> ()
+    | Error msg ->
+        let lower = String.lowercase_ascii msg in
+        check bool "unknown action must error" true (contains lower "unknown plugin action");
+        check bool "error suggests alternatives" true (contains lower "did you mean");
+        check bool "suggested action" true (contains lower "export_image")
+    | Ok _ -> fail "should error on unknown action"
   in
 
   (* --- Handler error paths: no channel_id, no default → Error --- *)
