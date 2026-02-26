@@ -609,47 +609,6 @@ let handle_plugin_subscribe_events args : (Yojson.Safe.t, string) result =
 let known_plugin_actions =
   Mcp_plugin_actions.known_plugin_actions
 
-let levenshtein_distance a b =
-  let a = String.lowercase_ascii a in
-  let b = String.lowercase_ascii b in
-  let n = String.length a in
-  let m = String.length b in
-  let prev = Array.make (m + 1) 0 in
-  let curr = Array.make (m + 1) 0 in
-  for j = 0 to m do
-    prev.(j) <- j
-  done;
-  for i = 1 to n do
-    curr.(0) <- i;
-    for j = 1 to m do
-      let cost = if a.[i - 1] = b.[j - 1] then 0 else 1 in
-      curr.(j) <-
-        min
-          (curr.(j - 1) + 1)
-          (min (prev.(j) + 1) (prev.(j - 1) + cost))
-    done;
-    for j = 0 to m do
-      prev.(j) <- curr.(j)
-    done
-  done;
-  prev.(m)
-
-let suggest_action unknown =
-  let unknown = String.lowercase_ascii (String.trim unknown) in
-  let unknown_len = String.length unknown in
-  let best_distance = Int.max_int in
-  let best =
-    List.fold_left (fun (best_d, best_action) action ->
-      let d = levenshtein_distance unknown action in
-      if d < best_d then (d, Some action) else (best_d, best_action))
-      (best_distance, None) known_plugin_actions
-  in
-  match best with
-  | (_, None) -> ""
-  | (dist, Some action) when dist <= 3 || unknown_len <= 1 ->
-      Printf.sprintf " Did you mean '%s'?" action
-  | _ -> ""
-
 let dispatch_unknown_plugin_action action args =
   match resolve_channel_id args with
   | Error msg -> Error msg
@@ -682,4 +641,4 @@ let handle_figma_plugin args : (Yojson.Safe.t, string) result =
       | "subscribe_events" -> handle_plugin_subscribe_events args
       | "export_tokens" -> handle_export_tokens_plugin args
       | action when List.mem action known_plugin_actions -> dispatch_unknown_plugin_action action args
-      | _ -> Error (Printf.sprintf "Unknown plugin action '%s'.%s" action (suggest_action action))
+      | _ -> Error (Printf.sprintf "Unknown plugin action '%s'." action)

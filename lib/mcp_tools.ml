@@ -1225,8 +1225,8 @@ let is_under_dir ~dir path =
 
 (** Core Figma API handlers (handle_get_file .. handle_get_style): moved to mcp_api_handlers.ml *)
 
-(** Plugin handlers (handle_plugin_*, handle_figma_plugin, known_plugin_actions,
-    suggest_action): moved to mcp_plugin_handlers.ml *)
+(** Plugin handlers (handle_plugin_*, handle_figma_plugin, known_plugin_actions):
+    moved to mcp_plugin_handlers.ml *)
 
 (** ============== LLM Bridge 핸들러 ============== *)
 

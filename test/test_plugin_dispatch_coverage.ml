@@ -50,21 +50,6 @@ let () =
       (List.length Mcp_plugin_handlers.known_plugin_actions > 50)
   in
 
-  (* --- suggest_action --- *)
-
-  let test_suggest_nonempty () =
-    let suggestion = Mcp_plugin_handlers.suggest_action "connekt" in
-    check bool "non-empty suggestion" true (String.length suggestion > 0)
-  in
-  let test_suggest_short_input () =
-    let suggestion = Mcp_plugin_handlers.suggest_action "x" in
-    check bool "suggestion returned" true (String.contains suggestion '\'')
-  in
-  let test_suggest_empty_input () =
-    let suggestion = Mcp_plugin_handlers.suggest_action "" in
-    check bool "has suggestion" true (String.length suggestion > 0)
-  in
-
   (* --- resolve_channel_id with explicit --- *)
 
   let test_resolve_channel_explicit () =
@@ -83,7 +68,7 @@ let () =
     | Ok _ -> fail "should error on missing action"
   in
 
-  (* --- handle_figma_plugin: unknown action -> strict Error with suggestion --- *)
+  (* --- handle_figma_plugin: unknown action -> strict Error --- *)
 
   let test_dispatch_unknown_action () =
     let args = `Assoc [("action", `String "export_imag")] in
@@ -91,8 +76,7 @@ let () =
     | Error msg ->
         let lower = String.lowercase_ascii msg in
         check bool "unknown action must error" true (contains lower "unknown plugin action");
-        check bool "error suggests alternatives" true (contains lower "did you mean");
-        check bool "suggested action" true (contains lower "export_image")
+        check bool "error should not include suggestion text" false (contains lower "did you mean")
     | Ok _ -> fail "should error on unknown action"
   in
 
@@ -659,11 +643,6 @@ let () =
       test_case "has annotate" `Quick test_known_actions_has_annotate;
       test_case "does not include execute_dsl" `Quick test_known_actions_excludes_execute_dsl;
       test_case "count >50" `Quick test_known_actions_count;
-    ]);
-    ("suggest_action", [
-      test_case "non-empty" `Quick test_suggest_nonempty;
-      test_case "short input" `Quick test_suggest_short_input;
-      test_case "empty input" `Quick test_suggest_empty_input;
     ]);
     ("resolve_channel_id", [
       test_case "explicit" `Quick test_resolve_channel_explicit;

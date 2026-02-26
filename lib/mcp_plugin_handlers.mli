@@ -80,5 +80,4 @@ val handle_export_tokens_plugin : Yojson.Safe.t -> (Yojson.Safe.t, string) resul
 (** {1 Unified plugin dispatch} *)
 
 val known_plugin_actions : string list
-val suggest_action : string -> string
 val handle_figma_plugin : Yojson.Safe.t -> (Yojson.Safe.t, string) result
