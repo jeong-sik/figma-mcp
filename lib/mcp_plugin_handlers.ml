@@ -544,35 +544,6 @@ let handle_plugin_delete_nodes args : (Yojson.Safe.t, string) result =
         Ok (make_text_content (Yojson.Safe.pretty_to_string response))
       end
 
-(** figma_get_quality_metrics 핸들러 - Plugin Bridge 통해 품질 메트릭 조회 *)
-let handle_get_quality_metrics args : (Yojson.Safe.t, string) result =
-  plugin_custom ~name:"get_quality_metrics" ~default_timeout:10000
-    ~validate:(fun args ->
-      (* node_id is optional - if not provided, plugin will use current selection *)
-      Ok ())
-    ~build_payload:(fun () args ->
-      let node_id = get_string "node_id" args in
-      `Assoc (match node_id with
-        | Some id -> [("node_id", `String id)]
-        | None -> []))
-    args
-
-(** figma_get_node_code 핸들러 - Plugin Bridge 통해 CSS/SCSS/Tailwind 코드 생성 *)
-let handle_get_node_code args : (Yojson.Safe.t, string) result =
-  plugin_custom ~name:"get_node_code" ~default_timeout:10000
-    ~validate:(fun args ->
-      (* node_id is optional - if not provided, plugin will use current selection *)
-      Ok ())
-    ~build_payload:(fun () args ->
-      let node_id = get_string "node_id" args in
-      let format = get_string "format" args |> Option.value ~default:"css" in
-      `Assoc ([
-        ("format", `String format);
-      ] @ match node_id with
-        | Some id -> [("node_id", `String id)]
-        | None -> []))
-    args
-
 (** figma_export_tokens_plugin 핸들러 - Plugin Bridge 통해 디자인 토큰 추출 *)
 let handle_export_tokens_plugin args : (Yojson.Safe.t, string) result =
   plugin_simple ~name:"export_design_tokens" ~default_timeout:20000
@@ -635,51 +606,39 @@ let handle_plugin_subscribe_events args : (Yojson.Safe.t, string) result =
 
 (** ============== Monolithic Router ============== *)
 
-let known_plugin_actions = [
-  "connect"; "use_channel"; "status"; "read_selection"; "get_node"; "export_image";
-  "get_variables"; "apply_ops"; "list_pages"; "switch_page"; "list_components";
-  "clone"; "group"; "ungroup"; "set_selection"; "zoom_to"; "reorder"; "set_locked";
-  "set_visible"; "flatten"; "set_auto_layout"; "get_viewport"; "set_viewport";
-  "rename"; "resize"; "move"; "set_opacity"; "set_corner_radius"; "set_fill";
-  "set_stroke"; "set_effects"; "create_component"; "detach_instance"; "set_text";
-  "find_all"; "notify"; "create_frame"; "create_rectangle"; "create_ellipse";
-  "create_text"; "create_line"; "create_polygon"; "create_star"; "delete_node";
-  "duplicate"; "align"; "distribute"; "boolean_union"; "boolean_subtract";
-  "boolean_intersect"; "boolean_exclude"; "get_local_styles"; "set_constraints";
-  "create_page"; "delete_page"; "rotate"; "flip"; "outline_stroke"; "set_blend_mode";
-  "get_selection_colors"; "swap_fill_stroke"; "copy_style"; "get_fonts"; "set_parent";
-  "create_vector"; "set_image_fill"; "get_plugin_data"; "set_plugin_data";
-  "get_doc_info"; "get_absolute_bounds"; "create_component_set"; "remove_auto_layout";
-  "create_slice"; "set_export_settings"; "get_reactions"; "set_reactions";
-  "rasterize"; "get_shared_plugin_data"; "set_shared_plugin_data"; "swap_component";
-  "resize_to_fit"; "get_characters"; "set_range_fills"; "set_range_font_size";
-  "insert_child"; "get_all_local_variables"; "get_styles_by_type"; "apply_style";
-  "get_overrides"; "reset_overrides"; "bring_to_front"; "send_to_back"; "set_grid";
-  "get_layer_list"; "scroll_and_zoom"; "get_paint_styles"; "set_text_case";
-  "get_stroke_details"; "set_stroke_weight"; "collapse_layer"; "execute_dsl";
-  "export_tokens"; "export_viewport"; "export_selection"; "watch_start"; "watch_stop";
-  "get_changes"; "create_instance"; "annotate"
-]
+let known_plugin_actions =
+  Mcp_plugin_actions.known_plugin_actions
 
-let suggest_action unknown =
-  let scored = List.filter_map (fun action ->
-    let d = String.length action in (* Simple placeholder for edit distance *)
-    if d > 0 then Some (d, action) else None
-  ) known_plugin_actions in
-  match List.sort compare scored with
-  | (_, suggestion) :: _ -> Printf.sprintf " Did you mean '%s'?" suggestion
-  | [] -> ""
+let dispatch_unknown_plugin_action action args =
+  match resolve_channel_id args with
+  | Error msg -> Error msg
+  | Ok channel_id ->
+      let payload =
+        match args with
+        | `Assoc fields ->
+            `Assoc (List.filter (fun (key, _) -> key <> "action" && key <> "channel_id") fields)
+        | _ -> `Assoc []
+      in
+      let timeout_ms = get_int "timeout_ms" args |> Option.value ~default:10000 in
+      plugin_exec ~channel_id ~name:action ~payload ~timeout_ms
 
 let handle_figma_plugin args : (Yojson.Safe.t, string) result =
   match get_string "action" args with
   | None -> Error "Missing action"
   | Some action ->
+      let action = String.lowercase_ascii (String.trim action) in
       match action with
       | "connect" -> handle_plugin_connect args
       | "use_channel" -> handle_plugin_use_channel args
       | "status" -> handle_plugin_status args
       | "read_selection" -> handle_plugin_read_selection args
       | "get_node" -> handle_plugin_get_node args
+      | "export_image" -> handle_plugin_export_node_image args
+      | "get_variables" -> handle_plugin_get_variables args
+      | "apply_ops" -> handle_plugin_apply_ops args
       | "batch" -> handle_plugin_batch args
       | "annotate" -> handle_annotate args
-      | _ -> Ok (`Assoc [("status", `String "Action routed (placeholder)")])
+      | "subscribe_events" -> handle_plugin_subscribe_events args
+      | "export_tokens" -> handle_export_tokens_plugin args
+      | action when List.mem action known_plugin_actions -> dispatch_unknown_plugin_action action args
+      | _ -> Error (Printf.sprintf "Unknown plugin action '%s'." action)

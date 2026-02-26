@@ -75,12 +75,9 @@ val handle_plugin_subscribe_events : Yojson.Safe.t -> (Yojson.Safe.t, string) re
 
 (** {1 Plugin Enhancement Tools (Phase A4)} *)
 
-val handle_get_quality_metrics : Yojson.Safe.t -> (Yojson.Safe.t, string) result
-val handle_get_node_code : Yojson.Safe.t -> (Yojson.Safe.t, string) result
 val handle_export_tokens_plugin : Yojson.Safe.t -> (Yojson.Safe.t, string) result
 
 (** {1 Unified plugin dispatch} *)
 
 val known_plugin_actions : string list
-val suggest_action : string -> string
 val handle_figma_plugin : Yojson.Safe.t -> (Yojson.Safe.t, string) result

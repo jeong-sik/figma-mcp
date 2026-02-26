@@ -639,29 +639,6 @@ let tool_figma_plugin_subscribe_events : tool_def = {
   ] [];
 }
 
-(** ============== Plugin Enhancement Tools (Phase A4) ============== *)
-
-let tool_figma_get_quality_metrics : tool_def = {
-  name = "figma_get_quality_metrics";
-  description = "🔌 PLUGIN QUALITY: 선택된 노드의 디자인 품질 메트릭 반환. SSIM 근사치, 레이아웃 일관성, 색상 조화 점수.";
-  input_schema = object_schema [
-    ("channel_id", string_prop "채널 ID (옵션)");
-    ("node_id", string_prop "노드 ID (옵션, 기본: 현재 선택)");
-    ("timeout_ms", number_prop "응답 대기 시간 (기본값: 10000)");
-  ] [];
-}
-
-let tool_figma_get_node_code : tool_def = {
-  name = "figma_get_node_code";
-  description = "🔌 PLUGIN CODE: 선택된 노드의 CSS/SCSS/Tailwind 코드 생성. syntax highlighting 지원.";
-  input_schema = object_schema [
-    ("channel_id", string_prop "채널 ID (옵션)");
-    ("node_id", string_prop "노드 ID (옵션, 기본: 현재 선택)");
-    ("format", enum_prop ["css"; "scss"; "tailwind"] "출력 포맷 (기본값: css)");
-    ("timeout_ms", number_prop "응답 대기 시간 (기본값: 10000)");
-  ] [];
-}
-
 let tool_figma_export_tokens_plugin : tool_def = {
   name = "figma_export_tokens_plugin";
   description = "🔌 PLUGIN TOKENS: Plugin Bridge를 통한 디자인 토큰 추출. 색상, 타이포, 간격, 그림자 등.";
@@ -677,38 +654,9 @@ let tool_figma_plugin : tool_def = {
   name = "figma_plugin";
   description = "🔌 PLUGIN: Figma Desktop 앱과 실시간 연동. action으로 세부 동작 선택. 106개 action 지원. 전용 WRITE 도구: figma_plugin_edit_node, figma_plugin_create_node, figma_plugin_delete_nodes, figma_plugin_batch.";
   input_schema = object_schema [
-    ("action", enum_prop [
-      "connect"; "use_channel"; "status";
-      "read_selection"; "get_node"; "export_image";
-      "get_variables"; "apply_ops";
-      "list_pages"; "switch_page"; "list_components";
-      "clone"; "group"; "ungroup";
-      "set_selection"; "zoom_to"; "reorder";
-      "set_locked"; "set_visible"; "flatten";
-      "set_auto_layout"; "get_viewport"; "set_viewport"; "rename";
-      "resize"; "move"; "set_opacity"; "set_corner_radius";
-      "set_fill"; "set_stroke"; "set_effects";
-      "create_component"; "create_instance"; "detach_instance"; "set_text"; "find_all"; "notify";
-      "create_frame"; "create_rectangle"; "create_ellipse"; "create_text";
-      "create_line"; "create_polygon"; "create_star";
-      "delete_node"; "duplicate"; "align"; "distribute";
-      "boolean_union"; "boolean_subtract"; "boolean_intersect"; "boolean_exclude";
-      "get_local_styles"; "set_constraints";
-      "create_page"; "delete_page"; "rotate"; "flip";
-      "outline_stroke"; "set_blend_mode"; "get_selection_colors";
-      "swap_fill_stroke"; "copy_style"; "get_fonts"; "set_parent";
-      "create_vector"; "set_image_fill"; "get_plugin_data"; "set_plugin_data";
-      "get_doc_info"; "get_absolute_bounds"; "create_component_set"; "remove_auto_layout";
-      "create_slice"; "set_export_settings"; "get_reactions"; "set_reactions";
-      "rasterize"; "get_shared_plugin_data"; "set_shared_plugin_data";
-      "swap_component"; "resize_to_fit"; "get_characters"; "set_range_fills";
-      "set_range_font_size"; "insert_child"; "get_all_local_variables";
-      "get_styles_by_type"; "apply_style"; "get_overrides"; "reset_overrides";
-      "bring_to_front"; "send_to_back"; "set_grid"; "get_layer_list";
-      "scroll_and_zoom"; "get_paint_styles"; "set_text_case";
-      "get_stroke_details"; "set_stroke_weight"; "collapse_layer";
-      "export_viewport"; "export_selection"; "get_changes"; "watch_start"; "watch_stop";
-    ] "106개 action: 연결(3), 페이지(4), 문서(1), 생성(12), 조회(20), 편집(9), 변형(7), 불리언(4), 정렬(2), 스타일(17), 텍스트(5), 레이아웃(4), 컴포넌트(4), 내보내기(3), 프로토타입(2), 레이어(4), 감시(3), 기타(2)");
+    ("action", enum_prop
+      Mcp_plugin_actions.figma_plugin_action_values
+      "106개 action: 연결(3), 페이지(4), 문서(1), 생성(12), 조회(20), 편집(9), 변형(7), 불리언(4), 정렬(2), 스타일(17), 텍스트(5), 레이아웃(4), 컴포넌트(4), 내보내기(3), 프로토타입(2), 레이어(4), 감시(3), 기타(2)");
     ("channel_id", string_prop "채널 ID");
     ("node_id", string_prop "노드 ID");
     ("url", string_prop "Figma URL (node_id 자동 추출)");
@@ -1182,9 +1130,7 @@ let all_detailed_tools = [
   tool_figma_plugin_batch;
   tool_figma_plugin_subscribe_events;
   tool_figma_plugin;
-  (* Plugin Enhancement Tools (Phase A4) *)
-  tool_figma_get_quality_metrics;
-  tool_figma_get_node_code;
+  (* Plugin Enhancement Tools *)
   tool_figma_export_tokens_plugin;
   (* Phase 1: 탐색 도구 *)
   tool_figma_parse_url;
@@ -1279,8 +1225,8 @@ let is_under_dir ~dir path =
 
 (** Core Figma API handlers (handle_get_file .. handle_get_style): moved to mcp_api_handlers.ml *)
 
-(** Plugin handlers (handle_plugin_*, handle_figma_plugin, known_plugin_actions,
-    suggest_action): moved to mcp_plugin_handlers.ml *)
+(** Plugin handlers (handle_plugin_*, handle_figma_plugin, known_plugin_actions):
+    moved to mcp_plugin_handlers.ml *)
 
 (** ============== LLM Bridge 핸들러 ============== *)
 
@@ -2729,9 +2675,7 @@ let all_handlers_sync : (string * tool_handler_sync) list = [
   ("figma_plugin_delete_nodes", wrap_sync_pure handle_plugin_delete_nodes);
   ("figma_plugin_batch", wrap_sync_pure handle_plugin_batch);
   ("figma_plugin_subscribe_events", wrap_sync_pure handle_plugin_subscribe_events);
-  (* Plugin Enhancement Tools (Phase A4) *)
-  ("figma_get_quality_metrics", wrap_sync_pure handle_get_quality_metrics);
-  ("figma_get_node_code", wrap_sync_pure handle_get_node_code);
+  (* Plugin Enhancement Tools *)
   ("figma_export_tokens_plugin", wrap_sync_pure handle_export_tokens_plugin);
   (* Phase 1: 탐색 도구 *)
   ("figma_parse_url", wrap_sync_pure handle_parse_url);
