@@ -647,11 +647,10 @@ let levenshtein_distance a b =
     curr.(0) <- i;
     for j = 1 to m do
       let cost = if a.[i - 1] = b.[j - 1] then 0 else 1 in
-      curr.(j) <-(
+      curr.(j) <-
         min
           (curr.(j - 1) + 1)
-          (min (prev.(j) + 1) (prev.(j - 1) + cost)
-          )
+          (min (prev.(j) + 1) (prev.(j - 1) + cost))
     done;
     for j = 0 to m do
       prev.(j) <- curr.(j)
