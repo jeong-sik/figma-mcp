@@ -660,6 +660,7 @@ let levenshtein_distance a b =
 
 let suggest_action unknown =
   let unknown = String.lowercase_ascii (String.trim unknown) in
+  let unknown_len = String.length unknown in
   let best_distance = Int.max_int in
   let best =
     List.fold_left (fun (best_d, best_action) action ->
@@ -669,7 +670,8 @@ let suggest_action unknown =
   in
   match best with
   | (_, None) -> ""
-  | (dist, Some action) when dist <= 3 -> Printf.sprintf " Did you mean '%s'?" action
+  | (dist, Some action) when dist <= 3 || unknown_len <= 1 ->
+      Printf.sprintf " Did you mean '%s'?" action
   | _ -> ""
 
 let dispatch_unknown_plugin_action action args =
