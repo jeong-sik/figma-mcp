@@ -41,6 +41,10 @@ let () =
     check bool "contains annotate" true
       (List.mem "annotate" Mcp_plugin_handlers.known_plugin_actions)
   in
+  let test_known_actions_excludes_execute_dsl () =
+    check bool "does not contain execute_dsl" false
+      (List.mem "execute_dsl" Mcp_plugin_handlers.known_plugin_actions)
+  in
   let test_known_actions_count () =
     check bool "many actions" true
       (List.length Mcp_plugin_handlers.known_plugin_actions > 50)
@@ -653,6 +657,7 @@ let () =
       test_case "non-empty" `Quick test_known_actions_nonempty;
       test_case "has connect" `Quick test_known_actions_has_connect;
       test_case "has annotate" `Quick test_known_actions_has_annotate;
+      test_case "does not include execute_dsl" `Quick test_known_actions_excludes_execute_dsl;
       test_case "count >50" `Quick test_known_actions_count;
     ]);
     ("suggest_action", [
