@@ -274,6 +274,11 @@
  (name test_crawl_coverage)
  (libraries figma_mcp alcotest yojson))
 
+; PR #131: file fetch error accumulation in figma_crawl.ml
+(test
+ (name test_crawl_file_fetch_errors)
+ (libraries figma_mcp alcotest))
+
 ; Coverage: visual_verifier.ml extra (hints, corrections, parse_diff_regions)
 (test
  (name test_visual_verifier_extra)
