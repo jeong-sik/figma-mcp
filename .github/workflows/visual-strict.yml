@@ -1,0 +1,66 @@
+name: Visual Strict Gate
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "lib/ciede2000.ml"
+      - "lib/ssim.ml"
+      - "lib/color_convert.ml"
+      - "test/test_ciede2000.ml"
+      - "test/test_ssim.ml"
+      - "test/test_color_convert.ml"
+      - "scripts/visual-strict-gate.sh"
+      - ".github/workflows/visual-strict.yml"
+  workflow_dispatch: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  strict:
+    name: Visual Strict Gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup OCaml
+        uses: ocaml/setup-ocaml@v3
+        with:
+          ocaml-compiler: 5.4.x
+          dune-cache: true
+
+      - name: Pin external dependencies
+        run: |
+          opam pin add grpc-direct-core https://github.com/jeong-sik/grpc-direct.git#main -n -y
+          opam pin add grpc-direct https://github.com/jeong-sik/grpc-direct.git#main -n -y
+
+      - name: Install dependencies
+        run: |
+          for attempt in 1 2 3; do
+            opam install . --deps-only --with-test --yes && break
+            if [ "$attempt" -eq 3 ]; then
+              echo "opam install failed after ${attempt} attempts"
+              exit 1
+            fi
+            echo "opam install failed (attempt ${attempt}); retrying in 15s..."
+            sleep 15
+          done
+
+      - name: Run visual strict gate (Fail-Closed)
+        run: |
+          chmod +x scripts/visual-strict-gate.sh
+          scripts/visual-strict-gate.sh
+
+      - name: Upload gate artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: visual-strict-gate-${{ github.run_id }}
+          path: |
+            _build/default/test/*.log
+          if-no-files-found: warn
