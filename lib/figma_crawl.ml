@@ -529,7 +529,8 @@ let team_tree ~token ~team_id
                      (* 상세 노드 트리 렌더링 *)
                      if node_depth > 0 then
                        render_node_tree ~indent:5 ~max_depth:node_depth ~depth:0 document buf
-                 | Error _ -> ()
+                 | Error err ->
+                  progress.errors <- (Printf.sprintf "File fetch failed: %s" err) :: progress.errors
                end
              ) files
          | Error err ->
