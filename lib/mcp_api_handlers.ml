@@ -1710,13 +1710,13 @@ let handle_add_dev_resource args : (Yojson.Safe.t, string) result =
 let handle_setup_webhook args : (Yojson.Safe.t, string) result =
   let team_id = get_string "team_id" args in
   let file_key = get_string "file_key" args in
-  let endpoint = get_string_or "endpoint" "https://mcp.your-domain.com/webhook/figma" args in
-  let passcode = get_string_or "passcode" "secret-passcode" args in
+  let endpoint = get_string "endpoint" args in
+  let passcode = get_string "passcode" args in
   let token = resolve_token args in
-  match (team_id, file_key, token) with
-  | (Some _team_id, Some _file_key, Some _token) ->
-      ignore (endpoint, passcode);
+  match (team_id, file_key, endpoint, passcode, token) with
+  | (Some _team_id, Some _file_key, Some _endpoint, Some _passcode, Some _token) ->
       Error "setup_webhook: planned for v0.8 (requires Figma Webhooks v2 API)"
-  | _ -> Error "Missing required parameters: team_id, file_key, token"
+  | (Some _, Some _, _, _, Some _) ->
+      Error "Missing required parameters: endpoint, passcode"
+  | _ -> Error "Missing required parameters: team_id, file_key, endpoint, passcode, token"
 [@@coverage off]
-

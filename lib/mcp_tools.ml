@@ -1071,9 +1071,9 @@ let tool_figma_setup_webhook : tool_def = {
   input_schema = object_schema [
     ("team_id", string_prop "팀 ID");
     ("file_key", string_prop "대상 파일 키");
-    ("endpoint", string_prop "알림을 받을 서버 URL (기본값: 우리 MCP 서버)");
-    ("passcode", string_prop "Webhook 보안 패스코드 (기본값: 랜덤)");
-  ] ["team_id"; "file_key"];
+    ("endpoint", string_prop "알림을 받을 서버 URL");
+    ("passcode", string_prop "Webhook 보안 패스코드");
+  ] ["team_id"; "file_key"; "endpoint"; "passcode"];
 }
 
 let tool_figma_annotate : tool_def = {
