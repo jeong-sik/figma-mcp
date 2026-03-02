@@ -206,6 +206,8 @@ HTTP endpoints: `POST /plugin/connect`, `POST /plugin/poll`, `POST /plugin/resul
 
 For detailed setup, troubleshooting, and configuration: `docs/plugin-workflow.md`.
 
+Supported actions for `figma_plugin` (authoritative list) are documented in `docs/figma_plugin_actions.md`.
+
 ## gRPC Streaming
 
 Server streaming for large Figma files. Use when responses exceed typical HTTP payload sizes or when recursive traversal is needed.
