@@ -4,7 +4,7 @@
  */
 
 figma.showUI(__html__, { width: 620, height: 700 });
-const PLUGIN_BRIDGE_VERSION = "0.8.3";
+const PLUGIN_BRIDGE_VERSION = "0.8.4";
 
 // Base64 encoder for Uint8Array (btoa is not available in Figma plugin sandbox)
 const _b64chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
