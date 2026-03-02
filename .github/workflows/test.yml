@@ -27,8 +27,16 @@ jobs:
         run: |
           opam install . --deps-only --with-test -y
 
+      - name: Plugin regression smoke (bounded)
+        run: |
+          set -euo pipefail
+          timeout 180 opam exec -- dune exec -- test/test_plugin_bridge_w7.exe
+          timeout 180 opam exec -- dune exec -- test/test_plugin_features.exe
+          timeout 180 opam exec -- dune exec -- test/test_plugin_dispatch_coverage.exe
+          timeout 240 opam exec -- dune exec -- test/test_plugin_handlers_w6.exe
+
       - name: OCaml tests
-        run: opam exec -- dune test
+        run: opam exec -- dune test --no-buffer -j 1
 
       - name: Python tests (optional)
         if: ${{ hashFiles('scripts/test_*.py') != '' }}
