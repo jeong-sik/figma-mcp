@@ -368,7 +368,8 @@
 ; Coverage Wave 6: mcp_plugin_handlers.ml (success paths, deep branches)
 (test
  (name test_plugin_handlers_w6)
- (libraries figma_mcp alcotest yojson unix str base64))
+ (libraries figma_mcp alcotest yojson unix str base64)
+ (action (run %{test} --color=always)))
 
 ; Coverage Wave 6: mcp_tools.ml (uncovered branches — compact_json, chunkify, plugin stats, etc.)
 (test

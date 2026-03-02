@@ -1019,7 +1019,7 @@
         </h1>
         <div class="header-right">
           <span class="ping" id="pingDisplay" style="display:none;">--ms</span>
-          <span class="version">v0.7.1</span>
+          <span class="version" id="pluginVersion">--</span>
         </div>
       </div>
 
@@ -1030,18 +1030,25 @@
         </div>
       </div>
 
-      <div style="margin-top: 6px;">
-        <label>API Key</label>
-        <div class="input-row">
-          <input id="apiKey" type="password" placeholder="X-MCP-API-Key" />
-        </div>
+      <div class="toggle-row" style="margin-top: 6px;">
+        <span>Advanced connection options</span>
+        <div class="toggle" id="bridgeAdvancedToggle"></div>
       </div>
 
-      <div>
-        <label>Channel ID</label>
-        <div class="input-row">
-          <input id="channel" placeholder="Auto-generated" />
-          <button class="icon-btn" id="copyChannel" disabled title="Copy">📋</button>
+      <div id="bridgeAdvancedFields" style="display:none;">
+        <div style="margin-top: 6px;">
+          <label>API Key</label>
+          <div class="input-row">
+            <input id="apiKey" type="password" placeholder="X-MCP-API-Key" />
+          </div>
+        </div>
+
+        <div>
+          <label>Channel ID</label>
+          <div class="input-row">
+            <input id="channel" placeholder="Auto-generated" />
+            <button class="icon-btn" id="copyChannel" disabled title="Copy">📋</button>
+          </div>
         </div>
       </div>
 
@@ -1535,10 +1542,12 @@
       var connectBtn = $("connect"), connectText = $("connectText"), connectSpinner = $("connectSpinner");
       var disconnectBtn = $("disconnect"), selfTestBtn = $("selfTest");
       var statusDot = $("statusDot"), statusText = $("statusText"), pingDisplay = $("pingDisplay");
+      var pluginVersionEl = $("pluginVersion");
       var cmdCount = $("cmdCount"), okCount = $("okCount"), errCount = $("errCount"), avgPingEl = $("avgPing");
       var sessionBar = $("sessionBar"), sessionDuration = $("sessionDuration");
       var successRate = $("successRate"), cmdPerMin = $("cmdPerMin");
       var autoReconnectToggle = $("autoReconnect");
+      var bridgeAdvancedToggle = $("bridgeAdvancedToggle"), bridgeAdvancedFields = $("bridgeAdvancedFields");
       var testProgress = $("testProgress"), testName = $("testName"), testCount = $("testCount"), testBar = $("testBar");
       var logContent = $("logContent"), logWrapper = $("logWrapper"), logBadge = $("logBadge");
       var inspectorData = $("inspectorData"), selectionCountBadge = $("selectionCount");
@@ -1568,6 +1577,8 @@
       var currentFilter = "all";
       var pings = [], reconnectAttempts = 0, MAX_RECONNECT = 5;
       var autoReconnect = true;
+      var channelRefreshAttempted = false;
+      var showBridgeAdvanced = false;
       var lastSelection = null;
       var isAnalyzing = false;
       var isGenerating = false;
@@ -1679,6 +1690,38 @@
         }
         return "";
       }
+      function setBridgeAdvancedOn(on) {
+        showBridgeAdvanced = !!on;
+        if (bridgeAdvancedToggle) bridgeAdvancedToggle.className = "toggle" + (showBridgeAdvanced ? " on" : "");
+        if (bridgeAdvancedFields) bridgeAdvancedFields.style.display = showBridgeAdvanced ? "block" : "none";
+      }
+      function isChannelStaleError(err) {
+        var status = err && err.status;
+        if (status === 404 || status === 410) return true;
+        var message = String((err && err.message) || err || "").toLowerCase();
+        return message.indexOf("http 404") >= 0 ||
+          message.indexOf("http 410") >= 0 ||
+          message.indexOf("channel not found") >= 0 ||
+          message.indexOf("unknown channel") >= 0 ||
+          message.indexOf("stale channel") >= 0;
+      }
+      function attemptChannelRefresh(trigger, err) {
+        if (!autoReconnect || channelRefreshAttempted) return false;
+        channelRefreshAttempted = true;
+        polling = false;
+        channelId = "";
+        if (channelInput) channelInput.value = "";
+        setStatus("connecting", "Refreshing channel...");
+        addLog("reconnect", "Refreshing channel (" + trigger + "): " + String((err && err.message) || err || "unknown"), false);
+        setConnected(false);
+        connect({ forceNewChannel: true, reason: trigger, propagateErrors: true }).catch(function(reconnectErr) {
+          polling = false;
+          setStatus("error", "Disconnected");
+          setConnected(false);
+          addLog("reconnect", "Channel refresh failed: " + String((reconnectErr && reconnectErr.message) || reconnectErr), false);
+        });
+        return true;
+      }
       function updateLlmUI() {
         var p = $("llmProvider").value;
         var keyLabel = $("llmApiKeyLabel");
@@ -1705,6 +1748,16 @@
       }
       function loadState() { try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) || {}; } catch(e) { return {}; } }
       function saveState(s) { try { localStorage.setItem(STORAGE_KEY, JSON.stringify(s)); } catch(e) {} }
+      function saveConnectionState() {
+        var st = loadState();
+        st.serverUrl = normalizeUrl(serverInput.value);
+        st.channelId = channelInput.value.trim();
+        st.rememberApiKey = rememberApiKey;
+        st.showBridgeAdvanced = showBridgeAdvanced;
+        if (rememberApiKey) st.apiKey = currentApiKey();
+        else delete st.apiKey;
+        saveState(st);
+      }
       function loadSessionApiKey() { try { return sessionStorage.getItem(SESSION_API_KEY_KEY) || ""; } catch(e) { return ""; } }
       function saveSessionApiKey(k) { try { sessionStorage.setItem(SESSION_API_KEY_KEY, k || ""); } catch(e) {} }
       function setLlmToggle(el, on) {
@@ -2130,9 +2183,11 @@
       }
 
       // Connect
-      function connect() {
+      function connect(options) {
+        options = options || {};
+        var forceNewChannel = !!options.forceNewChannel;
         serverUrl = normalizeUrl(serverInput.value);
-        channelId = channelInput.value.trim();
+        channelId = forceNewChannel ? "" : channelInput.value.trim();
         apiKey = currentApiKey();
         if (!serverUrl) { addLog("connect", "URL required", false); setStatus("error", "URL Required"); return Promise.reject(); }
         var secErr = validateServerUrlSecurity(serverUrl, apiKey);
@@ -2152,29 +2207,36 @@
           body: JSON.stringify(payload)
         }).then(function(r) {
           updatePing(Date.now() - startTime);
-          if (!r.ok) throw new Error("HTTP " + r.status);
+          if (!r.ok) {
+            var connectErr = new Error("HTTP " + r.status);
+            connectErr.status = r.status;
+            throw connectErr;
+          }
           return r.json();
         }).then(function(d) {
           channelId = d.channel_id || channelId;
           channelInput.value = channelId;
           saveSessionApiKey(apiKey);
-          saveState({ serverUrl: serverUrl, channelId: channelId, rememberApiKey: rememberApiKey, apiKey: rememberApiKey ? apiKey : undefined });
+          saveConnectionState();
           setStatus("connected", "Connected");
           setConnected(true);
           setConnecting(false);
           reconnectAttempts = 0;
+          channelRefreshAttempted = false;
           addLog("connect", "Channel: " + channelId.slice(0, 8) + "...", true);
           polling = true; pollLoop();
         }).catch(function(e) {
           setStatus("error", "Failed: " + (e && e.message ? e.message : String(e)));
           setConnecting(false);
           addLog("connect", String(e), false);
+          if (options.propagateErrors) throw e;
         });
       }
 
       function disconnect() {
         polling = false;
         channelId = "";
+        channelRefreshAttempted = false;
         setStatus("", "Disconnected");
         setConnected(false);
         addLog("disconnect", "User disconnected", true);
@@ -2190,7 +2252,11 @@
           body: JSON.stringify({ channel_id: channelId, max_commands: 5, wait_ms: 15000 })
         }).then(function(r) {
           updatePing(Date.now() - startTime);
-          if (!r.ok) throw new Error("HTTP " + r.status);
+          if (!r.ok) {
+            var pollErr = new Error("HTTP " + r.status);
+            pollErr.status = r.status;
+            throw pollErr;
+          }
           return r.json();
         }).then(function(d) {
           setStatus("connected", "Connected");
@@ -2209,6 +2275,9 @@
           }
           if (polling) setTimeout(pollLoop, 50);
         }).catch(function(e) {
+          if (isChannelStaleError(e) && attemptChannelRefresh("stale-channel", e)) {
+            return;
+          }
           reconnectAttempts++;
           var delay = Math.min(2000 * reconnectAttempts, 10000);
           if (autoReconnect && reconnectAttempts < MAX_RECONNECT) {
@@ -2216,6 +2285,9 @@
             addLog("poll", String(e), false);
             if (polling) setTimeout(pollLoop, delay);
           } else {
+            if (attemptChannelRefresh("retry-exhausted", e)) {
+              return;
+            }
             polling = false;
             setStatus("error", "Disconnected");
             setConnected(false);
@@ -2242,6 +2314,9 @@
 
         if (msg.type === "init") {
           if (typeof msg.nonce === "string") { sessionNonce = msg.nonce; }
+          if (typeof msg.version === "string" && pluginVersionEl) {
+            pluginVersionEl.textContent = "v" + msg.version;
+          }
           return;
         }
 
@@ -2309,12 +2384,7 @@
         apiKeyInput.oninput = function() {
           apiKey = currentApiKey();
           saveSessionApiKey(apiKey);
-          saveState({
-            serverUrl: normalizeUrl(serverInput.value),
-            channelId: channelInput.value.trim(),
-            rememberApiKey: rememberApiKey,
-            apiKey: rememberApiKey ? apiKey : undefined
-          });
+          saveConnectionState();
         };
       }
       if (llmApiKeyInput) {
@@ -2330,6 +2400,12 @@
         autoReconnect = !autoReconnect;
         autoReconnectToggle.className = "toggle" + (autoReconnect ? " on" : "");
       };
+      if (bridgeAdvancedToggle) {
+        bridgeAdvancedToggle.onclick = function() {
+          setBridgeAdvancedOn(!showBridgeAdvanced);
+          saveConnectionState();
+        };
+      }
 
       function setRememberApiKeyOn(on) {
         rememberApiKey = !!on;
@@ -2341,12 +2417,7 @@
           setRememberApiKeyOn(!rememberApiKey);
           apiKey = currentApiKey();
           saveSessionApiKey(apiKey);
-          saveState({
-            serverUrl: normalizeUrl(serverInput.value),
-            channelId: channelInput.value.trim(),
-            rememberApiKey: rememberApiKey,
-            apiKey: rememberApiKey ? apiKey : undefined
-          });
+          saveConnectionState();
         };
       }
 
@@ -3367,6 +3438,11 @@
         apiKeyInput.value = initialApiKey;
         apiKey = initialApiKey;
         saveSessionApiKey(apiKey);
+      }
+      if (state.showBridgeAdvanced !== undefined) {
+        setBridgeAdvancedOn(!!state.showBridgeAdvanced);
+      } else {
+        setBridgeAdvancedOn(!!state.channelId || !!initialApiKey);
       }
       var initialLlmApiKey = loadSessionLlmApiKey();
       if (initialLlmApiKey && llmApiKeyInput) {

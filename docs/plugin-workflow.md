@@ -23,8 +23,8 @@
 4. MCP ready:       Claude Code → POST /mcp (JSON-RPC initialize)
 ```
 
-**Reconnect after server restart**: Plugin must be reopened in Figma.
-The plugin polls the old channel which no longer exists → timeout → user must close/reopen plugin.
+**Reconnect after server restart**: Bridge now attempts one forced channel refresh.
+If refresh fails, reopen the plugin in Figma to establish a new channel.
 
 ## Command Dispatch Chain
 
@@ -128,4 +128,4 @@ Step 5: Visual diff
 3. **export_selection returns full base64** — Token expensive, prefer plugin export_image for file output
 4. **Untitled files have no file_key** — REST API export_image won't work, use plugin methods
 5. **Plugin poll timeout** — Default 15s, long exports (25+ nodes) may need extended timeout
-6. **Channel stale after restart** — Old channels persist in memory but plugin won't poll them
+6. **Channel stale after restart** — Bridge performs one automatic channel refresh; reopen plugin if retry also fails

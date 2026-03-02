@@ -4,6 +4,7 @@
  */
 
 figma.showUI(__html__, { width: 620, height: 700 });
+const PLUGIN_BRIDGE_VERSION = "0.8.4";
 
 // Base64 encoder for Uint8Array (btoa is not available in Figma plugin sandbox)
 const _b64chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
@@ -25,7 +26,7 @@ function uint8ToBase64(bytes) {
 // UI<->plugin message hardening: a per-session nonce that must be echoed back
 // in every UI->plugin message (and included in plugin->UI messages).
 const sessionNonce = Math.random().toString(16).slice(2) + Date.now().toString(16);
-figma.ui.postMessage({ type: "init", nonce: sessionNonce });
+figma.ui.postMessage({ type: "init", nonce: sessionNonce, version: PLUGIN_BRIDGE_VERSION });
 
 const MIXED = figma.mixed;
 const MAX_PAYLOAD_CHARS = 2000000;
@@ -1964,7 +1965,7 @@ figma.loadAllPagesAsync().then(function() {
 figma.ui.onmessage = async (msg) => {
   // Allow the UI to request the nonce in case the initial init message was missed.
   if (msg && msg.type === "hello") {
-    figma.ui.postMessage({ type: "init", nonce: sessionNonce });
+    figma.ui.postMessage({ type: "init", nonce: sessionNonce, version: PLUGIN_BRIDGE_VERSION });
     return;
   }
 
