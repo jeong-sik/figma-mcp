@@ -11,22 +11,22 @@ open Mcp_helpers
    ============================================================ *)
 
 let test_string_contains_empty_sub () =
-  check bool "empty substring always true" true (string_contains "hello" "")
+  check bool "empty substring returns false" false (Mcp_helpers.string_contains ~haystack:"hello" ~needle:"")
 
 let test_string_contains_empty_string () =
-  check bool "non-empty sub in empty string" false (string_contains "" "a")
+  check bool "non-empty sub in empty string" false (Mcp_helpers.string_contains ~haystack:"" ~needle:"a")
 
 let test_string_contains_both_empty () =
-  check bool "both empty" true (string_contains "" "")
+  check bool "both empty" false (Mcp_helpers.string_contains ~haystack:"" ~needle:"")
 
 let test_string_contains_case_insensitive () =
-  check bool "case insensitive" true (string_contains "HelloWorld" "hELLO")
+  check bool "case insensitive" true (Mcp_helpers.string_contains ~haystack:"HelloWorld" ~needle:"hELLO")
 
 let test_string_contains_not_found () =
-  check bool "not found" false (string_contains "abc" "xyz")
+  check bool "not found" false (Mcp_helpers.string_contains ~haystack:"abc" ~needle:"xyz")
 
 let test_string_contains_partial_overlap () =
-  check bool "partial match at end" true (string_contains "abcxyz" "xyz")
+  check bool "partial match at end" true (Mcp_helpers.string_contains ~haystack:"abcxyz" ~needle:"xyz")
 
 let string_contains_tests = [
   "empty sub", `Quick, test_string_contains_empty_sub;
@@ -830,8 +830,8 @@ let test_handle_category_invalid_mode () =
      fail "expected Invalid_argument for invalid mode"
    with Invalid_argument msg ->
      check bool "mentions invalid" true
-       (Mcp_tools.string_contains msg "invalid" ||
-        Mcp_tools.string_contains msg "Invalid"))
+       (Mcp_helpers.string_contains ~haystack:msg ~needle:"invalid" ||
+        Mcp_helpers.string_contains ~haystack:msg ~needle:"Invalid"))
 
 let test_handle_category_unknown_category () =
   let args = `Assoc [("mode", `String "list")] in
@@ -850,7 +850,7 @@ let test_handle_category_call_missing_args () =
   (match result with
    | Error msg ->
        check bool "mentions args" true
-         (Mcp_tools.string_contains msg "args")
+         (Mcp_helpers.string_contains ~haystack:msg ~needle:"args")
    | Ok _ -> fail "expected Error for missing args in call mode")
 
 let test_handle_category_call_with_args () =
@@ -905,7 +905,7 @@ let test_handle_parse_url_missing () =
   let args = `Assoc [] in
   let result = handle_parse_url args in
   (match result with
-   | Error msg -> check bool "mentions url" true (Mcp_tools.string_contains msg "url")
+   | Error msg -> check bool "mentions url" true (Mcp_helpers.string_contains ~haystack:msg ~needle:"url")
    | Ok _ -> fail "expected Error")
 
 let test_handle_parse_url_valid () =
@@ -921,7 +921,7 @@ let test_handle_parse_url_with_node () =
   (match result with
    | Ok json ->
        let s = Yojson.Safe.to_string json in
-       check bool "contains file_key" true (Mcp_tools.string_contains s "ABC123")
+       check bool "contains file_key" true (Mcp_helpers.string_contains ~haystack:s ~needle:"ABC123")
    | Error msg -> fail (Printf.sprintf "expected Ok, got Error: %s" msg))
 
 let test_handle_get_me_no_token () =
@@ -932,7 +932,7 @@ let test_handle_get_me_no_token () =
   let result = handle_get_me args in
   (match saved with Some v -> Unix.putenv "FIGMA_TOKEN" v | None -> ());
   (match result with
-   | Error msg -> check bool "mentions token" true (Mcp_tools.string_contains msg "token")
+   | Error msg -> check bool "mentions token" true (Mcp_helpers.string_contains ~haystack:msg ~needle:"token")
    | Ok _ -> (* If FIGMA_TOKEN was set globally, this might succeed through Effect *) ())
 
 let test_handle_list_projects_missing () =
@@ -995,7 +995,7 @@ let test_handle_crawl_team_missing_team () =
   let args = `Assoc [] in
   let result = handle_crawl_team args in
   (match result with
-   | Error msg -> check bool "mentions team_id" true (Mcp_tools.string_contains msg "team_id")
+   | Error msg -> check bool "mentions team_id" true (Mcp_helpers.string_contains ~haystack:msg ~needle:"team_id")
    | Ok _ -> fail "expected Error")
 
 let test_handle_crawl_team_missing_token () =
@@ -1005,14 +1005,14 @@ let test_handle_crawl_team_missing_token () =
   let result = handle_crawl_team args in
   (match saved with Some v -> Unix.putenv "FIGMA_TOKEN" v | None -> ());
   (match result with
-   | Error msg -> check bool "mentions token" true (Mcp_tools.string_contains msg "token")
+   | Error msg -> check bool "mentions token" true (Mcp_helpers.string_contains ~haystack:msg ~needle:"token")
    | Ok _ -> ())
 
 let test_handle_team_tree_missing_team () =
   let args = `Assoc [] in
   let result = handle_team_tree args in
   (match result with
-   | Error msg -> check bool "mentions team_id" true (Mcp_tools.string_contains msg "team_id")
+   | Error msg -> check bool "mentions team_id" true (Mcp_helpers.string_contains ~haystack:msg ~needle:"team_id")
    | Ok _ -> fail "expected Error")
 
 let test_handle_team_tree_missing_token () =
@@ -1022,14 +1022,14 @@ let test_handle_team_tree_missing_token () =
   let result = handle_team_tree args in
   (match saved with Some v -> Unix.putenv "FIGMA_TOKEN" v | None -> ());
   (match result with
-   | Error msg -> check bool "mentions token" true (Mcp_tools.string_contains msg "token")
+   | Error msg -> check bool "mentions token" true (Mcp_helpers.string_contains ~haystack:msg ~needle:"token")
    | Ok _ -> ())
 
 let test_handle_export_team_missing_team () =
   let args = `Assoc [] in
   let result = handle_export_team args in
   (match result with
-   | Error msg -> check bool "mentions team_id" true (Mcp_tools.string_contains msg "team_id")
+   | Error msg -> check bool "mentions team_id" true (Mcp_helpers.string_contains ~haystack:msg ~needle:"team_id")
    | Ok _ -> fail "expected Error")
 
 let test_handle_export_team_missing_token () =
@@ -1039,14 +1039,14 @@ let test_handle_export_team_missing_token () =
   let result = handle_export_team args in
   (match saved with Some v -> Unix.putenv "FIGMA_TOKEN" v | None -> ());
   (match result with
-   | Error msg -> check bool "mentions token" true (Mcp_tools.string_contains msg "token")
+   | Error msg -> check bool "mentions token" true (Mcp_helpers.string_contains ~haystack:msg ~needle:"token")
    | Ok _ -> ())
 
 let test_handle_export_team_missing_output_dir () =
   let args = `Assoc [("team_id", `String "12345"); ("token", `String "faketoken")] in
   let result = handle_export_team args in
   (match result with
-   | Error msg -> check bool "mentions output_dir" true (Mcp_tools.string_contains msg "output_dir")
+   | Error msg -> check bool "mentions output_dir" true (Mcp_helpers.string_contains ~haystack:msg ~needle:"output_dir")
    | Ok _ -> fail "expected Error")
 
 let handler_error_tests = [
@@ -1079,7 +1079,7 @@ let test_handle_codegen_sync_missing_json () =
   let args = `Assoc [] in
   let result = handle_codegen_sync args in
   (match result with
-   | Error msg -> check bool "mentions json" true (Mcp_tools.string_contains msg "json")
+   | Error msg -> check bool "mentions json" true (Mcp_helpers.string_contains ~haystack:msg ~needle:"json")
    | Ok _ -> fail "expected Error")
 
 let test_handle_codegen_sync_invalid_json () =
@@ -1104,7 +1104,7 @@ let test_wrap_sync_pure_no_eio () =
   let wrapped = wrap_sync_pure handler in
   let result = wrapped (`Assoc []) in
   (match result with
-   | Error msg -> check bool "mentions Eio" true (Mcp_tools.string_contains msg "Eio")
+   | Error msg -> check bool "mentions Eio" true (Mcp_helpers.string_contains ~haystack:msg ~needle:"Eio")
    | Ok _ -> fail "expected Error without Eio context")
 
 let wrap_sync_tests = [
@@ -1119,7 +1119,7 @@ let test_handle_read_large_result_missing_path () =
   let args = `Assoc [] in
   let result = handle_read_large_result args in
   (match result with
-   | Error msg -> check bool "mentions file_path" true (Mcp_tools.string_contains msg "file_path")
+   | Error msg -> check bool "mentions file_path" true (Mcp_helpers.string_contains ~haystack:msg ~needle:"file_path")
    | Ok _ -> fail "expected Error")
 
 let test_handle_read_large_result_outside_dir () =
@@ -1153,7 +1153,7 @@ let test_handle_cache_invalidate_all () =
   (match result with
    | Ok json ->
        let s = Yojson.Safe.to_string json in
-       check bool "all cache" true (Mcp_tools.string_contains s "All cache")
+       check bool "all cache" true (Mcp_helpers.string_contains ~haystack:s ~needle:"All cache")
    | Error msg -> fail msg)
 
 let test_handle_cache_invalidate_file_only () =
@@ -1162,7 +1162,7 @@ let test_handle_cache_invalidate_file_only () =
   (match result with
    | Ok json ->
        let s = Yojson.Safe.to_string json in
-       check bool "mentions file" true (Mcp_tools.string_contains s "ABC123")
+       check bool "mentions file" true (Mcp_helpers.string_contains ~haystack:s ~needle:"ABC123")
    | Error msg -> fail msg)
 
 let test_handle_cache_invalidate_file_and_node () =
@@ -1171,7 +1171,7 @@ let test_handle_cache_invalidate_file_and_node () =
   (match result with
    | Ok json ->
        let s = Yojson.Safe.to_string json in
-       check bool "mentions node" true (Mcp_tools.string_contains s "1:2")
+       check bool "mentions node" true (Mcp_helpers.string_contains ~haystack:s ~needle:"1:2")
    | Error msg -> fail msg)
 
 let cache_invalidate_tests = [
@@ -1188,14 +1188,14 @@ let test_handle_code_connect_empty_mode () =
   let args = `Assoc [] in
   let result = handle_code_connect args in
   (match result with
-   | Error msg -> check bool "mentions mode" true (Mcp_tools.string_contains msg "mode")
+   | Error msg -> check bool "mentions mode" true (Mcp_helpers.string_contains ~haystack:msg ~needle:"mode")
    | Ok _ -> fail "expected Error")
 
 let test_handle_code_connect_unknown_mode () =
   let args = `Assoc [("mode", `String "bogus")] in
   let result = handle_code_connect args in
   (match result with
-   | Error msg -> check bool "mentions unknown" true (Mcp_tools.string_contains msg "nknown")
+   | Error msg -> check bool "mentions unknown" true (Mcp_helpers.string_contains ~haystack:msg ~needle:"nknown")
    | Ok _ -> fail "expected Error")
 
 let test_handle_code_connect_validate_no_source () =
@@ -1218,7 +1218,7 @@ let test_handle_code_connect_validate_invalid_json () =
   let args = `Assoc [("mode", `String "validate"); ("json", `String "not json{")] in
   let result = handle_code_connect args in
   (match result with
-   | Error msg -> check bool "mentions JSON" true (Mcp_tools.string_contains msg "JSON")
+   | Error msg -> check bool "mentions JSON" true (Mcp_helpers.string_contains ~haystack:msg ~needle:"JSON")
    | Ok _ -> fail "expected Error for invalid JSON")
 
 let test_handle_code_connect_index_inline () =
@@ -1228,7 +1228,7 @@ let test_handle_code_connect_index_inline () =
   (match result with
    | Ok json ->
        let s = Yojson.Safe.to_string json in
-       check bool "has index_id" true (Mcp_tools.string_contains s "index_id")
+       check bool "has index_id" true (Mcp_helpers.string_contains ~haystack:s ~needle:"index_id")
    | Error _ -> ())
 
 let test_handle_code_connect_list_no_source () =
@@ -1252,7 +1252,7 @@ let test_handle_code_connect_match_bad_index () =
   ] in
   let result = handle_code_connect args in
   (match result with
-   | Error msg -> check bool "mentions index_id" true (Mcp_tools.string_contains msg "index_id")
+   | Error msg -> check bool "mentions index_id" true (Mcp_helpers.string_contains ~haystack:msg ~needle:"index_id")
    | Ok _ -> fail "expected Error")
 
 let code_connect_tests = [
@@ -1311,7 +1311,7 @@ let test_read_resource_tokens_empty_file_key () =
   (try Unix.putenv "FIGMA_TOKEN" "test_token" with _ -> ());
   let result = read_resource "figma://tokens/" in
   (match result with
-   | Error msg -> check bool "mentions file_key" true (Mcp_tools.string_contains msg "file_key")
+   | Error msg -> check bool "mentions file_key" true (Mcp_helpers.string_contains ~haystack:msg ~needle:"file_key")
    | Ok _ -> fail "expected Error for empty file_key")
 
 let test_read_resource_tokens_with_query () =
@@ -1481,8 +1481,8 @@ let test_handle_doctor () =
   (match result with
    | Ok json ->
        let s = Yojson.Safe.to_string json in
-       check bool "has checks" true (Mcp_tools.string_contains s "checks");
-       check bool "has status" true (Mcp_tools.string_contains s "status")
+       check bool "has checks" true (Mcp_helpers.string_contains ~haystack:s ~needle:"checks");
+       check bool "has status" true (Mcp_helpers.string_contains ~haystack:s ~needle:"status")
    | Error msg -> fail msg)
 
 let doctor_tests = [

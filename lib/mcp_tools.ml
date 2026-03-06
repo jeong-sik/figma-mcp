@@ -1,34 +1,17 @@
-let string_contains s sub = 
-  let len_s = String.length s in 
-  let len_sub = String.length sub in 
-  if len_sub = 0 then true 
-  else if len_sub > len_s then false 
-  else 
-    let found = ref false in 
-    for i = 0 to len_s - len_sub do 
-      if not !found then 
-        let match_at_i = ref true in 
-        for j = 0 to len_sub - 1 do 
-          if Char.lowercase_ascii s.[i + j] <> Char.lowercase_ascii sub.[j] then 
-            match_at_i := false 
-        done; 
-        if !match_at_i then found := true 
-    done; 
-    !found 
-
-let is_network_error exn = 
-  match exn with 
-  | Unix.Unix_error (Unix.EPIPE, _, _) 
-  | Unix.Unix_error (Unix.ECONNRESET, _, _) 
-  | Unix.Unix_error (Unix.ETIMEDOUT, _, _) -> true 
-  | _ -> 
-      let s = Printexc.to_string exn in 
-      string_contains s "broken pipe" || 
-      string_contains s "connection reset" || 
-      string_contains s "connection timed out" || 
-      string_contains s "econnreset" || 
-      string_contains s "epipe" || 
-      string_contains s "etimedout" 
+let is_network_error exn =
+  let sc = Mcp_helpers.string_contains in
+  match exn with
+  | Unix.Unix_error (Unix.EPIPE, _, _)
+  | Unix.Unix_error (Unix.ECONNRESET, _, _)
+  | Unix.Unix_error (Unix.ETIMEDOUT, _, _) -> true
+  | _ ->
+      let s = Printexc.to_string exn in
+      sc ~haystack:s ~needle:"broken pipe" ||
+      sc ~haystack:s ~needle:"connection reset" ||
+      sc ~haystack:s ~needle:"connection timed out" ||
+      sc ~haystack:s ~needle:"econnreset" ||
+      sc ~haystack:s ~needle:"epipe" ||
+      sc ~haystack:s ~needle:"etimedout"
 
 (** Figma MCP Tools 정의 *)
 
@@ -284,42 +267,6 @@ let tool_figma_verify_semantic : tool_def = {
     ("text_color_tol_rgb", number_prop "텍스트 색상 RGB 거리 허용치(0-1, 기본값: 0.15)");
     ("version", string_prop "특정 파일 버전 ID");
   ] ["file_key"; "node_id"; "html"];
-}
-
-(** Region-based comparison - 영역별 상세 비교 *)
-let tool_figma_compare_regions : tool_def = {
-  name = "figma_compare_regions";
-  description = "[DEPRECATED] figma_compare(mode: \"regions\")를 사용하세요. 영역별 이미지 비교 기능은 통합 compare 도구로 이전되었습니다.";
-  input_schema = object_schema [
-    ("image_a", string_prop "기준 이미지 경로 (Figma 렌더)");
-    ("image_b", string_prop "비교 이미지 경로 (HTML 렌더)");
-    ("regions", string_prop "비교할 영역 JSON 배열 [{name, x, y, width, height}]");
-    ("output_dir", string_prop "결과 저장 디렉토리 (기본값: /tmp/figma-evolution/regions)");
-    ("generate_diff", bool_prop "차이 이미지 생성 여부 (기본값: true)");
-  ] ["image_a"; "image_b"; "regions"];
-}
-
-(** Evolution Report - 진화 과정 리포트 조회 *)
-let tool_figma_evolution_report : tool_def = {
-  name = "figma_evolution_report";
-  description = "[DEPRECATED] figma_compare(mode: \"evolution\")를 사용하세요. 진화 리포트 기능은 통합 compare 도구로 이전되었습니다.";
-  input_schema = object_schema [
-    ("run_dir", string_prop "Evolution 디렉토리 경로 (예: /tmp/figma-evolution/run_1234567890). 없으면 최근 실행 목록 반환");
-    ("generate_image", bool_prop "비교 이미지 자동 생성 여부 (기본값: true)");
-  ] [];
-}
-
-(** Compare Elements - 색상/박스 확장 메트릭 비교 *)
-let tool_figma_compare_elements : tool_def = {
-  name = "figma_compare_elements";
-  description = "[DEPRECATED] figma_compare(mode: \"elements\")를 사용하세요. 색상/박스 비교 기능은 통합 compare 도구로 이전되었습니다.";
-  input_schema = object_schema [
-    ("type", enum_prop ["color"; "box"; "full"] "비교 타입: color(색상), box(박스), full(둘 다)");
-    ("color1", string_prop "첫 번째 색상 (#RRGGBB 또는 rgb(r,g,b))");
-    ("color2", string_prop "두 번째 색상 (#RRGGBB 또는 rgb(r,g,b))");
-    ("box1", string_prop "첫 번째 박스 (x,y,w,h 형식)");
-    ("box2", string_prop "두 번째 박스 (x,y,w,h 형식)");
-  ] ["type"];
 }
 
 let tool_figma_export_image : tool_def = {
@@ -1018,7 +965,6 @@ let tool_categories = [
              "tree"; "get_file_versions"; "parse_url"; "get_me"; "query"; "search"] };
   { name = "visual";
     description = "시각 검증 (SSIM, 비교)";
-    (* NOTE: compare_elements, compare_regions, evolution_report는 DEPRECATED → figma_compare(mode=...)로 통합 *)
     tools = ["verify_semantic"; "verify_visual"; "image_similarity"; "compare"; "fidelity_loop"] };
   (* plugin: monolithic tool로 직접 노출 (sub-handlers 미등록으로 category 라우팅 불가) *)
   { name = "team";

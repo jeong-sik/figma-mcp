@@ -14,25 +14,25 @@ open Alcotest
 
 let test_string_contains_basic () =
   check bool "substring found" true
-    (Figma_api_eio.string_contains "hello world" "world");
+    (Figma_api_eio.string_contains_ci ~haystack:"hello world" ~needle:"world");
   check bool "substring not found" false
-    (Figma_api_eio.string_contains "hello world" "xyz")
+    (Figma_api_eio.string_contains_ci ~haystack:"hello world" ~needle:"xyz")
 
 let test_string_contains_empty_sub () =
-  check bool "empty substring always matches" true
-    (Figma_api_eio.string_contains "anything" "")
+  check bool "empty substring returns false" false
+    (Figma_api_eio.string_contains_ci ~haystack:"anything" ~needle:"")
 
 let test_string_contains_empty_string () =
   check bool "empty string, non-empty sub" false
-    (Figma_api_eio.string_contains "" "abc")
+    (Figma_api_eio.string_contains_ci ~haystack:"" ~needle:"abc")
 
 let test_string_contains_equal () =
   check bool "exact match" true
-    (Figma_api_eio.string_contains "abc" "abc")
+    (Figma_api_eio.string_contains_ci ~haystack:"abc" ~needle:"abc")
 
 let test_string_contains_longer_sub () =
   check bool "sub longer than string" false
-    (Figma_api_eio.string_contains "ab" "abcd")
+    (Figma_api_eio.string_contains_ci ~haystack:"ab" ~needle:"abcd")
 
 (* ============== figma_api_eio: body_contains / body_contains_any ============== *)
 
@@ -80,61 +80,61 @@ let test_first_match_no_hit () =
 let test_suggestion_400_invalid_id () =
   let s = Figma_api_eio.suggestion_for_400 "Invalid ID format in request" in
   check bool "mentions ID" true
-    (Figma_api_eio.string_contains s "Invalid ID")
+    (Figma_api_eio.string_contains_ci ~haystack:s ~needle:"Invalid ID")
 
 let test_suggestion_400_missing () =
   let s = Figma_api_eio.suggestion_for_400 "Missing required parameter" in
   check bool "mentions missing" true
-    (Figma_api_eio.string_contains s "Missing")
+    (Figma_api_eio.string_contains_ci ~haystack:s ~needle:"Missing")
 
 let test_suggestion_400_node () =
   let s = Figma_api_eio.suggestion_for_400 "Node error occurred" in
   check bool "mentions node" true
-    (Figma_api_eio.string_contains (String.lowercase_ascii s) "node")
+    (Figma_api_eio.string_contains_ci ~haystack:(String.lowercase_ascii s) ~needle:"node")
 
 let test_suggestion_400_default () =
   let s = Figma_api_eio.suggestion_for_400 "some other error" in
   check bool "default suggestion" true
-    (Figma_api_eio.string_contains s "Invalid request")
+    (Figma_api_eio.string_contains_ci ~haystack:s ~needle:"Invalid request")
 
 (* ============== figma_api_eio: suggestion_for_404 ============== *)
 
 let test_suggestion_404_file () =
   let s = Figma_api_eio.suggestion_for_404 "File not found" in
   check bool "mentions file" true
-    (Figma_api_eio.string_contains (String.lowercase_ascii s) "file")
+    (Figma_api_eio.string_contains_ci ~haystack:(String.lowercase_ascii s) ~needle:"file")
 
 let test_suggestion_404_node () =
   let s = Figma_api_eio.suggestion_for_404 "Node not found" in
   check bool "mentions node" true
-    (Figma_api_eio.string_contains (String.lowercase_ascii s) "node")
+    (Figma_api_eio.string_contains_ci ~haystack:(String.lowercase_ascii s) ~needle:"node")
 
 let test_suggestion_404_version () =
   let s = Figma_api_eio.suggestion_for_404 "Version not found" in
   check bool "mentions version" true
-    (Figma_api_eio.string_contains (String.lowercase_ascii s) "version")
+    (Figma_api_eio.string_contains_ci ~haystack:(String.lowercase_ascii s) ~needle:"version")
 
 let test_suggestion_404_default () =
   let s = Figma_api_eio.suggestion_for_404 "generic 404" in
   check bool "default suggestion" true
-    (Figma_api_eio.string_contains (String.lowercase_ascii s) "not found")
+    (Figma_api_eio.string_contains_ci ~haystack:(String.lowercase_ascii s) ~needle:"not found")
 
 (* ============== figma_api_eio: suggestion_for_403 ============== *)
 
 let test_suggestion_403_scope () =
   let s = Figma_api_eio.suggestion_for_403 "file_variables:read scope required" in
   check bool "mentions scope" true
-    (Figma_api_eio.string_contains (String.lowercase_ascii s) "scope")
+    (Figma_api_eio.string_contains_ci ~haystack:(String.lowercase_ascii s) ~needle:"scope")
 
 let test_suggestion_403_invalid_scope () =
   let s = Figma_api_eio.suggestion_for_403 "invalid scope for this token" in
   check bool "mentions scope" true
-    (Figma_api_eio.string_contains (String.lowercase_ascii s) "scope")
+    (Figma_api_eio.string_contains_ci ~haystack:(String.lowercase_ascii s) ~needle:"scope")
 
 let test_suggestion_403_generic () =
   let s = Figma_api_eio.suggestion_for_403 "access denied" in
   check bool "mentions permission" true
-    (Figma_api_eio.string_contains (String.lowercase_ascii s) "permission")
+    (Figma_api_eio.string_contains_ci ~haystack:(String.lowercase_ascii s) ~needle:"permission")
 
 (* ============== figma_api_eio: truncate_body ============== *)
 
@@ -219,19 +219,19 @@ let test_friendly_string_network () =
   let err = Figma_api_eio.Network_error "DNS resolution failed" in
   let s = Figma_api_eio.api_error_to_friendly_string err in
   check bool "contains dns" true
-    (Figma_api_eio.string_contains (String.lowercase_ascii s) "dns")
+    (Figma_api_eio.string_contains_ci ~haystack:(String.lowercase_ascii s) ~needle:"dns")
 
 let test_friendly_string_json () =
   let err = Figma_api_eio.Json_error "unexpected token at position 0" in
   let s = Figma_api_eio.api_error_to_friendly_string err in
   check bool "contains invalid" true
-    (Figma_api_eio.string_contains (String.lowercase_ascii s) "invalid")
+    (Figma_api_eio.string_contains_ci ~haystack:(String.lowercase_ascii s) ~needle:"invalid")
 
 let test_friendly_string_timeout () =
   let err = Figma_api_eio.Timeout_error in
   let s = Figma_api_eio.api_error_to_friendly_string err in
   check bool "contains timed out" true
-    (Figma_api_eio.string_contains (String.lowercase_ascii s) "timed out")
+    (Figma_api_eio.string_contains_ci ~haystack:(String.lowercase_ascii s) ~needle:"timed out")
 
 (* ============== figma_api_eio: get_retry_delay Network_error ============== *)
 
@@ -338,7 +338,7 @@ let test_parse_neo4j_code_only_error () =
   match result with
   | Error msg ->
       check bool "has error code" true
-        (Figma_api_eio.string_contains msg "Neo.Error")
+        (Figma_api_eio.string_contains_ci ~haystack:msg ~needle:"Neo.Error")
   | Ok _ -> fail "expected error"
 
 let test_parse_neo4j_message_only_error () =
@@ -347,7 +347,7 @@ let test_parse_neo4j_message_only_error () =
   match result with
   | Error msg ->
       check bool "has error message" true
-        (Figma_api_eio.string_contains msg "something wrong")
+        (Figma_api_eio.string_contains_ci ~haystack:msg ~needle:"something wrong")
   | Ok _ -> fail "expected error"
 
 let test_parse_neo4j_multiple_errors () =
@@ -358,8 +358,8 @@ let test_parse_neo4j_multiple_errors () =
   let result = Figma_effects.parse_neo4j_response body in
   match result with
   | Error msg ->
-      check bool "has first" true (Figma_api_eio.string_contains msg "Error1");
-      check bool "has second" true (Figma_api_eio.string_contains msg "Error2")
+      check bool "has first" true (Figma_api_eio.string_contains_ci ~haystack:msg ~needle:"Error1");
+      check bool "has second" true (Figma_api_eio.string_contains_ci ~haystack:msg ~needle:"Error2")
   | Ok _ -> fail "expected error"
 
 let test_parse_neo4j_missing_code_key () =
@@ -368,7 +368,7 @@ let test_parse_neo4j_missing_code_key () =
   let result = Figma_effects.parse_neo4j_response body in
   match result with
   | Error msg ->
-      check bool "has message" true (Figma_api_eio.string_contains msg "oops")
+      check bool "has message" true (Figma_api_eio.string_contains_ci ~haystack:msg ~needle:"oops")
   | Ok _ -> fail "expected error"
 
 (* ============== figma_effects: make_neo4j_statement edge cases ============== *)
