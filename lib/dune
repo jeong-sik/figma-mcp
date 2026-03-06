@@ -11,6 +11,7 @@
    ;; Eio (Pure: HTTP server + gRPC server + Figma API client)
    eio
    eio_main
+   eio.unix
    httpun-eio
    gluten-eio
    cohttp-eio
