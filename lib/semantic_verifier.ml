@@ -55,8 +55,10 @@ type t = {
   mismatches: mismatch list;
 }
 
+let re_whitespace = Str.regexp "[ \t\n\r]+"
+
 let normalize_text s =
-  let s = Str.global_replace (Str.regexp "[ \t\n\r]+") " " s in
+  let s = Str.global_replace re_whitespace " " s in
   String.trim s
 
 let rgba_dist_rgb (a: rgba) (b: rgba) : float =
