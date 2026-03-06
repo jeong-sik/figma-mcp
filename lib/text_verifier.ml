@@ -5,6 +5,17 @@
 
 open Figma_types
 
+let re_script = Str.regexp "<script[^>]*>.*?</script>"
+let re_style = Str.regexp "<style[^>]*>.*?</style>"
+let re_tag = Str.regexp "<[^>]*>"
+let re_nbsp = Str.regexp_string "&nbsp;"
+let re_lt = Str.regexp_string "&lt;"
+let re_gt = Str.regexp_string "&gt;"
+let re_amp = Str.regexp_string "&amp;"
+let re_quot = Str.regexp_string "&quot;"
+let re_whitespace_lines = Str.regexp "[\n\r\t]+"
+let re_whitespace = Str.regexp "[ \t\n\r]+"
+
 (** 텍스트 비교 결과 *)
 type text_match = {
   dsl_text: string;      (** DSL에서 추출한 텍스트 *)
@@ -33,21 +44,21 @@ let rec extract_texts_from_node (node: ui_node) : string list =
 (** HTML에서 텍스트 추출 (간단한 태그 제거) *)
 let extract_texts_from_html (html: string) : string list =
   (* 1. script, style 태그 내용 제거 *)
-  let html = Str.global_replace (Str.regexp "<script[^>]*>.*?</script>") "" html in
-  let html = Str.global_replace (Str.regexp "<style[^>]*>.*?</style>") "" html in
+  let html = Str.global_replace re_script "" html in
+  let html = Str.global_replace re_style "" html in
 
   (* 2. HTML 태그 제거 *)
-  let html = Str.global_replace (Str.regexp "<[^>]*>") "\n" html in
+  let html = Str.global_replace re_tag "\n" html in
 
   (* 3. HTML 엔티티 디코딩 *)
-  let html = Str.global_replace (Str.regexp_string "&nbsp;") " " html in
-  let html = Str.global_replace (Str.regexp_string "&lt;") "<" html in
-  let html = Str.global_replace (Str.regexp_string "&gt;") ">" html in
-  let html = Str.global_replace (Str.regexp_string "&amp;") "&" html in
-  let html = Str.global_replace (Str.regexp_string "&quot;") "\"" html in
+  let html = Str.global_replace re_nbsp " " html in
+  let html = Str.global_replace re_lt "<" html in
+  let html = Str.global_replace re_gt ">" html in
+  let html = Str.global_replace re_amp "&" html in
+  let html = Str.global_replace re_quot "\"" html in
 
   (* 4. 줄바꿈/공백으로 분리하고 빈 문자열 제거 *)
-  let parts = Str.split (Str.regexp "[\n\r\t]+") html in
+  let parts = Str.split re_whitespace_lines html in
   List.filter_map (fun s ->
     let trimmed = String.trim s in
     if String.length trimmed > 0 then Some trimmed else None
@@ -56,7 +67,7 @@ let extract_texts_from_html (html: string) : string list =
 (** 텍스트 정규화 (비교용) *)
 let normalize_text (s: string) : string =
   (* 공백 정규화: 연속 공백 → 단일 공백 *)
-  let s = Str.global_replace (Str.regexp "[ \t\n\r]+") " " s in
+  let s = Str.global_replace re_whitespace " " s in
   String.trim s
 
 (** DSL 텍스트가 HTML 텍스트 목록에 존재하는지 확인 *)
