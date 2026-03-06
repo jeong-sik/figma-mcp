@@ -1030,7 +1030,7 @@ let test_read_resource_tokens_empty_key () =
   (match result with
    | Error msg ->
        check bool "mentions file_key" true
-         (string_contains msg "file_key" || string_contains msg "missing")
+         (Mcp_helpers.string_contains ~haystack:msg ~needle:"file_key" || Mcp_helpers.string_contains ~haystack:msg ~needle:"missing")
    | Ok _ -> ())
 
 (* tokens template with query params — exercises split_query + format extraction.
@@ -1077,7 +1077,7 @@ let read_resource_extra_tests = [
 let test_handle_codegen_sync_missing_json () =
   let args = `Assoc [] in
   match handle_codegen_sync args with
-  | Error msg -> check bool "mentions json" true (string_contains msg "json")
+  | Error msg -> check bool "mentions json" true (Mcp_helpers.string_contains ~haystack:msg ~needle:"json")
   | Ok _ -> fail "Expected Error for missing json"
 
 let test_handle_codegen_sync_invalid_json () =
@@ -1120,7 +1120,7 @@ let test_handle_parse_url_design_url () =
   match handle_parse_url args with
   | Ok json ->
       let s = Yojson.Safe.to_string json in
-      check bool "contains file_key" true (string_contains s "ABC123")
+      check bool "contains file_key" true (Mcp_helpers.string_contains ~haystack:s ~needle:"ABC123")
   | Error _ -> ()  (* Might fail if URL format not recognized *)
 
 let test_handle_parse_url_proto_url () =
@@ -1136,7 +1136,7 @@ let test_handle_parse_url_non_figma () =
   match handle_parse_url args with
   | Ok json ->
       let s = Yojson.Safe.to_string json in
-      check bool "has none markers" true (string_contains s "none")
+      check bool "has none markers" true (Mcp_helpers.string_contains ~haystack:s ~needle:"none")
   | Error _ -> ()
 
 let test_handle_parse_url_empty_string () =
@@ -1200,7 +1200,7 @@ let test_make_category_tool_structure () =
   let tool = make_category_tool cat in
   check string "name" "figma_test_cat" tool.name;
   check bool "description has tools" true
-    (string_contains tool.description "a, b");
+    (Mcp_helpers.string_contains ~haystack:tool.description ~needle:"a, b");
   (match tool.input_schema with
    | `Assoc _ -> ()
    | _ -> fail "Expected object schema")
@@ -1295,16 +1295,16 @@ let network_error_extra_tests = [
    ============================================================ *)
 
 let test_string_contains_repeated () =
-  check bool "repeated pattern" true (string_contains "ababab" "bab")
+  check bool "repeated pattern" true (Mcp_helpers.string_contains ~haystack:"ababab" ~needle:"bab")
 
 let test_string_contains_unicode () =
-  check bool "unicode haystack" true (string_contains "hello\xc3\xa9world" "world")
+  check bool "unicode haystack" true (Mcp_helpers.string_contains ~haystack:"hello\xc3\xa9world" ~needle:"world")
 
 let test_string_contains_single_char_both () =
-  check bool "single char both" true (string_contains "a" "a")
+  check bool "single char both" true (Mcp_helpers.string_contains ~haystack:"a" ~needle:"a")
 
 let test_string_contains_single_char_mismatch () =
-  check bool "single char mismatch" false (string_contains "a" "b")
+  check bool "single char mismatch" false (Mcp_helpers.string_contains ~haystack:"a" ~needle:"b")
 
 let string_contains_extra_tests = [
   "repeated pattern", `Quick, test_string_contains_repeated;
@@ -1398,11 +1398,11 @@ let test_handle_category_invalid_mode_caught () =
   (try
     match handle_category "core" args with
     | Error msg ->
-        check bool "mentions invalid" true (string_contains msg "invalid" || string_contains msg "Invalid")
+        check bool "mentions invalid" true (Mcp_helpers.string_contains ~haystack:msg ~needle:"invalid" || Mcp_helpers.string_contains ~haystack:msg ~needle:"Invalid")
     | Ok _ -> fail "Expected Error for invalid mode"
    with
    | Invalid_argument msg ->
-       check bool "mentions invalid" true (string_contains msg "Invalid" || string_contains msg "invalid")
+       check bool "mentions invalid" true (Mcp_helpers.string_contains ~haystack:msg ~needle:"Invalid" || Mcp_helpers.string_contains ~haystack:msg ~needle:"invalid")
    | exn ->
        (* Other exception: still acceptable, the branch was exercised *)
        check bool "exception raised" true (String.length (Printexc.to_string exn) > 0))
@@ -1422,14 +1422,14 @@ let test_handle_cache_invalidate_all () =
   match handle_cache_invalidate (`Assoc []) with
   | Ok json ->
       let s = Yojson.Safe.to_string json in
-      check bool "mentions all" true (string_contains s "All" || string_contains s "all")
+      check bool "mentions all" true (Mcp_helpers.string_contains ~haystack:s ~needle:"All" || Mcp_helpers.string_contains ~haystack:s ~needle:"all")
   | Error msg -> fail ("Unexpected error: " ^ msg)
 
 let test_handle_cache_invalidate_file_only () =
   match handle_cache_invalidate (`Assoc [("file_key", `String "ABC123")]) with
   | Ok json ->
       let s = Yojson.Safe.to_string json in
-      check bool "mentions file" true (string_contains s "ABC123")
+      check bool "mentions file" true (Mcp_helpers.string_contains ~haystack:s ~needle:"ABC123")
   | Error msg -> fail ("Unexpected error: " ^ msg)
 
 let test_handle_cache_invalidate_file_and_node () =
@@ -1439,7 +1439,7 @@ let test_handle_cache_invalidate_file_and_node () =
   ]) with
   | Ok json ->
       let s = Yojson.Safe.to_string json in
-      check bool "mentions node" true (string_contains s "1:2")
+      check bool "mentions node" true (Mcp_helpers.string_contains ~haystack:s ~needle:"1:2")
   | Error msg -> fail ("Unexpected error: " ^ msg)
 
 let cache_invalidate_tests = [
@@ -1469,8 +1469,8 @@ let test_handle_doctor_basic () =
   match handle_doctor (`Assoc []) with
   | Ok json ->
       let s = Yojson.Safe.to_string json in
-      check bool "has status" true (string_contains s "status");
-      check bool "has checks" true (string_contains s "checks")
+      check bool "has status" true (Mcp_helpers.string_contains ~haystack:s ~needle:"status");
+      check bool "has checks" true (Mcp_helpers.string_contains ~haystack:s ~needle:"checks")
   | Error msg -> fail ("Unexpected error: " ^ msg)
 
 let doctor_tests = [

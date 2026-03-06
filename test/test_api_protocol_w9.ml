@@ -108,22 +108,22 @@ let test_api_error_to_string_http_long_body () =
   let body = String.make 1000 'A' in
   let s = api_error_to_string (Http_error (500, body, None)) in
   Alcotest.(check bool) "contains body_bytes"
-    true (string_contains s "body_bytes: 1000")
+    true (string_contains_ci ~haystack:s ~needle:"body_bytes: 1000")
 
 let test_api_error_to_string_http_empty_body () =
   let s = api_error_to_string (Http_error (200, "", None)) in
   Alcotest.(check bool) "body_bytes: 0"
-    true (string_contains s "body_bytes: 0")
+    true (string_contains_ci ~haystack:s ~needle:"body_bytes: 0")
 
 let test_api_error_to_string_json () =
   let s = api_error_to_string (Json_error "unexpected token") in
   Alcotest.(check bool) "JSON error prefix"
-    true (string_contains s "JSON error:")
+    true (string_contains_ci ~haystack:s ~needle:"JSON error:")
 
 let test_api_error_to_string_network () =
   let s = api_error_to_string (Network_error "ECONNREFUSED") in
   Alcotest.(check bool) "Network error prefix"
-    true (string_contains s "Network error:")
+    true (string_contains_ci ~haystack:s ~needle:"Network error:")
 
 let test_api_error_to_string_timeout () =
   let s = api_error_to_string Timeout_error in
@@ -144,7 +144,7 @@ let test_parse_http_response_not_chunked () =
   let status, body = parse_http_response response in
   Alcotest.(check int) "status" 200 status;
   Alcotest.(check bool) "body contains ok"
-    true (string_contains body "ok")
+    true (string_contains_ci ~haystack:body ~needle:"ok")
 
 let test_parse_http_response_transfer_encoding_not_chunked () =
   (* Transfer-Encoding header present but NOT chunked — the detection
@@ -336,23 +336,23 @@ let test_retry_delay_json () =
 
 let test_friendly_http_401 () =
   let s = api_error_to_friendly_string (Http_error (401, "", None)) in
-  Alcotest.(check bool) "contains Auth" true (string_contains s "Auth error")
+  Alcotest.(check bool) "contains Auth" true (string_contains_ci ~haystack:s ~needle:"Auth error")
 
 let test_friendly_http_429_with_body () =
   let s = api_error_to_friendly_string (Http_error (429, {|{"retry_after":10}|}, None)) in
-  Alcotest.(check bool) "contains Rate" true (string_contains s "Rate limited")
+  Alcotest.(check bool) "contains Rate" true (string_contains_ci ~haystack:s ~needle:"Rate limited")
 
 let test_friendly_json () =
   let s = api_error_to_friendly_string (Json_error "unexpected eof") in
-  Alcotest.(check bool) "contains Invalid" true (string_contains s "Invalid response")
+  Alcotest.(check bool) "contains Invalid" true (string_contains_ci ~haystack:s ~needle:"Invalid response")
 
 let test_friendly_network () =
   let s = api_error_to_friendly_string (Network_error "DNS: NXDOMAIN") in
-  Alcotest.(check bool) "contains DNS" true (string_contains s "DNS")
+  Alcotest.(check bool) "contains DNS" true (string_contains_ci ~haystack:s ~needle:"DNS")
 
 let test_friendly_timeout () =
   let s = api_error_to_friendly_string Timeout_error in
-  Alcotest.(check bool) "contains timed out" true (string_contains s "timed out")
+  Alcotest.(check bool) "contains timed out" true (string_contains_ci ~haystack:s ~needle:"timed out")
 
 (* ================================================================ *)
 (* figma_api_eio.ml — truncate_body edge cases                      *)
@@ -650,8 +650,8 @@ let test_with_query_empty () =
 let test_with_query_params () =
   let url = with_query "https://api.figma.com/v1/files/KEY"
     [("depth", ["2"]); ("version", ["v1"])] in
-  Alcotest.(check bool) "has depth" true (string_contains url "depth=2");
-  Alcotest.(check bool) "has version" true (string_contains url "version=v1")
+  Alcotest.(check bool) "has depth" true (string_contains_ci ~haystack:url ~needle:"depth=2");
+  Alcotest.(check bool) "has version" true (string_contains_ci ~haystack:url ~needle:"version=v1")
 
 (* ================================================================ *)
 (* figma_api_eio.ml — api_base constant                             *)
@@ -666,43 +666,43 @@ let test_api_base () =
 
 let test_suggestion_400_empty () =
   let s = suggestion_for_400 "" in
-  Alcotest.(check bool) "default suggestion" true (string_contains s "Invalid request")
+  Alcotest.(check bool) "default suggestion" true (string_contains_ci ~haystack:s ~needle:"Invalid request")
 
 let test_suggestion_400_invalid_id () =
   let s = suggestion_for_400 "invalid id format" in
-  Alcotest.(check bool) "invalid id" true (string_contains s "Invalid ID")
+  Alcotest.(check bool) "invalid id" true (string_contains_ci ~haystack:s ~needle:"Invalid ID")
 
 let test_suggestion_400_missing () =
   let s = suggestion_for_400 "missing parameter xyz" in
-  Alcotest.(check bool) "missing" true (string_contains s "Missing required")
+  Alcotest.(check bool) "missing" true (string_contains_ci ~haystack:s ~needle:"Missing required")
 
 let test_suggestion_400_node () =
   let s = suggestion_for_400 "node error encountered" in
-  Alcotest.(check bool) "node" true (string_contains s "Node-related")
+  Alcotest.(check bool) "node" true (string_contains_ci ~haystack:s ~needle:"Node-related")
 
 let test_suggestion_404_file () =
   let s = suggestion_for_404 "file not found" in
-  Alcotest.(check bool) "file" true (string_contains s "File not found")
+  Alcotest.(check bool) "file" true (string_contains_ci ~haystack:s ~needle:"File not found")
 
 let test_suggestion_404_node () =
   let s = suggestion_for_404 "node not found" in
-  Alcotest.(check bool) "node" true (string_contains s "Node not found")
+  Alcotest.(check bool) "node" true (string_contains_ci ~haystack:s ~needle:"Node not found")
 
 let test_suggestion_404_version () =
   let s = suggestion_for_404 "version not found" in
-  Alcotest.(check bool) "version" true (string_contains s "Version not found")
+  Alcotest.(check bool) "version" true (string_contains_ci ~haystack:s ~needle:"Version not found")
 
 let test_suggestion_404_empty () =
   let s = suggestion_for_404 "" in
-  Alcotest.(check bool) "default" true (string_contains s "Resource not found")
+  Alcotest.(check bool) "default" true (string_contains_ci ~haystack:s ~needle:"Resource not found")
 
 let test_suggestion_403_scope () =
   let s = suggestion_for_403 "file_variables:read is invalid scope" in
-  Alcotest.(check bool) "scope" true (string_contains s "scope")
+  Alcotest.(check bool) "scope" true (string_contains_ci ~haystack:s ~needle:"scope")
 
 let test_suggestion_403_generic () =
   let s = suggestion_for_403 "forbidden" in
-  Alcotest.(check bool) "permission" true (string_contains s "permission")
+  Alcotest.(check bool) "permission" true (string_contains_ci ~haystack:s ~needle:"permission")
 
 (* ================================================================ *)
 (* figma_api_eio.ml — body_contains, body_contains_any, first_match *)
@@ -849,7 +849,7 @@ let test_prompt_to_detail_json () =
 let test_mcp_instructions () =
   Alcotest.(check bool) "non-empty" true (String.length mcp_instructions > 100);
   Alcotest.(check bool) "contains Parse Don't Validate"
-    true (Figma_api_eio.string_contains mcp_instructions "Parse")
+    true (Figma_api_eio.string_contains_ci ~haystack:mcp_instructions ~needle:"Parse")
 
 (* ================================================================ *)
 (* mcp_protocol.ml — error codes                                    *)
@@ -906,18 +906,18 @@ let test_parse_request_valid () =
 let test_parse_request_no_version () =
   let json_str = {|{"id":1,"method":"test"}|} in
   match parse_request json_str with
-  | Error msg -> Alcotest.(check bool) "version error" true (Figma_api_eio.string_contains msg "version")
+  | Error msg -> Alcotest.(check bool) "version error" true (Figma_api_eio.string_contains_ci ~haystack:msg ~needle:"version")
   | Ok _ -> Alcotest.fail "should fail"
 
 let test_parse_request_no_method () =
   let json_str = {|{"jsonrpc":"2.0","id":1}|} in
   match parse_request json_str with
-  | Error msg -> Alcotest.(check bool) "method error" true (Figma_api_eio.string_contains msg "method")
+  | Error msg -> Alcotest.(check bool) "method error" true (Figma_api_eio.string_contains_ci ~haystack:msg ~needle:"method")
   | Ok _ -> Alcotest.fail "should fail"
 
 let test_parse_request_invalid_json () =
   match parse_request "not json" with
-  | Error msg -> Alcotest.(check bool) "JSON parse" true (Figma_api_eio.string_contains msg "JSON")
+  | Error msg -> Alcotest.(check bool) "JSON parse" true (Figma_api_eio.string_contains_ci ~haystack:msg ~needle:"JSON")
   | Ok _ -> Alcotest.fail "should fail"
 
 let test_parse_request_notification () =
@@ -1174,7 +1174,7 @@ let test_tools_call_handler_error () =
   match handle_tools_call_sync server (Some (`Assoc [("name", `String "fail_tool")])) with
   | Error (code, msg) ->
     Alcotest.(check int) "internal_error" internal_error code;
-    Alcotest.(check bool) "msg" true (Figma_api_eio.string_contains msg "handler failed")
+    Alcotest.(check bool) "msg" true (Figma_api_eio.string_contains_ci ~haystack:msg ~needle:"handler failed")
   | Ok _ -> Alcotest.fail "should fail"
 
 let test_tools_call_no_arguments_field () =

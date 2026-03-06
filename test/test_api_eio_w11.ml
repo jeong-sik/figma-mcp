@@ -21,29 +21,29 @@ open Figma_api_eio
 (* ---- string_contains ---- *)
 
 let test_string_contains_basic () =
-  Alcotest.(check bool) "substring present" true (string_contains "hello world" "world");
-  Alcotest.(check bool) "substring absent" false (string_contains "hello world" "xyz")
+  Alcotest.(check bool) "substring present" true (string_contains_ci ~haystack:"hello world" ~needle:"world");
+  Alcotest.(check bool) "substring absent" false (string_contains_ci ~haystack:"hello world" ~needle:"xyz")
 
 let test_string_contains_empty_sub () =
-  Alcotest.(check bool) "empty sub always matches" true (string_contains "anything" "")
+  Alcotest.(check bool) "empty sub returns false" false (string_contains_ci ~haystack:"anything" ~needle:"")
 
 let test_string_contains_empty_haystack () =
-  Alcotest.(check bool) "empty haystack, non-empty sub" false (string_contains "" "a")
+  Alcotest.(check bool) "empty haystack, non-empty sub" false (string_contains_ci ~haystack:"" ~needle:"a")
 
 let test_string_contains_both_empty () =
-  Alcotest.(check bool) "both empty" true (string_contains "" "")
+  Alcotest.(check bool) "both empty" false (string_contains_ci ~haystack:"" ~needle:"")
 
 let test_string_contains_equal () =
-  Alcotest.(check bool) "exact match" true (string_contains "abc" "abc")
+  Alcotest.(check bool) "exact match" true (string_contains_ci ~haystack:"abc" ~needle:"abc")
 
 let test_string_contains_longer_sub () =
-  Alcotest.(check bool) "sub longer than haystack" false (string_contains "ab" "abc")
+  Alcotest.(check bool) "sub longer than haystack" false (string_contains_ci ~haystack:"ab" ~needle:"abc")
 
 let test_string_contains_at_end () =
-  Alcotest.(check bool) "match at end" true (string_contains "foobar" "bar")
+  Alcotest.(check bool) "match at end" true (string_contains_ci ~haystack:"foobar" ~needle:"bar")
 
 let test_string_contains_at_start () =
-  Alcotest.(check bool) "match at start" true (string_contains "foobar" "foo")
+  Alcotest.(check bool) "match at start" true (string_contains_ci ~haystack:"foobar" ~needle:"foo")
 
 (* ---- body_contains / body_contains_any ---- *)
 
@@ -104,19 +104,19 @@ let test_first_match_empty_rules () =
 let test_http_400_invalid_id () =
   let r = get_http_error_recovery 400 "invalid id format" None in
   Alcotest.(check bool) "not retryable" false r.retryable;
-  Alcotest.(check bool) "mentions invalid ID" true (string_contains r.suggestion "Invalid ID")
+  Alcotest.(check bool) "mentions invalid ID" true (string_contains_ci ~haystack:r.suggestion ~needle:"Invalid ID")
 
 let test_http_400_missing () =
   let r = get_http_error_recovery 400 "missing parameter" None in
-  Alcotest.(check bool) "mentions missing" true (string_contains r.suggestion "Missing")
+  Alcotest.(check bool) "mentions missing" true (string_contains_ci ~haystack:r.suggestion ~needle:"Missing")
 
 let test_http_400_node () =
   let r = get_http_error_recovery 400 "node error" None in
-  Alcotest.(check bool) "mentions node" true (string_contains r.suggestion "Node")
+  Alcotest.(check bool) "mentions node" true (string_contains_ci ~haystack:r.suggestion ~needle:"Node")
 
 let test_http_400_generic () =
   let r = get_http_error_recovery 400 "something else" None in
-  Alcotest.(check bool) "generic 400" true (string_contains r.suggestion "Invalid request")
+  Alcotest.(check bool) "generic 400" true (string_contains_ci ~haystack:r.suggestion ~needle:"Invalid request")
 
 let test_http_401 () =
   let r = get_http_error_recovery 401 "" None in
@@ -125,31 +125,31 @@ let test_http_401 () =
 
 let test_http_403_scope () =
   let r = get_http_error_recovery 403 "file_variables:read scope required" None in
-  Alcotest.(check bool) "mentions scope" true (string_contains r.suggestion "file_variables:read")
+  Alcotest.(check bool) "mentions scope" true (string_contains_ci ~haystack:r.suggestion ~needle:"file_variables:read")
 
 let test_http_403_invalid_scope () =
   let r = get_http_error_recovery 403 "invalid scope detected" None in
-  Alcotest.(check bool) "mentions scope" true (string_contains r.suggestion "file_variables:read")
+  Alcotest.(check bool) "mentions scope" true (string_contains_ci ~haystack:r.suggestion ~needle:"file_variables:read")
 
 let test_http_403_generic () =
   let r = get_http_error_recovery 403 "no access" None in
-  Alcotest.(check bool) "mentions permission" true (string_contains r.suggestion "permission")
+  Alcotest.(check bool) "mentions permission" true (string_contains_ci ~haystack:r.suggestion ~needle:"permission")
 
 let test_http_404_file () =
   let r = get_http_error_recovery 404 "file not accessible" None in
-  Alcotest.(check bool) "mentions file" true (string_contains r.suggestion "File not found")
+  Alcotest.(check bool) "mentions file" true (string_contains_ci ~haystack:r.suggestion ~needle:"File not found")
 
 let test_http_404_node () =
   let r = get_http_error_recovery 404 "node not found" None in
-  Alcotest.(check bool) "mentions node" true (string_contains r.suggestion "Node not found")
+  Alcotest.(check bool) "mentions node" true (string_contains_ci ~haystack:r.suggestion ~needle:"Node not found")
 
 let test_http_404_version () =
   let r = get_http_error_recovery 404 "version not found" None in
-  Alcotest.(check bool) "mentions version" true (string_contains r.suggestion "Version not found")
+  Alcotest.(check bool) "mentions version" true (string_contains_ci ~haystack:r.suggestion ~needle:"Version not found")
 
 let test_http_404_generic () =
   let r = get_http_error_recovery 404 "who knows" None in
-  Alcotest.(check bool) "generic 404" true (string_contains r.suggestion "Resource not found")
+  Alcotest.(check bool) "generic 404" true (string_contains_ci ~haystack:r.suggestion ~needle:"Resource not found")
 
 let test_http_429_with_header () =
   let r = get_http_error_recovery 429 "" (Some 30.0) in
@@ -204,7 +204,7 @@ let test_http_504 () =
 let test_http_unknown () =
   let r = get_http_error_recovery 418 "" None in
   Alcotest.(check bool) "not retryable" false r.retryable;
-  Alcotest.(check bool) "mentions code" true (string_contains r.message "418")
+  Alcotest.(check bool) "mentions code" true (string_contains_ci ~haystack:r.message ~needle:"418")
 
 (* ---- get_network_error_recovery ---- *)
 
@@ -238,19 +238,19 @@ let test_network_short () =
 
 let test_friendly_http () =
   let s = api_error_to_friendly_string (Http_error (401, "", None)) in
-  Alcotest.(check bool) "contains auth" true (string_contains s "Auth error")
+  Alcotest.(check bool) "contains auth" true (string_contains_ci ~haystack:s ~needle:"Auth error")
 
 let test_friendly_json () =
   let s = api_error_to_friendly_string (Json_error "bad json") in
-  Alcotest.(check bool) "contains json msg" true (string_contains s "bad json")
+  Alcotest.(check bool) "contains json msg" true (string_contains_ci ~haystack:s ~needle:"bad json")
 
 let test_friendly_network () =
   let s = api_error_to_friendly_string (Network_error "DNS failed") in
-  Alcotest.(check bool) "contains DNS" true (string_contains s "DNS")
+  Alcotest.(check bool) "contains DNS" true (string_contains_ci ~haystack:s ~needle:"DNS")
 
 let test_friendly_timeout () =
   let s = api_error_to_friendly_string Timeout_error in
-  Alcotest.(check bool) "contains timeout" true (string_contains s "timed out")
+  Alcotest.(check bool) "contains timeout" true (string_contains_ci ~haystack:s ~needle:"timed out")
 
 (* ---- truncate_body ---- *)
 
@@ -265,7 +265,7 @@ let test_truncate_201 () =
   let s = String.make 201 'x' in
   let result = truncate_body s in
   Alcotest.(check int) "length 203" 203 (String.length result);
-  Alcotest.(check bool) "ends with ..." true (string_contains result "...")
+  Alcotest.(check bool) "ends with ..." true (string_contains_ci ~haystack:result ~needle:"...")
 
 let test_truncate_empty () =
   Alcotest.(check string) "empty" "" (truncate_body "")

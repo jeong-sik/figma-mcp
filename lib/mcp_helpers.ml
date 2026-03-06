@@ -1,5 +1,23 @@
 (** Figma MCP shared helpers — JSON, Schema, Cache, Error, Parameter extraction *)
 
+(** ============== String search ============== *)
+
+let string_contains ~haystack ~needle =
+  let needle = String.lowercase_ascii (String.trim needle) in
+  if needle = "" then false
+  else
+    let haystack = String.lowercase_ascii haystack in
+    try
+      ignore (Str.search_forward (Str.regexp_string needle) haystack 0);
+      true
+    with Not_found -> false
+
+let matches_any patterns text =
+  List.exists (fun p -> string_contains ~needle:p ~haystack:text) patterns
+
+let find_matching_pattern patterns text =
+  List.find_opt (fun p -> string_contains ~needle:p ~haystack:text) patterns
+
 (** ============== JSON → DSL 변환 (Figma_mcp 순환 의존 방지) ============== *)
 let process_json_string ~format json_str =
   try

@@ -37,21 +37,9 @@ let normalize_patterns patterns =
   |> List.map String.trim
   |> List.filter (fun p -> p <> "")
 
-let string_contains ~needle ~haystack =
-  let needle = String.lowercase_ascii (String.trim needle) in
-  if needle = "" then false
-  else
-    let haystack = String.lowercase_ascii haystack in
-    try
-      ignore (Str.search_forward (Str.regexp_string needle) haystack 0);
-      true
-    with Not_found -> false
-
-let matches_any patterns text =
-  List.exists (fun p -> string_contains ~needle:p ~haystack:text) patterns
-
-let find_matching_pattern patterns text =
-  List.find_opt (fun p -> string_contains ~needle:p ~haystack:text) patterns
+let string_contains = Mcp_helpers.string_contains
+let matches_any = Mcp_helpers.matches_any
+let find_matching_pattern = Mcp_helpers.find_matching_pattern
 
 let node_text_blob node =
   match node.Figma_types.characters with

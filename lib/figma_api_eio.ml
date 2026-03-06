@@ -6,15 +6,16 @@
 
 open Printf
 
-let string_contains s sub =
-  let len_s = String.length s in
-  let len_sub = String.length sub in
-  let rec loop i =
-    if i + len_sub > len_s then false
-    else if String.sub s i len_sub = sub then true
-    else loop (i + 1)
-  in
-  if len_sub = 0 then true else loop 0
+(** Case-insensitive substring check (local — cannot depend on Mcp_helpers due to cycle) *)
+let string_contains_ci ~haystack ~needle =
+  let needle = String.lowercase_ascii (String.trim needle) in
+  if needle = "" then false
+  else
+    let haystack = String.lowercase_ascii haystack in
+    try
+      ignore (Str.search_forward (Str.regexp_string needle) haystack 0);
+      true
+    with Not_found -> false
 
 (** ============== Types ============== *)
 
@@ -40,7 +41,7 @@ type error_recovery = {
 
 (** Body 기반 에러 키워드 감지 *)
 let body_contains body keyword =
-  string_contains (String.lowercase_ascii body) keyword
+  string_contains_ci ~haystack:body ~needle:keyword
 
 let body_contains_any body keywords =
   List.exists (body_contains body) keywords
@@ -198,12 +199,13 @@ let max_body_size = Figma_config.Http.max_body_bytes
 let log_response_body = Figma_config.Http.log_response_body
 
 let is_dns_failure exn =
-  let msg = Printexc.to_string exn |> String.lowercase_ascii in
-  string_contains msg "resolve" || string_contains msg "dns"
+  let msg = Printexc.to_string exn in
+  string_contains_ci ~haystack:msg ~needle:"resolve" ||
+  string_contains_ci ~haystack:msg ~needle:"dns"
 
 let is_html_response body =
   let trimmed = String.trim body in
-  string_contains (String.lowercase_ascii trimmed) "<html"
+  string_contains_ci ~haystack:trimmed ~needle:"<html"
 
 let retry_after_of_headers headers =
   match Cohttp.Header.get headers "retry-after" with
@@ -514,12 +516,12 @@ let read_http_response_from_flow br =
   let headers = read_headers br in
   let connection_close =
     match header_value headers "connection" with
-    | Some value -> string_contains (String.lowercase_ascii value) "close"
+    | Some value -> string_contains_ci ~haystack:value ~needle:"close"
     | None -> false
   in
   let is_chunked =
     match header_value headers "transfer-encoding" with
-    | Some value -> string_contains (String.lowercase_ascii value) "chunked"
+    | Some value -> string_contains_ci ~haystack:value ~needle:"chunked"
     | None -> false
   in
   let content_length =

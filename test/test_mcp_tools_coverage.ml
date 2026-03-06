@@ -924,10 +924,10 @@ let server_tests = [
 (** ============== Main ============== *)
 
 let test_string_contains_basic () =
-  check bool "basic match" true (Mcp_tools.string_contains "Hello World" "world");
-  check bool "no match" false (Mcp_tools.string_contains "Hello" "bye");
-  check bool "empty sub" true (Mcp_tools.string_contains "Hello" "");
-  check bool "case insensitive" true (Mcp_tools.string_contains "BROKEN PIPE" "broken pipe")
+  check bool "basic match" true (Mcp_helpers.string_contains ~haystack:"Hello World" ~needle:"world");
+  check bool "no match" false (Mcp_helpers.string_contains ~haystack:"Hello" ~needle:"bye");
+  check bool "empty sub" false (Mcp_helpers.string_contains ~haystack:"Hello" ~needle:"");
+  check bool "case insensitive" true (Mcp_helpers.string_contains ~haystack:"BROKEN PIPE" ~needle:"broken pipe")
 
 let test_is_network_error_structural () =
   check bool "Unix EPIPE" true (Mcp_tools.is_network_error (Unix.Unix_error (Unix.EPIPE, "write", "")));
@@ -1049,8 +1049,8 @@ let test_make_category_tool_name () =
 let test_make_category_tool_description_contains_tools () =
   let cat : Mcp_tools.tool_category = { name = "mycat"; description = "My description"; tools = ["foo"; "bar"] } in
   let tool = Mcp_tools.make_category_tool cat in
-  check bool "description contains foo" true (Mcp_tools.string_contains tool.description "foo");
-  check bool "description contains bar" true (Mcp_tools.string_contains tool.description "bar")
+  check bool "description contains foo" true (Mcp_helpers.string_contains ~haystack:tool.description ~needle:"foo");
+  check bool "description contains bar" true (Mcp_helpers.string_contains ~haystack:tool.description ~needle:"bar")
 
 let test_make_category_tool_has_mode_enum () =
   let cat : Mcp_tools.tool_category = { name = "test"; description = "Test"; tools = ["x"] } in
@@ -1773,7 +1773,7 @@ let test_read_resource_tokens_docs () =
   | Ok (mime, body) ->
       check string "mime type" "text/markdown" mime;
       check bool "body not empty" true (String.length body > 0);
-      check bool "mentions Variables" true (Mcp_tools.string_contains body "variables")
+      check bool "mentions Variables" true (Mcp_helpers.string_contains ~haystack:body ~needle:"variables")
   | Error e -> fail ("read_resource tokens error: " ^ e)
 
 let test_read_resource_unknown_scheme () =
@@ -1799,31 +1799,31 @@ let resource_prompt_tests = [
 
 let test_string_contains_sub_longer_than_string () =
   check bool "sub longer" false
-    (Mcp_tools.string_contains "hi" "hello world")
+    (Mcp_helpers.string_contains ~haystack:"hi" ~needle:"hello world")
 
 let test_string_contains_equal_strings () =
   check bool "equal strings" true
-    (Mcp_tools.string_contains "hello" "hello")
+    (Mcp_helpers.string_contains ~haystack:"hello" ~needle:"hello")
 
 let test_string_contains_single_char () =
   check bool "single char match" true
-    (Mcp_tools.string_contains "abc" "b")
+    (Mcp_helpers.string_contains ~haystack:"abc" ~needle:"b")
 
 let test_string_contains_single_char_no_match () =
   check bool "single char no match" false
-    (Mcp_tools.string_contains "abc" "z")
+    (Mcp_helpers.string_contains ~haystack:"abc" ~needle:"z")
 
 let test_string_contains_at_end () =
   check bool "match at end" true
-    (Mcp_tools.string_contains "Hello World" "world")
+    (Mcp_helpers.string_contains ~haystack:"Hello World" ~needle:"world")
 
 let test_string_contains_at_start () =
   check bool "match at start" true
-    (Mcp_tools.string_contains "Hello World" "hello")
+    (Mcp_helpers.string_contains ~haystack:"Hello World" ~needle:"hello")
 
 let test_string_contains_mixed_case () =
   check bool "mixed case" true
-    (Mcp_tools.string_contains "aBcDeF" "BcDe")
+    (Mcp_helpers.string_contains ~haystack:"aBcDeF" ~needle:"BcDe")
 
 let string_contains_extra_tests = [
   "string_contains sub longer", `Quick, test_string_contains_sub_longer_than_string;

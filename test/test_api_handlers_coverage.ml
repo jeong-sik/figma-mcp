@@ -55,27 +55,27 @@ let () =
   (* ============== string_contains ============== *)
   let test_string_contains_basic () =
     check bool "found" true
-      (Mcp_api_handlers.string_contains ~needle:"hello" ~haystack:"say hello world")
+      (Mcp_api_handlers.string_contains ~haystack:"say hello world" ~needle:"hello")
   in
   let test_string_contains_case () =
     check bool "case insensitive" true
-      (Mcp_api_handlers.string_contains ~needle:"HELLO" ~haystack:"hello world")
+      (Mcp_api_handlers.string_contains ~haystack:"hello world" ~needle:"HELLO")
   in
   let test_string_contains_not_found () =
     check bool "not found" false
-      (Mcp_api_handlers.string_contains ~needle:"xyz" ~haystack:"hello")
+      (Mcp_api_handlers.string_contains ~haystack:"hello" ~needle:"xyz")
   in
   let test_string_contains_empty_needle () =
     check bool "empty needle" false
-      (Mcp_api_handlers.string_contains ~needle:"" ~haystack:"hello")
+      (Mcp_api_handlers.string_contains ~haystack:"hello" ~needle:"")
   in
   let test_string_contains_empty_haystack () =
     check bool "empty haystack" false
-      (Mcp_api_handlers.string_contains ~needle:"a" ~haystack:"")
+      (Mcp_api_handlers.string_contains ~haystack:"" ~needle:"a")
   in
   let test_string_contains_needle_trim () =
     check bool "needle trimmed" true
-      (Mcp_api_handlers.string_contains ~needle:"  hello  " ~haystack:"hello world")
+      (Mcp_api_handlers.string_contains ~haystack:"hello world" ~needle:"  hello  ")
   in
 
   (* ============== matches_any ============== *)

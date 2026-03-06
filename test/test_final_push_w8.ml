@@ -27,14 +27,14 @@ let () =
 
   (* --- string_contains: case-insensitive substring match --- *)
   let test_string_contains_basic () =
-    check bool "exact" true (Mcp_tools.string_contains "hello" "hello");
-    check bool "prefix" true (Mcp_tools.string_contains "hello world" "hello");
-    check bool "suffix" true (Mcp_tools.string_contains "hello world" "world");
-    check bool "middle" true (Mcp_tools.string_contains "hello world" "lo wo");
-    check bool "case insensitive" true (Mcp_tools.string_contains "Hello World" "hello");
-    check bool "empty sub" true (Mcp_tools.string_contains "hello" "");
-    check bool "sub longer" false (Mcp_tools.string_contains "hi" "hello");
-    check bool "no match" false (Mcp_tools.string_contains "hello" "xyz")
+    check bool "exact" true (Mcp_helpers.string_contains ~haystack:"hello" ~needle:"hello");
+    check bool "prefix" true (Mcp_helpers.string_contains ~haystack:"hello world" ~needle:"hello");
+    check bool "suffix" true (Mcp_helpers.string_contains ~haystack:"hello world" ~needle:"world");
+    check bool "middle" true (Mcp_helpers.string_contains ~haystack:"hello world" ~needle:"lo wo");
+    check bool "case insensitive" true (Mcp_helpers.string_contains ~haystack:"Hello World" ~needle:"hello");
+    check bool "empty sub" false (Mcp_helpers.string_contains ~haystack:"hello" ~needle:"");
+    check bool "sub longer" false (Mcp_helpers.string_contains ~haystack:"hi" ~needle:"hello");
+    check bool "no match" false (Mcp_helpers.string_contains ~haystack:"hello" ~needle:"xyz")
   in
 
   (* --- is_network_error: Unix errors and string matching --- *)
