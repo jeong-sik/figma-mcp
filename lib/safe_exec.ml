@@ -60,7 +60,7 @@ let kill_process pid =
 let kill_process_force pid =
   try Unix.kill pid Sys.sigkill with Unix.Unix_error _ -> ()
 
-let run ?(timeout_ms=default_timeout_ms) ?(output_limit=default_output_limit) cmd argv =
+let run_blocking ?(timeout_ms=default_timeout_ms) ?(output_limit=default_output_limit) cmd argv =
   try
     let stdout_r, stdout_w = Unix.pipe () in
     let stderr_r, stderr_w = Unix.pipe () in
@@ -135,6 +135,10 @@ let run ?(timeout_ms=default_timeout_ms) ?(output_limit=default_output_limit) cm
   with
   | Unix.Unix_error (e, _, _) -> Error (Printf.sprintf "Unix error: %s" (Unix.error_message e))
   | exn -> Error (Printexc.to_string exn)
+
+let run ?timeout_ms ?output_limit cmd argv =
+  Eio_unix.run_in_systhread ~label:"safe_exec" (fun () ->
+    run_blocking ?timeout_ms ?output_limit cmd argv)
 
 let run_stdout ?timeout_ms ?output_limit cmd argv =
   match run ?timeout_ms ?output_limit cmd argv with
