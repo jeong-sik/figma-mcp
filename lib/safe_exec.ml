@@ -137,8 +137,12 @@ let run_blocking ?(timeout_ms=default_timeout_ms) ?(output_limit=default_output_
   | exn -> Error (Printexc.to_string exn)
 
 let run ?timeout_ms ?output_limit cmd argv =
-  Eio_unix.run_in_systhread ~label:"safe_exec" (fun () ->
+  match Eio_unix.run_in_systhread ~label:"safe_exec" (fun () ->
     run_blocking ?timeout_ms ?output_limit cmd argv)
+  with
+  | result -> result
+  | exception Effect.Unhandled _ ->
+      run_blocking ?timeout_ms ?output_limit cmd argv
 
 let run_stdout ?timeout_ms ?output_limit cmd argv =
   match run ?timeout_ms ?output_limit cmd argv with
