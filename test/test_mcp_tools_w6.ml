@@ -1160,14 +1160,14 @@ let test_all_detailed_tools_count () =
   check bool "at least 30 tools" true (List.length all_detailed_tools >= 30)
 
 let test_all_detailed_tools_figma_prefix () =
-  let all_prefixed = List.for_all (fun (t : Mcp_protocol.tool_def) ->
+  let all_prefixed = List.for_all (fun (t : Figma_mcp_protocol.tool_def) ->
     String.length t.name >= 6 &&
     String.sub t.name 0 6 = "figma_"
   ) all_detailed_tools in
   check bool "all have figma_ prefix" true all_prefixed
 
 let test_featured_tool_names_in_all_tools () =
-  let all_names = List.map (fun (t : Mcp_protocol.tool_def) -> t.name) all_detailed_tools in
+  let all_names = List.map (fun (t : Figma_mcp_protocol.tool_def) -> t.name) all_detailed_tools in
   List.iter (fun name ->
     let full = "figma_" ^ name in
     check bool (Printf.sprintf "%s in all_tools" full) true
@@ -1175,23 +1175,23 @@ let test_featured_tool_names_in_all_tools () =
   ) featured_tool_names
 
 let test_category_tools_have_schema () =
-  List.iter (fun (t : Mcp_protocol.tool_def) ->
+  List.iter (fun (t : Figma_mcp_protocol.tool_def) ->
     match t.input_schema with
     | `Assoc _ -> ()
     | _ -> fail (Printf.sprintf "Category tool %s missing object schema" t.name)
   ) category_tools
 
 let test_public_tools_includes_categories () =
-  let cat_names = List.map (fun (t : Mcp_protocol.tool_def) -> t.name) category_tools in
+  let cat_names = List.map (fun (t : Figma_mcp_protocol.tool_def) -> t.name) category_tools in
   List.iter (fun name ->
-    let in_public = List.exists (fun (t : Mcp_protocol.tool_def) -> t.name = name) public_tools in
+    let in_public = List.exists (fun (t : Figma_mcp_protocol.tool_def) -> t.name = name) public_tools in
     check bool (Printf.sprintf "%s in public_tools" name) true in_public
   ) cat_names
 
 let test_public_tools_includes_featured () =
-  let feat_names = List.map (fun (t : Mcp_protocol.tool_def) -> t.name) featured_tools in
+  let feat_names = List.map (fun (t : Figma_mcp_protocol.tool_def) -> t.name) featured_tools in
   List.iter (fun name ->
-    let in_public = List.exists (fun (t : Mcp_protocol.tool_def) -> t.name = name) public_tools in
+    let in_public = List.exists (fun (t : Figma_mcp_protocol.tool_def) -> t.name = name) public_tools in
     check bool (Printf.sprintf "%s in public_tools" name) true in_public
   ) feat_names
 
@@ -1318,33 +1318,33 @@ let string_contains_extra_tests = [
    ============================================================ *)
 
 let test_resources_all_have_uris () =
-  List.iter (fun (r : Mcp_protocol.mcp_resource) ->
+  List.iter (fun (r : Figma_mcp_protocol.mcp_resource) ->
     check bool (Printf.sprintf "resource %s has uri" r.name) true
       (String.length r.uri > 0)
   ) resources
 
 let test_resources_all_have_mime () =
-  List.iter (fun (r : Mcp_protocol.mcp_resource) ->
+  List.iter (fun (r : Figma_mcp_protocol.mcp_resource) ->
     check bool (Printf.sprintf "resource %s has mime" r.name) true
       (String.length r.mime_type > 0)
   ) resources
 
 let test_resource_templates_have_uri () =
-  List.iter (fun (t : Mcp_protocol.mcp_resource_template) ->
+  List.iter (fun (t : Figma_mcp_protocol.mcp_resource_template) ->
     check bool (Printf.sprintf "template %s has uri" t.name) true
       (String.length t.uri_template > 0)
   ) resource_templates
 
 let test_prompts_have_arguments () =
-  List.iter (fun (p : Mcp_protocol.mcp_prompt) ->
+  List.iter (fun (p : Figma_mcp_protocol.mcp_prompt) ->
     check bool (Printf.sprintf "prompt %s has text" p.name) true
       (String.length p.text > 0)
   ) prompts
 
 let test_prompts_fidelity_review_has_required_args () =
-  match List.find_opt (fun (p : Mcp_protocol.mcp_prompt) -> p.name = "figma_fidelity_review") prompts with
+  match List.find_opt (fun (p : Figma_mcp_protocol.mcp_prompt) -> p.name = "figma_fidelity_review") prompts with
   | Some p ->
-      let required_args = List.filter (fun (a : Mcp_protocol.prompt_arg) -> a.required) p.arguments in
+      let required_args = List.filter (fun (a : Figma_mcp_protocol.prompt_arg) -> a.required) p.arguments in
       check bool "has required args" true (List.length required_args >= 2)
   | None -> fail "figma_fidelity_review prompt not found"
 

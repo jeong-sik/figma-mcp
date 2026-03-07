@@ -15,7 +15,7 @@ let is_network_error exn =
 
 (** Figma MCP Tools 정의 *)
 
-open Mcp_protocol
+open Figma_mcp_protocol
 open Mcp_helpers
 open Mcp_api_handlers
 open Mcp_plugin_handlers
@@ -3088,7 +3088,7 @@ let read_resource uri =
 (** ============== 서버 생성 ============== *)
 
 let create_figma_server () =
-  Mcp_protocol.create_server
+  Figma_mcp_protocol.create_server
     ~handlers_sync:all_handlers_sync
     ~resource_templates
     public_tools

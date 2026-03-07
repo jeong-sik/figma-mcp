@@ -246,7 +246,7 @@ let prom_metric name labels value =
 
 let to_prometheus_text () =
   let s = snapshot () in
-  let labels = sprintf "server=\"%s\"" Mcp_protocol.server_name in
+  let labels = sprintf "server=\"%s\"" Figma_mcp_protocol.server_name in
   let header =
     "# HELP mcp_http_requests_total Total HTTP requests\n" ^
     "# TYPE mcp_http_requests_total counter\n" ^

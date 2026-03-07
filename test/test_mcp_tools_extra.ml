@@ -1416,7 +1416,7 @@ let system_util_tests = [
    ============================================================ *)
 
 let test_all_tools_have_input_schema () =
-  List.iter (fun (t : Mcp_protocol.tool_def) ->
+  List.iter (fun (t : Figma_mcp_protocol.tool_def) ->
     match t.input_schema with
     | `Assoc _ -> ()
     | _ -> fail (Printf.sprintf "Tool %s has non-Assoc input_schema" t.name)
@@ -1427,12 +1427,12 @@ let test_public_tools_not_empty () =
 
 let test_category_tools_generated () =
   check bool "category tools non-empty" true (List.length category_tools > 0);
-  List.iter (fun (t : Mcp_protocol.tool_def) ->
+  List.iter (fun (t : Figma_mcp_protocol.tool_def) ->
     check bool "starts with figma_" true (String.length t.name > 6)
   ) category_tools
 
 let test_featured_tools_match_names () =
-  List.iter (fun (t : Mcp_protocol.tool_def) ->
+  List.iter (fun (t : Figma_mcp_protocol.tool_def) ->
     let has_match = List.exists (fun name ->
       t.name = "figma_" ^ name
     ) featured_tool_names in
@@ -1460,7 +1460,7 @@ let test_prompts_list () =
   check int "2 prompts" 2 (List.length prompts)
 
 let test_prompts_have_arguments () =
-  List.iter (fun (p : Mcp_protocol.mcp_prompt) ->
+  List.iter (fun (p : Figma_mcp_protocol.mcp_prompt) ->
     check bool (Printf.sprintf "%s has arguments" p.name) true
       (List.length p.arguments > 0)
   ) prompts

@@ -2,6 +2,7 @@
  (name figma_mcp)
  (public_name figma_mcp)
  (libraries
+   mcp_protocol
    yojson
    uri
    str
