@@ -3,6 +3,8 @@
 
 open Printf
 
+module Sdk_jsonrpc = Mcp_protocol.Jsonrpc
+
 (** Progress token type *)
 type progress_token = string
 
@@ -30,9 +32,17 @@ let make_progress_token () =
 
 (** Send progress notification via broadcast *)
 let send_progress ~token ~current ~total ~message () =
-  let data = sprintf
-    {|{"jsonrpc":"2.0","method":"notifications/progress","params":{"progressToken":"%s","progress":%d,"total":%d,"message":"%s"}}|}
-    token current total message
+  let data =
+    Sdk_jsonrpc.make_notification_json
+      ~method_:"notifications/progress"
+      ~params:(`Assoc [
+        ("progressToken", `String token);
+        ("progress", `Int current);
+        ("total", `Int total);
+        ("message", `String message);
+      ])
+      ()
+    |> Yojson.Safe.to_string
   in
   eprintf "[progress] %s: %d/%d - %s\n%!" token current total message;
   match !broadcast_fn with
