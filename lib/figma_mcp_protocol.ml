@@ -101,12 +101,6 @@ let sdk_id_of_json json =
   | Ok id -> id
   | Error _ -> Sdk_jsonrpc.Null
 
-let ensure_jsonrpc_field = function
-  | `Assoc fields as json when List.mem_assoc "jsonrpc" fields -> json
-  | `Assoc fields -> `Assoc (("jsonrpc", `String "2.0") :: fields)
-  | json -> json
-
-
 let parse_request json_str : (json_rpc_request, string) result =
   try
     let json = Yojson.Safe.from_string json_str in
@@ -136,22 +130,10 @@ let is_notification req =
 (** ============== 응답 생성 ============== *)
 
 let make_success_response id result : Yojson.Safe.t =
-  match Sdk_jsonrpc.make_response ~id:(sdk_id_of_json id) ~result with
-  | Sdk_jsonrpc.Response response ->
-      Sdk_jsonrpc.response_to_yojson response |> ensure_jsonrpc_field
-  | msg ->
-      (* make_response always returns Response; guard against SDK changes *)
-      failwith (sprintf "make_success_response: unexpected message type: %s"
-        (Yojson.Safe.to_string (Sdk_jsonrpc.message_to_yojson msg)))
+  Sdk_jsonrpc.make_response_json ~id:(sdk_id_of_json id) ~result
 
 let make_error_response id code message data : Yojson.Safe.t =
-  match Sdk_jsonrpc.make_error ~id:(sdk_id_of_json id) ~code ~message ?data () with
-  | Sdk_jsonrpc.Error response ->
-      Sdk_jsonrpc.error_response_to_yojson response |> ensure_jsonrpc_field
-  | msg ->
-      (* make_error always returns Error; guard against SDK changes *)
-      failwith (sprintf "make_error_response: unexpected message type: %s"
-        (Yojson.Safe.to_string (Sdk_jsonrpc.message_to_yojson msg)))
+  Sdk_jsonrpc.make_error_json ~id:(sdk_id_of_json id) ~code ~message ?data ()
 
 (** ============== Tool 정의 → JSON ============== *)
 
