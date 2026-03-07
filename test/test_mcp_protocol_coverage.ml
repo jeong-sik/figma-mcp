@@ -25,25 +25,25 @@ module Protocol_tests = struct
 
   let test_member_existing_key () =
     let json = `Assoc [("name", `String "test"); ("value", `Int 42)] in
-    let result = Mcp_protocol.member "name" json in
+    let result = Figma_mcp_protocol.member "name" json in
     check (option json_testable) "finds existing key"
       (Some (`String "test")) result
 
   let test_member_missing_key () =
     let json = `Assoc [("name", `String "test")] in
-    let result = Mcp_protocol.member "missing" json in
+    let result = Figma_mcp_protocol.member "missing" json in
     check (option json_testable) "returns None for missing key"
       None result
 
   let test_member_non_object () =
     let json = `List [`String "a"; `String "b"] in
-    let result = Mcp_protocol.member "key" json in
+    let result = Figma_mcp_protocol.member "key" json in
     check (option json_testable) "returns None for non-object"
       None result
 
   let test_member_null_json () =
     let json = `Null in
-    let result = Mcp_protocol.member "key" json in
+    let result = Figma_mcp_protocol.member "key" json in
     check (option json_testable) "returns None for null"
       None result
 
@@ -51,7 +51,7 @@ module Protocol_tests = struct
 
   let test_parse_valid_request () =
     let json_str = {|{"jsonrpc":"2.0","id":1,"method":"test","params":{}}|} in
-    match Mcp_protocol.parse_request json_str with
+    match Figma_mcp_protocol.parse_request json_str with
     | Ok req ->
         check string "jsonrpc version" "2.0" req.jsonrpc;
         check string "method" "test" req.method_;
@@ -62,7 +62,7 @@ module Protocol_tests = struct
 
   let test_parse_request_string_id () =
     let json_str = {|{"jsonrpc":"2.0","id":"abc-123","method":"test"}|} in
-    match Mcp_protocol.parse_request json_str with
+    match Figma_mcp_protocol.parse_request json_str with
     | Ok req ->
         check (option json_testable) "string id"
           (Some (`String "abc-123")) req.id
@@ -71,7 +71,7 @@ module Protocol_tests = struct
 
   let test_parse_request_null_id () =
     let json_str = {|{"jsonrpc":"2.0","id":null,"method":"notify"}|} in
-    match Mcp_protocol.parse_request json_str with
+    match Figma_mcp_protocol.parse_request json_str with
     | Ok req ->
         check (option json_testable) "null id"
           (Some `Null) req.id
@@ -80,7 +80,7 @@ module Protocol_tests = struct
 
   let test_parse_request_no_id () =
     let json_str = {|{"jsonrpc":"2.0","method":"notify"}|} in
-    match Mcp_protocol.parse_request json_str with
+    match Figma_mcp_protocol.parse_request json_str with
     | Ok req ->
         check (option json_testable) "no id" None req.id
     | Error _ ->
@@ -88,7 +88,7 @@ module Protocol_tests = struct
 
   let test_parse_invalid_json () =
     let json_str = "{invalid json" in
-    match Mcp_protocol.parse_request json_str with
+    match Figma_mcp_protocol.parse_request json_str with
     | Error msg ->
         check bool "contains parse error" true
           (String.length msg > 0)
@@ -97,7 +97,7 @@ module Protocol_tests = struct
 
   let test_parse_wrong_version () =
     let json_str = {|{"jsonrpc":"1.0","id":1,"method":"test"}|} in
-    match Mcp_protocol.parse_request json_str with
+    match Figma_mcp_protocol.parse_request json_str with
     | Error msg ->
         check bool "contains version error" true
           (String.length msg > 0)
@@ -106,7 +106,7 @@ module Protocol_tests = struct
 
   let test_parse_missing_method () =
     let json_str = {|{"jsonrpc":"2.0","id":1}|} in
-    match Mcp_protocol.parse_request json_str with
+    match Figma_mcp_protocol.parse_request json_str with
     | Error msg ->
         check bool "contains missing method error" true
           (String.length msg > 0)
@@ -115,13 +115,13 @@ module Protocol_tests = struct
 
   let test_parse_empty_string () =
     let json_str = "" in
-    match Mcp_protocol.parse_request json_str with
+    match Figma_mcp_protocol.parse_request json_str with
     | Error _ -> ()  (* Expected *)
     | Ok _ -> fail "Expected Error for empty string"
 
   let test_parse_with_complex_params () =
     let json_str = {|{"jsonrpc":"2.0","id":1,"method":"test","params":{"nested":{"deep":true},"array":[1,2,3]}}|} in
-    match Mcp_protocol.parse_request json_str with
+    match Figma_mcp_protocol.parse_request json_str with
     | Ok req ->
         (match req.params with
          | Some (`Assoc _) -> ()
@@ -132,27 +132,27 @@ module Protocol_tests = struct
   (** --- is_notification Tests --- *)
 
   let test_is_notification_no_id () =
-    let req = { Mcp_protocol.jsonrpc = "2.0"; id = None; method_ = "test"; params = None } in
-    check bool "no id is notification" true (Mcp_protocol.is_notification req)
+    let req = { Figma_mcp_protocol.jsonrpc = "2.0"; id = None; method_ = "test"; params = None } in
+    check bool "no id is notification" true (Figma_mcp_protocol.is_notification req)
 
   let test_is_notification_null_id () =
-    let req = { Mcp_protocol.jsonrpc = "2.0"; id = Some `Null; method_ = "test"; params = None } in
-    check bool "null id is notification" true (Mcp_protocol.is_notification req)
+    let req = { Figma_mcp_protocol.jsonrpc = "2.0"; id = Some `Null; method_ = "test"; params = None } in
+    check bool "null id is notification" true (Figma_mcp_protocol.is_notification req)
 
   let test_is_notification_with_id () =
-    let req = { Mcp_protocol.jsonrpc = "2.0"; id = Some (`Int 1); method_ = "test"; params = None } in
-    check bool "with id is not notification" false (Mcp_protocol.is_notification req)
+    let req = { Figma_mcp_protocol.jsonrpc = "2.0"; id = Some (`Int 1); method_ = "test"; params = None } in
+    check bool "with id is not notification" false (Figma_mcp_protocol.is_notification req)
 
   let test_is_notification_string_id () =
-    let req = { Mcp_protocol.jsonrpc = "2.0"; id = Some (`String "abc"); method_ = "test"; params = None } in
-    check bool "string id is not notification" false (Mcp_protocol.is_notification req)
+    let req = { Figma_mcp_protocol.jsonrpc = "2.0"; id = Some (`String "abc"); method_ = "test"; params = None } in
+    check bool "string id is not notification" false (Figma_mcp_protocol.is_notification req)
 
   (** --- Response Generation Tests --- *)
 
   let test_make_success_response () =
     let id = `Int 42 in
     let result = `Assoc [("data", `String "ok")] in
-    let response = Mcp_protocol.make_success_response id result in
+    let response = Figma_mcp_protocol.make_success_response id result in
     match response with
     | `Assoc fields ->
         check (option json_testable) "jsonrpc"
@@ -165,7 +165,7 @@ module Protocol_tests = struct
 
   let test_make_error_response () =
     let id = `Int 1 in
-    let response = Mcp_protocol.make_error_response id (-32600) "Invalid Request" None in
+    let response = Figma_mcp_protocol.make_error_response id (-32600) "Invalid Request" None in
     match response with
     | `Assoc fields ->
         check (option json_testable) "jsonrpc"
@@ -182,7 +182,7 @@ module Protocol_tests = struct
   let test_make_error_response_with_data () =
     let id = `String "req-1" in
     let data = Some (`Assoc [("details", `String "extra info")]) in
-    let response = Mcp_protocol.make_error_response id (-32603) "Internal Error" data in
+    let response = Figma_mcp_protocol.make_error_response id (-32603) "Internal Error" data in
     match response with
     | `Assoc fields ->
         (match List.assoc_opt "error" fields with
@@ -194,12 +194,12 @@ module Protocol_tests = struct
   (** --- Type Serialization Tests --- *)
 
   let test_tool_to_json () =
-    let tool : Mcp_protocol.tool_def = {
+    let tool : Figma_mcp_protocol.tool_def = {
       name = "test_tool";
       description = "A test tool";
       input_schema = `Assoc [("type", `String "object")];
     } in
-    let json = Mcp_protocol.tool_to_json tool in
+    let json = Figma_mcp_protocol.tool_to_json tool in
     match json with
     | `Assoc fields ->
         check (option json_testable) "name"
@@ -210,13 +210,13 @@ module Protocol_tests = struct
     | _ -> fail "Expected Assoc"
 
   let test_resource_to_json () =
-    let resource : Mcp_protocol.mcp_resource = {
+    let resource : Figma_mcp_protocol.mcp_resource = {
       uri = "file:///test.txt";
       name = "Test Resource";
       description = "A test resource";
       mime_type = "text/plain";
     } in
-    let json = Mcp_protocol.resource_to_json resource in
+    let json = Figma_mcp_protocol.resource_to_json resource in
     match json with
     | `Assoc fields ->
         check (option json_testable) "uri"
@@ -226,12 +226,12 @@ module Protocol_tests = struct
     | _ -> fail "Expected Assoc"
 
   let test_prompt_arg_to_json () =
-    let arg : Mcp_protocol.prompt_arg = {
+    let arg : Figma_mcp_protocol.prompt_arg = {
       name = "query";
       description = "The search query";
       required = true;
     } in
-    let json = Mcp_protocol.prompt_arg_to_json arg in
+    let json = Figma_mcp_protocol.prompt_arg_to_json arg in
     match json with
     | `Assoc fields ->
         check (option json_testable) "name"
@@ -241,13 +241,13 @@ module Protocol_tests = struct
     | _ -> fail "Expected Assoc"
 
   let test_prompt_to_json () =
-    let prompt : Mcp_protocol.mcp_prompt = {
+    let prompt : Figma_mcp_protocol.mcp_prompt = {
       name = "search";
       description = "Search prompt";
       arguments = [];
       text = "Search for: {query}";
     } in
-    let json = Mcp_protocol.prompt_to_json prompt in
+    let json = Figma_mcp_protocol.prompt_to_json prompt in
     match json with
     | `Assoc fields ->
         check (option json_testable) "name"
@@ -260,13 +260,13 @@ module Protocol_tests = struct
     | _ -> fail "Expected Assoc"
 
   let test_prompt_to_detail_json () =
-    let prompt : Mcp_protocol.mcp_prompt = {
+    let prompt : Figma_mcp_protocol.mcp_prompt = {
       name = "search";
       description = "Search prompt";
       arguments = [];
       text = "Search for: {query}";
     } in
-    let json = Mcp_protocol.prompt_to_detail_json prompt in
+    let json = Figma_mcp_protocol.prompt_to_detail_json prompt in
     match json with
     | `Assoc fields ->
         check (option json_testable) "text"
@@ -276,51 +276,51 @@ module Protocol_tests = struct
   (** --- Protocol Version Tests --- *)
 
   let test_normalize_protocol_version_supported () =
-    let version = Mcp_protocol.normalize_protocol_version "2024-11-05" in
+    let version = Figma_mcp_protocol.normalize_protocol_version "2024-11-05" in
     check string "supported version unchanged" "2024-11-05" version
 
   let test_normalize_protocol_version_unsupported () =
-    let version = Mcp_protocol.normalize_protocol_version "1999-01-01" in
+    let version = Figma_mcp_protocol.normalize_protocol_version "1999-01-01" in
     check string "unsupported version normalized"
-      Mcp_protocol.default_protocol_version version
+      Figma_mcp_protocol.default_protocol_version version
 
   let test_protocol_version_from_params () =
     let params = Some (`Assoc [("protocolVersion", `String "2024-11-05")]) in
-    let version = Mcp_protocol.protocol_version_from_params params in
+    let version = Figma_mcp_protocol.protocol_version_from_params params in
     check string "extracts version from params" "2024-11-05" version
 
   let test_protocol_version_from_params_missing () =
     let params = Some (`Assoc [("other", `String "value")]) in
-    let version = Mcp_protocol.protocol_version_from_params params in
+    let version = Figma_mcp_protocol.protocol_version_from_params params in
     check string "default when missing"
-      Mcp_protocol.default_protocol_version version
+      Figma_mcp_protocol.default_protocol_version version
 
   let test_protocol_version_from_params_none () =
-    let version = Mcp_protocol.protocol_version_from_params None in
+    let version = Figma_mcp_protocol.protocol_version_from_params None in
     check string "default when None"
-      Mcp_protocol.default_protocol_version version
+      Figma_mcp_protocol.default_protocol_version version
 
   (** --- Handler Tests --- *)
 
   let make_test_server () =
-    let tool : Mcp_protocol.tool_def = {
+    let tool : Figma_mcp_protocol.tool_def = {
       name = "echo";
       description = "Echo tool";
       input_schema = `Assoc [("type", `String "object")];
     } in
-    let resource : Mcp_protocol.mcp_resource = {
+    let resource : Figma_mcp_protocol.mcp_resource = {
       uri = "file:///test.txt";
       name = "Test";
       description = "Test resource";
       mime_type = "text/plain";
     } in
-    let prompt : Mcp_protocol.mcp_prompt = {
+    let prompt : Figma_mcp_protocol.mcp_prompt = {
       name = "greeting";
       description = "Greeting prompt";
       arguments = [];
       text = "Hello!";
     } in
-    let template : Mcp_protocol.mcp_resource_template = {
+    let template : Figma_mcp_protocol.mcp_resource_template = {
       uri_template = "file:///template/{name}.txt";
       name = "Template";
       description = "Test template";
@@ -338,14 +338,14 @@ module Protocol_tests = struct
       else
         Error (Printf.sprintf "Resource not found: %s" uri)
     in
-    Mcp_protocol.create_server
+    Figma_mcp_protocol.create_server
       ~handlers_sync:[("echo", echo_handler)]
       ~resource_templates:[template]
       [tool] [resource] [prompt] read_resource
 
   let test_handle_initialize () =
     let params = Some (`Assoc [("protocolVersion", `String "2025-11-25")]) in
-    let result = Mcp_protocol.handle_initialize params in
+    let result = Figma_mcp_protocol.handle_initialize params in
     match result with
     | `Assoc fields ->
         check (option json_testable) "protocolVersion"
@@ -357,7 +357,7 @@ module Protocol_tests = struct
 
   let test_handle_tools_list () =
     let server = make_test_server () in
-    let result = Mcp_protocol.handle_tools_list server None in
+    let result = Figma_mcp_protocol.handle_tools_list server None in
     match result with
     | `Assoc fields ->
         (match List.assoc_opt "tools" fields with
@@ -368,7 +368,7 @@ module Protocol_tests = struct
 
   let test_handle_resources_list () =
     let server = make_test_server () in
-    let result = Mcp_protocol.handle_resources_list server None in
+    let result = Figma_mcp_protocol.handle_resources_list server None in
     match result with
     | `Assoc fields ->
         (match List.assoc_opt "resources" fields with
@@ -379,7 +379,7 @@ module Protocol_tests = struct
 
   let test_handle_prompts_list () =
     let server = make_test_server () in
-    let result = Mcp_protocol.handle_prompts_list server None in
+    let result = Figma_mcp_protocol.handle_prompts_list server None in
     match result with
     | `Assoc fields ->
         (match List.assoc_opt "prompts" fields with
@@ -391,7 +391,7 @@ module Protocol_tests = struct
   let test_handle_prompts_get_found () =
     let server = make_test_server () in
     let params = Some (`Assoc [("name", `String "greeting")]) in
-    match Mcp_protocol.handle_prompts_get server params with
+    match Figma_mcp_protocol.handle_prompts_get server params with
     | Ok result ->
         (match result with
          | `Assoc fields ->
@@ -403,25 +403,25 @@ module Protocol_tests = struct
   let test_handle_prompts_get_not_found () =
     let server = make_test_server () in
     let params = Some (`Assoc [("name", `String "nonexistent")]) in
-    match Mcp_protocol.handle_prompts_get server params with
+    match Figma_mcp_protocol.handle_prompts_get server params with
     | Error (code, _) ->
-        check int "invalid_params error" Mcp_protocol.invalid_params code
+        check int "invalid_params error" Figma_mcp_protocol.invalid_params code
     | Ok _ ->
         fail "Expected Error for nonexistent prompt"
 
   let test_handle_prompts_get_missing_name () =
     let server = make_test_server () in
     let params = Some (`Assoc []) in
-    match Mcp_protocol.handle_prompts_get server params with
+    match Figma_mcp_protocol.handle_prompts_get server params with
     | Error (code, _) ->
-        check int "invalid_params error" Mcp_protocol.invalid_params code
+        check int "invalid_params error" Figma_mcp_protocol.invalid_params code
     | Ok _ ->
         fail "Expected Error for missing name"
 
   let test_handle_resources_read_found () =
     let server = make_test_server () in
     let params = Some (`Assoc [("uri", `String "file:///test.txt")]) in
-    match Mcp_protocol.handle_resources_read server params with
+    match Figma_mcp_protocol.handle_resources_read server params with
     | Ok result ->
         (match result with
          | `Assoc fields ->
@@ -433,9 +433,9 @@ module Protocol_tests = struct
   let test_handle_resources_read_not_found () =
     let server = make_test_server () in
     let params = Some (`Assoc [("uri", `String "file:///missing.txt")]) in
-    match Mcp_protocol.handle_resources_read server params with
+    match Figma_mcp_protocol.handle_resources_read server params with
     | Error (code, _) ->
-        check int "internal_error" Mcp_protocol.internal_error code
+        check int "internal_error" Figma_mcp_protocol.internal_error code
     | Ok _ ->
         fail "Expected Error for missing resource"
 
@@ -445,7 +445,7 @@ module Protocol_tests = struct
       ("name", `String "echo");
       ("arguments", `Assoc [("input", `String "hello")])
     ]) in
-    match Mcp_protocol.handle_tools_call_sync server params with
+    match Figma_mcp_protocol.handle_tools_call_sync server params with
     | Ok result ->
         (match result with
          | `Assoc fields ->
@@ -460,9 +460,9 @@ module Protocol_tests = struct
       ("name", `String "nonexistent");
       ("arguments", `Assoc [])
     ]) in
-    match Mcp_protocol.handle_tools_call_sync server params with
+    match Figma_mcp_protocol.handle_tools_call_sync server params with
     | Error (code, _) ->
-        check int "method_not_found" Mcp_protocol.method_not_found code
+        check int "method_not_found" Figma_mcp_protocol.method_not_found code
     | Ok _ ->
         fail "Expected Error for nonexistent tool"
 
@@ -471,12 +471,12 @@ module Protocol_tests = struct
   let test_process_request_initialize () =
     let server = make_test_server () in
     let req = {
-      Mcp_protocol.jsonrpc = "2.0";
+      Figma_mcp_protocol.jsonrpc = "2.0";
       id = Some (`Int 1);
       method_ = "initialize";
       params = Some (`Assoc []);
     } in
-    let response = Mcp_protocol.process_request_sync server req in
+    let response = Figma_mcp_protocol.process_request_sync server req in
     match response with
     | `Assoc fields ->
         check bool "has result" true (List.mem_assoc "result" fields);
@@ -486,19 +486,19 @@ module Protocol_tests = struct
   let test_process_request_unknown_method () =
     let server = make_test_server () in
     let req = {
-      Mcp_protocol.jsonrpc = "2.0";
+      Figma_mcp_protocol.jsonrpc = "2.0";
       id = Some (`Int 1);
       method_ = "unknown/method";
       params = None;
     } in
-    let response = Mcp_protocol.process_request_sync server req in
+    let response = Figma_mcp_protocol.process_request_sync server req in
     match response with
     | `Assoc fields ->
         check bool "has error" true (List.mem_assoc "error" fields);
         (match List.assoc_opt "error" fields with
          | Some (`Assoc err) ->
              check (option json_testable) "method_not_found code"
-               (Some (`Int Mcp_protocol.method_not_found))
+               (Some (`Int Figma_mcp_protocol.method_not_found))
                (List.assoc_opt "code" err)
          | _ -> fail "Expected error object")
     | _ -> fail "Expected Assoc"
@@ -506,12 +506,12 @@ module Protocol_tests = struct
   let test_process_request_initialized () =
     let server = make_test_server () in
     let req = {
-      Mcp_protocol.jsonrpc = "2.0";
+      Figma_mcp_protocol.jsonrpc = "2.0";
       id = Some (`Int 1);
       method_ = "initialized";
       params = None;
     } in
-    let response = Mcp_protocol.process_request_sync server req in
+    let response = Figma_mcp_protocol.process_request_sync server req in
     match response with
     | `Assoc fields ->
         check (option json_testable) "result null"
@@ -521,12 +521,12 @@ module Protocol_tests = struct
   let test_process_request_resources_templates_list () =
     let server = make_test_server () in
     let req = {
-      Mcp_protocol.jsonrpc = "2.0";
+      Figma_mcp_protocol.jsonrpc = "2.0";
       id = Some (`Int 1);
       method_ = "resources/templates/list";
       params = None;
     } in
-    let response = Mcp_protocol.process_request_sync server req in
+    let response = Figma_mcp_protocol.process_request_sync server req in
     match response with
     | `Assoc fields ->
         (match List.assoc_opt "result" fields with
@@ -546,7 +546,7 @@ module Protocol_tests = struct
 
   let test_request_roundtrip () =
     let original = {|{"jsonrpc":"2.0","id":123,"method":"tools/list","params":{"filter":"all"}}|} in
-    match Mcp_protocol.parse_request original with
+    match Figma_mcp_protocol.parse_request original with
     | Ok req ->
         check string "method preserved" "tools/list" req.method_;
         check (option json_testable) "id preserved"
@@ -557,7 +557,7 @@ module Protocol_tests = struct
   let test_response_roundtrip () =
     let id = `Int 999 in
     let result = `Assoc [("data", `List [`Int 1; `Int 2; `Int 3])] in
-    let response = Mcp_protocol.make_success_response id result in
+    let response = Figma_mcp_protocol.make_success_response id result in
     let json_str = Yojson.Safe.to_string response in
     let parsed = Yojson.Safe.from_string json_str in
     check json_testable "roundtrip preserves structure" response parsed
@@ -565,18 +565,18 @@ module Protocol_tests = struct
   (** --- Error Code Constants --- *)
 
   let test_error_codes () =
-    check int "parse_error" (-32700) Mcp_protocol.parse_error;
-    check int "invalid_request" (-32600) Mcp_protocol.invalid_request;
-    check int "method_not_found" (-32601) Mcp_protocol.method_not_found;
-    check int "invalid_params" (-32602) Mcp_protocol.invalid_params;
-    check int "internal_error" (-32603) Mcp_protocol.internal_error
+    check int "parse_error" (-32700) Figma_mcp_protocol.parse_error;
+    check int "invalid_request" (-32600) Figma_mcp_protocol.invalid_request;
+    check int "method_not_found" (-32601) Figma_mcp_protocol.method_not_found;
+    check int "invalid_params" (-32602) Figma_mcp_protocol.invalid_params;
+    check int "internal_error" (-32603) Figma_mcp_protocol.internal_error
 
   (** --- Server Info --- *)
 
   let test_server_info () =
-    check string "server_name" "figma-mcp" Mcp_protocol.server_name;
-    check bool "version not empty" true (String.length Mcp_protocol.server_version > 0);
-    check bool "protocol_version not empty" true (String.length Mcp_protocol.protocol_version > 0)
+    check string "server_name" "figma-mcp" Figma_mcp_protocol.server_name;
+    check bool "version not empty" true (String.length Figma_mcp_protocol.server_version > 0);
+    check bool "protocol_version not empty" true (String.length Figma_mcp_protocol.protocol_version > 0)
 
 end
 
@@ -687,7 +687,7 @@ module Eio_tests = struct
       ]])])
     in
     let read_resource _uri = Error "Not implemented" in
-    Mcp_protocol.create_server
+    Figma_mcp_protocol.create_server
       ~handlers_sync:[("echo", echo_handler)]
       [] [] [] read_resource
 
@@ -719,7 +719,7 @@ module Edge_cases = struct
 
   let test_unicode_in_request () =
     let json_str = {|{"jsonrpc":"2.0","id":1,"method":"test","params":{"text":"한글 테스트 🎨"}}|} in
-    match Mcp_protocol.parse_request json_str with
+    match Figma_mcp_protocol.parse_request json_str with
     | Ok req ->
         (match req.params with
          | Some (`Assoc fields) ->
@@ -732,7 +732,7 @@ module Edge_cases = struct
 
   let test_large_numeric_id () =
     let json_str = {|{"jsonrpc":"2.0","id":9999999999999,"method":"test"}|} in
-    match Mcp_protocol.parse_request json_str with
+    match Figma_mcp_protocol.parse_request json_str with
     | Ok req ->
         check bool "has id" true (Option.is_some req.id)
     | Error msg ->
@@ -740,7 +740,7 @@ module Edge_cases = struct
 
   let test_nested_json_params () =
     let json_str = {|{"jsonrpc":"2.0","id":1,"method":"test","params":{"a":{"b":{"c":{"d":1}}}}}|} in
-    match Mcp_protocol.parse_request json_str with
+    match Figma_mcp_protocol.parse_request json_str with
     | Ok req ->
         check bool "has params" true (Option.is_some req.params)
     | Error msg ->
@@ -748,7 +748,7 @@ module Edge_cases = struct
 
   let test_array_params () =
     let json_str = {|{"jsonrpc":"2.0","id":1,"method":"test","params":[1,2,3]}|} in
-    match Mcp_protocol.parse_request json_str with
+    match Figma_mcp_protocol.parse_request json_str with
     | Ok req ->
         (match req.params with
          | Some (`List _) -> ()
@@ -758,7 +758,7 @@ module Edge_cases = struct
 
   let test_float_id () =
     let json_str = {|{"jsonrpc":"2.0","id":1.5,"method":"test"}|} in
-    match Mcp_protocol.parse_request json_str with
+    match Figma_mcp_protocol.parse_request json_str with
     | Ok req ->
         (match req.id with
          | Some (`Float f) -> check (float 0.001) "float id" 1.5 f
@@ -768,7 +768,7 @@ module Edge_cases = struct
 
   let test_special_characters_in_method () =
     let json_str = {|{"jsonrpc":"2.0","id":1,"method":"tools/call"}|} in
-    match Mcp_protocol.parse_request json_str with
+    match Figma_mcp_protocol.parse_request json_str with
     | Ok req ->
         check string "method with slash" "tools/call" req.method_
     | Error msg ->
@@ -776,7 +776,7 @@ module Edge_cases = struct
 
   let test_empty_object_params () =
     let json_str = {|{"jsonrpc":"2.0","id":1,"method":"test","params":{}}|} in
-    match Mcp_protocol.parse_request json_str with
+    match Figma_mcp_protocol.parse_request json_str with
     | Ok req ->
         (match req.params with
          | Some (`Assoc []) -> ()
@@ -792,7 +792,7 @@ module Edge_cases = struct
       "method": "test"
     }
     |} in
-    match Mcp_protocol.parse_request json_str with
+    match Figma_mcp_protocol.parse_request json_str with
     | Ok req ->
         check string "method" "test" req.method_
     | Error msg ->

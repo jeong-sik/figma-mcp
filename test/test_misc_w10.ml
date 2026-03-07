@@ -140,7 +140,7 @@ let () =
       (try ignore (Str.search_forward (Str.regexp_string s) text 0); true
        with Not_found -> false)
     in
-    check bool "has server name" true (has Mcp_protocol.server_name)
+    check bool "has server name" true (has Figma_mcp_protocol.server_name)
   in
 
   (* ================================================================
@@ -672,23 +672,23 @@ let () =
      ================================================================ *)
 
   let make_test_server () =
-    let tool : Mcp_protocol.tool_def = {
+    let tool : Figma_mcp_protocol.tool_def = {
       name = "echo";
       description = "Echo tool";
       input_schema = `Assoc [("type", `String "object")];
     } in
-    let deprecated_tool : Mcp_protocol.tool_def = {
+    let deprecated_tool : Figma_mcp_protocol.tool_def = {
       name = "old_tool";
       description = "[DEPRECATED] Use new_tool instead";
       input_schema = `Assoc [("type", `String "object")];
     } in
-    let resource : Mcp_protocol.mcp_resource = {
+    let resource : Figma_mcp_protocol.mcp_resource = {
       uri = "file:///test.txt";
       name = "Test";
       description = "Test resource";
       mime_type = "text/plain";
     } in
-    let prompt : Mcp_protocol.mcp_prompt = {
+    let prompt : Figma_mcp_protocol.mcp_prompt = {
       name = "greeting";
       description = "Greeting prompt";
       arguments = [
@@ -697,7 +697,7 @@ let () =
       ];
       text = "Hello, {name}!";
     } in
-    let template : Mcp_protocol.mcp_resource_template = {
+    let template : Figma_mcp_protocol.mcp_resource_template = {
       uri_template = "figma://tokens/{file_key}";
       name = "Tokens";
       description = "Design tokens";
@@ -716,7 +716,7 @@ let () =
       if uri = "file:///test.txt" then Ok ("text/plain", "Test content")
       else Error (Printf.sprintf "Not found: %s" uri)
     in
-    Mcp_protocol.create_server
+    Figma_mcp_protocol.create_server
       ~handlers_sync:[("echo", echo_handler); ("fail_tool", failing_handler)]
       ~resource_templates:[template]
       [tool; deprecated_tool] [resource] [prompt] read_resource
@@ -724,12 +724,12 @@ let () =
 
   (* tool_to_json: deprecated tool has deprecated field *)
   let test_tool_to_json_deprecated () =
-    let tool : Mcp_protocol.tool_def = {
+    let tool : Figma_mcp_protocol.tool_def = {
       name = "old_tool";
       description = "[DEPRECATED] Use new_tool instead";
       input_schema = `Assoc [("type", `String "object")];
     } in
-    let json = Mcp_protocol.tool_to_json tool in
+    let json = Figma_mcp_protocol.tool_to_json tool in
     match json with
     | `Assoc fields ->
         check bool "has deprecated" true
@@ -739,12 +739,12 @@ let () =
 
   (* tool_to_json: non-deprecated tool has no deprecated field *)
   let test_tool_to_json_not_deprecated () =
-    let tool : Mcp_protocol.tool_def = {
+    let tool : Figma_mcp_protocol.tool_def = {
       name = "new_tool";
       description = "A new tool";
       input_schema = `Assoc [];
     } in
-    let json = Mcp_protocol.tool_to_json tool in
+    let json = Figma_mcp_protocol.tool_to_json tool in
     match json with
     | `Assoc fields ->
         check bool "no deprecated" true
@@ -754,12 +754,12 @@ let () =
 
   (* tool_to_json: short description (< 12 chars, not deprecated) *)
   let test_tool_to_json_short_desc () =
-    let tool : Mcp_protocol.tool_def = {
+    let tool : Figma_mcp_protocol.tool_def = {
       name = "t";
       description = "short";
       input_schema = `Null;
     } in
-    let json = Mcp_protocol.tool_to_json tool in
+    let json = Figma_mcp_protocol.tool_to_json tool in
     match json with
     | `Assoc fields ->
         check bool "no deprecated for short" true
@@ -769,13 +769,13 @@ let () =
 
   (* resource_template_to_json: verify fields *)
   let test_resource_template_to_json () =
-    let tmpl : Mcp_protocol.mcp_resource_template = {
+    let tmpl : Figma_mcp_protocol.mcp_resource_template = {
       uri_template = "figma://tokens/{file_key}";
       name = "Tokens";
       description = "Design tokens";
       mime_type = "application/json";
     } in
-    let json = Mcp_protocol.resource_template_to_json tmpl in
+    let json = Figma_mcp_protocol.resource_template_to_json tmpl in
     match json with
     | `Assoc fields ->
         check bool "has uriTemplate" true
@@ -790,27 +790,27 @@ let () =
   (* handle_prompts_get: non-Assoc params *)
   let test_prompts_get_non_assoc () =
     let server = make_test_server () in
-    match Mcp_protocol.handle_prompts_get server (Some (`List [])) with
+    match Figma_mcp_protocol.handle_prompts_get server (Some (`List [])) with
     | Error (code, _) ->
-        check int "invalid_params" Mcp_protocol.invalid_params code
+        check int "invalid_params" Figma_mcp_protocol.invalid_params code
     | Ok _ -> fail "expected error"
   in
 
   (* handle_prompts_get: None params *)
   let test_prompts_get_none_params () =
     let server = make_test_server () in
-    match Mcp_protocol.handle_prompts_get server None with
+    match Figma_mcp_protocol.handle_prompts_get server None with
     | Error (code, _) ->
-        check int "invalid_params" Mcp_protocol.invalid_params code
+        check int "invalid_params" Figma_mcp_protocol.invalid_params code
     | Ok _ -> fail "expected error"
   in
 
   (* handle_resources_read: non-Assoc params *)
   let test_resources_read_non_assoc () =
     let server = make_test_server () in
-    match Mcp_protocol.handle_resources_read server (Some (`String "bad")) with
+    match Figma_mcp_protocol.handle_resources_read server (Some (`String "bad")) with
     | Error (code, _) ->
-        check int "invalid_params" Mcp_protocol.invalid_params code
+        check int "invalid_params" Figma_mcp_protocol.invalid_params code
     | Ok _ -> fail "expected error"
   in
 
@@ -818,9 +818,9 @@ let () =
   let test_resources_read_missing_uri () =
     let server = make_test_server () in
     let params = Some (`Assoc [("other", `String "value")]) in
-    match Mcp_protocol.handle_resources_read server params with
+    match Figma_mcp_protocol.handle_resources_read server params with
     | Error (code, _) ->
-        check int "invalid_params" Mcp_protocol.invalid_params code
+        check int "invalid_params" Figma_mcp_protocol.invalid_params code
     | Ok _ -> fail "expected error"
   in
 
@@ -828,27 +828,27 @@ let () =
   let test_tools_call_missing_name () =
     let server = make_test_server () in
     let params = Some (`Assoc [("arguments", `Assoc [])]) in
-    match Mcp_protocol.handle_tools_call_sync server params with
+    match Figma_mcp_protocol.handle_tools_call_sync server params with
     | Error (code, _) ->
-        check int "invalid_params" Mcp_protocol.invalid_params code
+        check int "invalid_params" Figma_mcp_protocol.invalid_params code
     | Ok _ -> fail "expected error"
   in
 
   (* handle_tools_call_sync: non-Assoc params *)
   let test_tools_call_non_assoc () =
     let server = make_test_server () in
-    match Mcp_protocol.handle_tools_call_sync server (Some (`List [])) with
+    match Figma_mcp_protocol.handle_tools_call_sync server (Some (`List [])) with
     | Error (code, _) ->
-        check int "invalid_params" Mcp_protocol.invalid_params code
+        check int "invalid_params" Figma_mcp_protocol.invalid_params code
     | Ok _ -> fail "expected error"
   in
 
   (* handle_tools_call_sync: None params *)
   let test_tools_call_none_params () =
     let server = make_test_server () in
-    match Mcp_protocol.handle_tools_call_sync server None with
+    match Figma_mcp_protocol.handle_tools_call_sync server None with
     | Error (code, _) ->
-        check int "invalid_params" Mcp_protocol.invalid_params code
+        check int "invalid_params" Figma_mcp_protocol.invalid_params code
     | Ok _ -> fail "expected error"
   in
 
@@ -859,9 +859,9 @@ let () =
       ("name", `String "fail_tool");
       ("arguments", `Assoc [])
     ]) in
-    match Mcp_protocol.handle_tools_call_sync server params with
+    match Figma_mcp_protocol.handle_tools_call_sync server params with
     | Error (code, msg) ->
-        check int "internal_error" Mcp_protocol.internal_error code;
+        check int "internal_error" Figma_mcp_protocol.internal_error code;
         check bool "has error msg" true (String.length msg > 0)
     | Ok _ -> fail "expected error"
   in
@@ -870,12 +870,12 @@ let () =
   let test_process_notifications_initialized () =
     let server = make_test_server () in
     let req = {
-      Mcp_protocol.jsonrpc = "2.0";
+      Figma_mcp_protocol.jsonrpc = "2.0";
       id = Some (`Int 1);
       method_ = "notifications/initialized";
       params = None;
     } in
-    let response = Mcp_protocol.process_request_sync server req in
+    let response = Figma_mcp_protocol.process_request_sync server req in
     match response with
     | `Assoc fields ->
         check bool "result is null" true
@@ -887,7 +887,7 @@ let () =
   let test_process_tools_call () =
     let server = make_test_server () in
     let req = {
-      Mcp_protocol.jsonrpc = "2.0";
+      Figma_mcp_protocol.jsonrpc = "2.0";
       id = Some (`Int 99);
       method_ = "tools/call";
       params = Some (`Assoc [
@@ -895,7 +895,7 @@ let () =
         ("arguments", `Assoc [("msg", `String "hi")])
       ]);
     } in
-    let response = Mcp_protocol.process_request_sync server req in
+    let response = Figma_mcp_protocol.process_request_sync server req in
     match response with
     | `Assoc fields ->
         check bool "has result" true (List.mem_assoc "result" fields);
@@ -907,12 +907,12 @@ let () =
   let test_process_resources_read () =
     let server = make_test_server () in
     let req = {
-      Mcp_protocol.jsonrpc = "2.0";
+      Figma_mcp_protocol.jsonrpc = "2.0";
       id = Some (`Int 2);
       method_ = "resources/read";
       params = Some (`Assoc [("uri", `String "file:///test.txt")]);
     } in
-    let response = Mcp_protocol.process_request_sync server req in
+    let response = Figma_mcp_protocol.process_request_sync server req in
     match response with
     | `Assoc fields ->
         check bool "has result" true (List.mem_assoc "result" fields)
@@ -923,12 +923,12 @@ let () =
   let test_process_resources_read_error () =
     let server = make_test_server () in
     let req = {
-      Mcp_protocol.jsonrpc = "2.0";
+      Figma_mcp_protocol.jsonrpc = "2.0";
       id = Some (`Int 2);
       method_ = "resources/read";
       params = Some (`Assoc [("uri", `String "file:///missing.txt")]);
     } in
-    let response = Mcp_protocol.process_request_sync server req in
+    let response = Figma_mcp_protocol.process_request_sync server req in
     match response with
     | `Assoc fields ->
         check bool "has error" true (List.mem_assoc "error" fields)
@@ -939,12 +939,12 @@ let () =
   let test_process_prompts_get () =
     let server = make_test_server () in
     let req = {
-      Mcp_protocol.jsonrpc = "2.0";
+      Figma_mcp_protocol.jsonrpc = "2.0";
       id = Some (`Int 3);
       method_ = "prompts/get";
       params = Some (`Assoc [("name", `String "greeting")]);
     } in
-    let response = Mcp_protocol.process_request_sync server req in
+    let response = Figma_mcp_protocol.process_request_sync server req in
     match response with
     | `Assoc fields ->
         check bool "has result" true (List.mem_assoc "result" fields)
@@ -955,12 +955,12 @@ let () =
   let test_process_prompts_get_error () =
     let server = make_test_server () in
     let req = {
-      Mcp_protocol.jsonrpc = "2.0";
+      Figma_mcp_protocol.jsonrpc = "2.0";
       id = Some (`Int 3);
       method_ = "prompts/get";
       params = Some (`Assoc [("name", `String "nonexistent")]);
     } in
-    let response = Mcp_protocol.process_request_sync server req in
+    let response = Figma_mcp_protocol.process_request_sync server req in
     match response with
     | `Assoc fields ->
         check bool "has error" true (List.mem_assoc "error" fields)
@@ -970,7 +970,7 @@ let () =
   (* handle_initialize: with various protocol versions *)
   let test_initialize_old_version () =
     let params = Some (`Assoc [("protocolVersion", `String "2024-11-05")]) in
-    let result = Mcp_protocol.handle_initialize params in
+    let result = Figma_mcp_protocol.handle_initialize params in
     match result with
     | `Assoc fields ->
         check bool "negotiated version" true
@@ -980,32 +980,32 @@ let () =
 
   let test_initialize_unsupported_version () =
     let params = Some (`Assoc [("protocolVersion", `String "1999-01-01")]) in
-    let result = Mcp_protocol.handle_initialize params in
+    let result = Figma_mcp_protocol.handle_initialize params in
     match result with
     | `Assoc fields ->
         check bool "default version" true
           (List.assoc_opt "protocolVersion" fields =
-           Some (`String Mcp_protocol.default_protocol_version))
+           Some (`String Figma_mcp_protocol.default_protocol_version))
     | _ -> fail "expected assoc"
   in
 
   (* protocol_version_from_params: non-string version *)
   let test_protocol_version_non_string () =
     let params = Some (`Assoc [("protocolVersion", `Int 42)]) in
-    let version = Mcp_protocol.protocol_version_from_params params in
-    check string "default for non-string" Mcp_protocol.default_protocol_version version
+    let version = Figma_mcp_protocol.protocol_version_from_params params in
+    check string "default for non-string" Figma_mcp_protocol.default_protocol_version version
   in
 
   (* protocol_version_from_params: non-Assoc params *)
   let test_protocol_version_from_list () =
     let params = Some (`List []) in
-    let version = Mcp_protocol.protocol_version_from_params params in
-    check string "default for list" Mcp_protocol.default_protocol_version version
+    let version = Figma_mcp_protocol.protocol_version_from_params params in
+    check string "default for list" Figma_mcp_protocol.default_protocol_version version
   in
 
   (* prompt with arguments serialization *)
   let test_prompt_with_args_json () =
-    let prompt : Mcp_protocol.mcp_prompt = {
+    let prompt : Figma_mcp_protocol.mcp_prompt = {
       name = "search";
       description = "Search";
       arguments = [
@@ -1014,7 +1014,7 @@ let () =
       ];
       text = "Search: {q}";
     } in
-    let json = Mcp_protocol.prompt_to_json prompt in
+    let json = Figma_mcp_protocol.prompt_to_json prompt in
     match json with
     | `Assoc fields ->
         (match List.assoc_opt "arguments" fields with
@@ -1025,13 +1025,13 @@ let () =
 
   (* prompt_to_detail_json includes text *)
   let test_prompt_detail_includes_text () =
-    let prompt : Mcp_protocol.mcp_prompt = {
+    let prompt : Figma_mcp_protocol.mcp_prompt = {
       name = "test";
       description = "Test";
       arguments = [];
       text = "Detail text here";
     } in
-    let json = Mcp_protocol.prompt_to_detail_json prompt in
+    let json = Figma_mcp_protocol.prompt_to_detail_json prompt in
     match json with
     | `Assoc fields ->
         check bool "has text" true
@@ -1044,19 +1044,19 @@ let () =
   (* normalize_protocol_version: each supported version *)
   let test_normalize_all_supported () =
     List.iter (fun v ->
-      let result = Mcp_protocol.normalize_protocol_version v in
+      let result = Figma_mcp_protocol.normalize_protocol_version v in
       check string (Printf.sprintf "supported %s" v) v result
-    ) Mcp_protocol.supported_protocol_versions
+    ) Figma_mcp_protocol.supported_protocol_versions
   in
 
   (* is_notification_id edge cases *)
   let test_is_notification_id_int () =
     check bool "Int not notification" false
-      (Mcp_protocol.is_notification_id (Some (`Int 1)));
+      (Figma_mcp_protocol.is_notification_id (Some (`Int 1)));
     check bool "String not notification" false
-      (Mcp_protocol.is_notification_id (Some (`String "abc")));
+      (Figma_mcp_protocol.is_notification_id (Some (`String "abc")));
     check bool "Float not notification" false
-      (Mcp_protocol.is_notification_id (Some (`Float 1.5)))
+      (Figma_mcp_protocol.is_notification_id (Some (`Float 1.5)))
   in
 
   (* create_server: verify fields *)
@@ -1071,7 +1071,7 @@ let () =
 
   (* make_error_response with data=None *)
   let test_error_response_no_data () =
-    let resp = Mcp_protocol.make_error_response (`Int 1) (-32600) "Bad" None in
+    let resp = Figma_mcp_protocol.make_error_response (`Int 1) (-32600) "Bad" None in
     match resp with
     | `Assoc fields ->
         (match List.assoc_opt "error" fields with

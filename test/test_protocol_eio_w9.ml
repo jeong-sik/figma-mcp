@@ -447,7 +447,7 @@ let test_cors_allow_origin_restrict_none () =
 (* ===== 14. process_mcp_request_sync ===== *)
 
 let test_process_mcp_request_sync_invalid_json () =
-  let server = Mcp_protocol.create_server [] [] [] (fun _uri -> Error "not implemented") in
+  let server = Figma_mcp_protocol.create_server [] [] [] (fun _uri -> Error "not implemented") in
   let result = process_mcp_request_sync server "not json" in
   let json = Yojson.Safe.from_string result in
   (match json with
@@ -456,7 +456,7 @@ let test_process_mcp_request_sync_invalid_json () =
    | _ -> Alcotest.fail "expected JSON object")
 
 let test_process_mcp_request_sync_bad_jsonrpc () =
-  let server = Mcp_protocol.create_server [] [] [] (fun _uri -> Error "not implemented") in
+  let server = Figma_mcp_protocol.create_server [] [] [] (fun _uri -> Error "not implemented") in
   let result = process_mcp_request_sync server {|{"jsonrpc":"1.0","id":1,"method":"test"}|} in
   let json = Yojson.Safe.from_string result in
   (match json with
@@ -465,7 +465,7 @@ let test_process_mcp_request_sync_bad_jsonrpc () =
    | _ -> Alcotest.fail "expected JSON object")
 
 let test_process_mcp_request_sync_tools_list () =
-  let server = Mcp_protocol.create_server [] [] [] (fun _uri -> Error "not implemented") in
+  let server = Figma_mcp_protocol.create_server [] [] [] (fun _uri -> Error "not implemented") in
   (* Initialize first *)
   let init_req = {|{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"test","version":"1.0"}}}|} in
   let _ = process_mcp_request_sync server init_req in

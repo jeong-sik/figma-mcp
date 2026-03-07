@@ -2,6 +2,11 @@
 
 open Printf
 
+(* The local protocol wrapper lives under a figma-specific module name so the
+   external MCP SDK can be linked without colliding on Mcp_protocol. *)
+module Sdk_error_codes = Mcp_protocol.Error_codes
+module Sdk_jsonrpc = Mcp_protocol.Jsonrpc
+
 (** ============== JSON-RPC 타입 ============== *)
 
 type json_rpc_request = {
@@ -51,11 +56,11 @@ type mcp_prompt = {
 type resource_reader = string -> (string * string, string) result
 
 (** ============== 에러 코드 (JSON-RPC 2.0) ============== *)
-let parse_error = -32700
-let invalid_request = -32600
-let method_not_found = -32601
-let invalid_params = -32602
-let internal_error = -32603
+let parse_error = Sdk_error_codes.parse_error
+let invalid_request = Sdk_error_codes.invalid_request
+let method_not_found = Sdk_error_codes.method_not_found
+let invalid_params = Sdk_error_codes.invalid_params
+let internal_error = Sdk_error_codes.internal_error
 
 (** ============== 서버 정보 ============== *)
 let supported_protocol_versions = [
@@ -91,6 +96,16 @@ let member key json =
   | `Assoc lst -> List.assoc_opt key lst
   | _ -> None
 
+let sdk_id_of_json json =
+  match Sdk_jsonrpc.id_of_yojson json with
+  | Ok id -> id
+  | Error _ -> Sdk_jsonrpc.Null
+
+let ensure_jsonrpc_field = function
+  | `Assoc fields as json when List.mem_assoc "jsonrpc" fields -> json
+  | `Assoc fields -> `Assoc (("jsonrpc", `String "2.0") :: fields)
+  | json -> json
+
 
 let parse_request json_str : (json_rpc_request, string) result =
   try
@@ -121,23 +136,16 @@ let is_notification req =
 (** ============== 응답 생성 ============== *)
 
 let make_success_response id result : Yojson.Safe.t =
-  `Assoc [
-    ("jsonrpc", `String "2.0");
-    ("id", id);
-    ("result", result)
-  ]
+  match Sdk_jsonrpc.make_response ~id:(sdk_id_of_json id) ~result with
+  | Sdk_jsonrpc.Response response ->
+      Sdk_jsonrpc.response_to_yojson response |> ensure_jsonrpc_field
+  | _ -> assert false
 
 let make_error_response id code message data : Yojson.Safe.t =
-  let error_obj = [
-    ("code", `Int code);
-    ("message", `String message);
-  ] @ (match data with Some d -> [("data", d)] | None -> [])
-  in
-  `Assoc [
-    ("jsonrpc", `String "2.0");
-    ("id", id);
-    ("error", `Assoc error_obj)
-  ]
+  match Sdk_jsonrpc.make_error ~id:(sdk_id_of_json id) ~code ~message ?data () with
+  | Sdk_jsonrpc.Error response ->
+      Sdk_jsonrpc.error_response_to_yojson response |> ensure_jsonrpc_field
+  | _ -> assert false
 
 (** ============== Tool 정의 → JSON ============== *)
 

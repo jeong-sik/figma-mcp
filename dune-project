@@ -20,6 +20,7 @@
   (dune (>= 3.13))
   ; External dependencies (opam pin)
   (grpc-direct (>= 0.1.0))
+  (mcp_protocol (>= 0.1.0))
   ; Standard dependencies
   (yojson (>= 2.0))
   (uri (>= 4.2))

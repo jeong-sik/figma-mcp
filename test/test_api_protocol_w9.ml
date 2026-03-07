@@ -20,7 +20,7 @@
 *)
 
 open Figma_api_eio
-open Mcp_protocol
+open Figma_mcp_protocol
 
 (* ================================================================ *)
 (* figma_api_eio.ml — retry_after_of_headers                        *)
@@ -732,39 +732,39 @@ let test_first_match_default () =
 let test_tool_to_json_deprecated () =
   let tool = { name = "old"; description = "[DEPRECATED] old tool"; input_schema = `Assoc [] } in
   let json = tool_to_json tool in
-  let deprecated = Mcp_protocol.member "deprecated" json in
+  let deprecated = Figma_mcp_protocol.member "deprecated" json in
   Alcotest.(check bool) "has deprecated field" true (deprecated = Some (`Bool true))
 
 let test_tool_to_json_not_deprecated () =
   let tool = { name = "new"; description = "A new tool"; input_schema = `Assoc [] } in
   let json = tool_to_json tool in
-  let deprecated = Mcp_protocol.member "deprecated" json in
+  let deprecated = Figma_mcp_protocol.member "deprecated" json in
   Alcotest.(check bool) "no deprecated field" true (deprecated = None)
 
 let test_tool_to_json_short_desc () =
   let tool = { name = "t"; description = "short"; input_schema = `Assoc [] } in
   let json = tool_to_json tool in
-  let deprecated = Mcp_protocol.member "deprecated" json in
+  let deprecated = Figma_mcp_protocol.member "deprecated" json in
   Alcotest.(check bool) "< 12 chars → no deprecated" true (deprecated = None)
 
 let test_tool_to_json_exactly_12_not_deprecated () =
   let tool = { name = "t"; description = "123456789012"; input_schema = `Assoc [] } in
   let json = tool_to_json tool in
-  let deprecated = Mcp_protocol.member "deprecated" json in
+  let deprecated = Figma_mcp_protocol.member "deprecated" json in
   Alcotest.(check bool) "exactly 12 but not prefix" true (deprecated = None)
 
 let test_tool_to_json_exactly_deprecated_prefix () =
   let tool = { name = "t"; description = "[DEPRECATED]"; input_schema = `Assoc [] } in
   let json = tool_to_json tool in
-  let deprecated = Mcp_protocol.member "deprecated" json in
+  let deprecated = Figma_mcp_protocol.member "deprecated" json in
   Alcotest.(check bool) "exactly [DEPRECATED]" true (deprecated = Some (`Bool true))
 
 let test_tool_to_json_has_all_fields () =
   let tool = { name = "test_tool"; description = "A test"; input_schema = `Assoc [("type", `String "object")] } in
   let json = tool_to_json tool in
-  let name = Mcp_protocol.member "name" json in
-  let desc = Mcp_protocol.member "description" json in
-  let schema = Mcp_protocol.member "inputSchema" json in
+  let name = Figma_mcp_protocol.member "name" json in
+  let desc = Figma_mcp_protocol.member "description" json in
+  let schema = Figma_mcp_protocol.member "inputSchema" json in
   Alcotest.(check bool) "name" true (name = Some (`String "test_tool"));
   Alcotest.(check bool) "desc" true (desc = Some (`String "A test"));
   Alcotest.(check bool) "schema" true (schema <> None)
@@ -776,7 +776,7 @@ let test_tool_to_json_has_all_fields () =
 let test_resource_to_json () =
   let r = { uri = "figma://docs/usage"; name = "Usage"; description = "usage docs"; mime_type = "text/plain" } in
   let json = resource_to_json r in
-  let uri = Mcp_protocol.member "uri" json in
+  let uri = Figma_mcp_protocol.member "uri" json in
   Alcotest.(check bool) "uri" true (uri = Some (`String "figma://docs/usage"))
 
 (* ================================================================ *)
@@ -786,8 +786,8 @@ let test_resource_to_json () =
 let test_resource_template_to_json () =
   let t = { uri_template = "figma://tokens/{file_key}"; name = "Tokens"; description = "tokens"; mime_type = "application/json" } in
   let json = resource_template_to_json t in
-  let uri_tmpl = Mcp_protocol.member "uriTemplate" json in
-  let name = Mcp_protocol.member "name" json in
+  let uri_tmpl = Figma_mcp_protocol.member "uriTemplate" json in
+  let name = Figma_mcp_protocol.member "name" json in
   Alcotest.(check bool) "uriTemplate" true (uri_tmpl = Some (`String "figma://tokens/{file_key}"));
   Alcotest.(check bool) "name" true (name = Some (`String "Tokens"))
 
@@ -798,15 +798,15 @@ let test_resource_template_to_json () =
 let test_prompt_arg_to_json () =
   let arg = { name = "format"; description = "Output format"; required = true } in
   let json = prompt_arg_to_json arg in
-  let name = Mcp_protocol.member "name" json in
-  let req = Mcp_protocol.member "required" json in
+  let name = Figma_mcp_protocol.member "name" json in
+  let req = Figma_mcp_protocol.member "required" json in
   Alcotest.(check bool) "name" true (name = Some (`String "format"));
   Alcotest.(check bool) "required" true (req = Some (`Bool true))
 
 let test_prompt_arg_optional () =
   let arg = { name = "depth"; description = "Depth"; required = false } in
   let json = prompt_arg_to_json arg in
-  let req = Mcp_protocol.member "required" json in
+  let req = Figma_mcp_protocol.member "required" json in
   Alcotest.(check bool) "not required" true (req = Some (`Bool false))
 
 (* ================================================================ *)
@@ -816,8 +816,8 @@ let test_prompt_arg_optional () =
 let test_prompt_to_json () =
   let p = { name = "gen_css"; description = "Generate CSS"; arguments = []; text = "template" } in
   let json = prompt_to_json p in
-  let name = Mcp_protocol.member "name" json in
-  let args = Mcp_protocol.member "arguments" json in
+  let name = Figma_mcp_protocol.member "name" json in
+  let args = Figma_mcp_protocol.member "arguments" json in
   Alcotest.(check bool) "name" true (name = Some (`String "gen_css"));
   Alcotest.(check bool) "args empty list" true (args = Some (`List []))
 
@@ -825,10 +825,10 @@ let test_prompt_to_json_with_args () =
   let arg = { name = "file_key"; description = "Figma file key"; required = true } in
   let p = { name = "gen_html"; description = "Generate HTML"; arguments = [arg]; text = "tmpl" } in
   let json = prompt_to_json p in
-  let args = Mcp_protocol.member "arguments" json in
+  let args = Figma_mcp_protocol.member "arguments" json in
   match args with
   | Some (`List [a]) ->
-    let aname = Mcp_protocol.member "name" a in
+    let aname = Figma_mcp_protocol.member "name" a in
     Alcotest.(check bool) "arg name" true (aname = Some (`String "file_key"))
   | _ -> Alcotest.fail "expected list with one arg"
 
@@ -839,7 +839,7 @@ let test_prompt_to_json_with_args () =
 let test_prompt_to_detail_json () =
   let p = { name = "analyze"; description = "Analyze design"; arguments = []; text = "You are a designer." } in
   let json = prompt_to_detail_json p in
-  let text = Mcp_protocol.member "text" json in
+  let text = Figma_mcp_protocol.member "text" json in
   Alcotest.(check bool) "has text" true (text = Some (`String "You are a designer."))
 
 (* ================================================================ *)
@@ -868,14 +868,14 @@ let test_error_codes () =
 
 let test_make_success_response () =
   let resp = make_success_response (`Int 1) (`String "ok") in
-  let id = Mcp_protocol.member "id" resp in
-  let result = Mcp_protocol.member "result" resp in
+  let id = Figma_mcp_protocol.member "id" resp in
+  let result = Figma_mcp_protocol.member "result" resp in
   Alcotest.(check bool) "id" true (id = Some (`Int 1));
   Alcotest.(check bool) "result" true (result = Some (`String "ok"))
 
 let test_make_error_response_no_data () =
   let resp = make_error_response (`Int 2) (-32600) "bad" None in
-  let error = Mcp_protocol.member "error" resp in
+  let error = Figma_mcp_protocol.member "error" resp in
   match error with
   | Some (`Assoc lst) ->
     let code = List.assoc_opt "code" lst in
@@ -884,7 +884,7 @@ let test_make_error_response_no_data () =
 
 let test_make_error_response_with_data () =
   let resp = make_error_response `Null (-32700) "parse err" (Some (`String "detail")) in
-  let error = Mcp_protocol.member "error" resp in
+  let error = Figma_mcp_protocol.member "error" resp in
   match error with
   | Some (`Assoc lst) ->
     let data = List.assoc_opt "data" lst in
@@ -983,28 +983,28 @@ let test_version_from_params_non_string () =
 
 let test_handle_initialize_default () =
   let result = handle_initialize None in
-  let version = Mcp_protocol.member "protocolVersion" result in
+  let version = Figma_mcp_protocol.member "protocolVersion" result in
   Alcotest.(check bool) "default version" true (version = Some (`String default_protocol_version))
 
 let test_handle_initialize_old_version () =
   let params = Some (`Assoc [("protocolVersion", `String "2024-11-05")]) in
   let result = handle_initialize params in
-  let version = Mcp_protocol.member "protocolVersion" result in
+  let version = Figma_mcp_protocol.member "protocolVersion" result in
   Alcotest.(check bool) "negotiated" true (version = Some (`String "2024-11-05"))
 
 let test_handle_initialize_has_capabilities () =
   let result = handle_initialize None in
-  let caps = Mcp_protocol.member "capabilities" result in
+  let caps = Figma_mcp_protocol.member "capabilities" result in
   Alcotest.(check bool) "has capabilities" true (caps <> None)
 
 let test_handle_initialize_has_server_info () =
   let result = handle_initialize None in
-  let info = Mcp_protocol.member "serverInfo" result in
+  let info = Figma_mcp_protocol.member "serverInfo" result in
   Alcotest.(check bool) "has serverInfo" true (info <> None)
 
 let test_handle_initialize_has_instructions () =
   let result = handle_initialize None in
-  let instr = Mcp_protocol.member "instructions" result in
+  let instr = Figma_mcp_protocol.member "instructions" result in
   Alcotest.(check bool) "has instructions" true (instr <> None)
 
 (* ================================================================ *)
@@ -1034,7 +1034,7 @@ let make_test_server () =
 let test_handle_tools_list () =
   let server = make_test_server () in
   let result = handle_tools_list server None in
-  let tools = Mcp_protocol.member "tools" result in
+  let tools = Figma_mcp_protocol.member "tools" result in
   match tools with
   | Some (`List lst) -> Alcotest.(check int) "1 tool" 1 (List.length lst)
   | _ -> Alcotest.fail "expected tools list"
@@ -1042,7 +1042,7 @@ let test_handle_tools_list () =
 let test_handle_resources_list () =
   let server = make_test_server () in
   let result = handle_resources_list server None in
-  let resources = Mcp_protocol.member "resources" result in
+  let resources = Figma_mcp_protocol.member "resources" result in
   match resources with
   | Some (`List lst) -> Alcotest.(check int) "1 resource" 1 (List.length lst)
   | _ -> Alcotest.fail "expected resources list"
@@ -1050,7 +1050,7 @@ let test_handle_resources_list () =
 let test_handle_resource_templates_list () =
   let server = make_test_server () in
   let result = handle_resource_templates_list server None in
-  let templates = Mcp_protocol.member "resourceTemplates" result in
+  let templates = Figma_mcp_protocol.member "resourceTemplates" result in
   match templates with
   | Some (`List lst) -> Alcotest.(check int) "1 template" 1 (List.length lst)
   | _ -> Alcotest.fail "expected templates list"
@@ -1058,7 +1058,7 @@ let test_handle_resource_templates_list () =
 let test_handle_prompts_list () =
   let server = make_test_server () in
   let result = handle_prompts_list server None in
-  let prompts = Mcp_protocol.member "prompts" result in
+  let prompts = Figma_mcp_protocol.member "prompts" result in
   match prompts with
   | Some (`List lst) -> Alcotest.(check int) "1 prompt" 1 (List.length lst)
   | _ -> Alcotest.fail "expected prompts list"
@@ -1071,7 +1071,7 @@ let test_process_request_sync_notification_initialized () =
   let server = make_test_server () in
   let req = { jsonrpc = "2.0"; id = None; method_ = "notifications/initialized"; params = None } in
   let resp = process_request_sync server req in
-  let result = Mcp_protocol.member "result" resp in
+  let result = Figma_mcp_protocol.member "result" resp in
   Alcotest.(check bool) "null result" true (result = Some `Null)
 
 let test_process_request_sync_tools_call_success () =
@@ -1079,7 +1079,7 @@ let test_process_request_sync_tools_call_success () =
   let params = Some (`Assoc [("name", `String "echo"); ("arguments", `Assoc [("msg", `String "hi")])]) in
   let req = { jsonrpc = "2.0"; id = Some (`Int 1); method_ = "tools/call"; params } in
   let resp = process_request_sync server req in
-  let result = Mcp_protocol.member "result" resp in
+  let result = Figma_mcp_protocol.member "result" resp in
   Alcotest.(check bool) "has result" true (result <> None)
 
 let test_process_request_sync_tools_call_not_found () =
@@ -1087,14 +1087,14 @@ let test_process_request_sync_tools_call_not_found () =
   let params = Some (`Assoc [("name", `String "nonexist")]) in
   let req = { jsonrpc = "2.0"; id = Some (`Int 2); method_ = "tools/call"; params } in
   let resp = process_request_sync server req in
-  let error = Mcp_protocol.member "error" resp in
+  let error = Figma_mcp_protocol.member "error" resp in
   Alcotest.(check bool) "has error" true (error <> None)
 
 let test_process_request_sync_unknown_method () =
   let server = make_test_server () in
   let req = { jsonrpc = "2.0"; id = Some (`Int 3); method_ = "unknown/method"; params = None } in
   let resp = process_request_sync server req in
-  let error = Mcp_protocol.member "error" resp in
+  let error = Figma_mcp_protocol.member "error" resp in
   Alcotest.(check bool) "has error" true (error <> None)
 
 let test_process_request_sync_resources_read_success () =
@@ -1102,7 +1102,7 @@ let test_process_request_sync_resources_read_success () =
   let params = Some (`Assoc [("uri", `String "figma://test")]) in
   let req = { jsonrpc = "2.0"; id = Some (`Int 4); method_ = "resources/read"; params } in
   let resp = process_request_sync server req in
-  let result = Mcp_protocol.member "result" resp in
+  let result = Figma_mcp_protocol.member "result" resp in
   Alcotest.(check bool) "has result" true (result <> None)
 
 let test_process_request_sync_resources_read_not_found () =
@@ -1110,7 +1110,7 @@ let test_process_request_sync_resources_read_not_found () =
   let params = Some (`Assoc [("uri", `String "figma://missing")]) in
   let req = { jsonrpc = "2.0"; id = Some (`Int 5); method_ = "resources/read"; params } in
   let resp = process_request_sync server req in
-  let error = Mcp_protocol.member "error" resp in
+  let error = Figma_mcp_protocol.member "error" resp in
   Alcotest.(check bool) "has error" true (error <> None)
 
 let test_process_request_sync_prompts_get_success () =
@@ -1118,7 +1118,7 @@ let test_process_request_sync_prompts_get_success () =
   let params = Some (`Assoc [("name", `String "gen")]) in
   let req = { jsonrpc = "2.0"; id = Some (`Int 6); method_ = "prompts/get"; params } in
   let resp = process_request_sync server req in
-  let result = Mcp_protocol.member "result" resp in
+  let result = Figma_mcp_protocol.member "result" resp in
   Alcotest.(check bool) "has result" true (result <> None)
 
 let test_process_request_sync_prompts_get_not_found () =
@@ -1126,21 +1126,21 @@ let test_process_request_sync_prompts_get_not_found () =
   let params = Some (`Assoc [("name", `String "missing")]) in
   let req = { jsonrpc = "2.0"; id = Some (`Int 7); method_ = "prompts/get"; params } in
   let resp = process_request_sync server req in
-  let error = Mcp_protocol.member "error" resp in
+  let error = Figma_mcp_protocol.member "error" resp in
   Alcotest.(check bool) "has error" true (error <> None)
 
 let test_process_request_sync_resources_templates_list () =
   let server = make_test_server () in
   let req = { jsonrpc = "2.0"; id = Some (`Int 8); method_ = "resources/templates/list"; params = None } in
   let resp = process_request_sync server req in
-  let result = Mcp_protocol.member "result" resp in
+  let result = Figma_mcp_protocol.member "result" resp in
   Alcotest.(check bool) "has result" true (result <> None)
 
 let test_process_request_sync_initialize () =
   let server = make_test_server () in
   let req = { jsonrpc = "2.0"; id = Some (`Int 9); method_ = "initialize"; params = None } in
   let resp = process_request_sync server req in
-  let result = Mcp_protocol.member "result" resp in
+  let result = Figma_mcp_protocol.member "result" resp in
   Alcotest.(check bool) "has result" true (result <> None)
 
 (* ================================================================ *)
@@ -1227,14 +1227,14 @@ let test_server_constants () =
 
 let test_mcp_member_assoc () =
   let json = `Assoc [("key", `String "val")] in
-  Alcotest.(check bool) "found" true (Mcp_protocol.member "key" json = Some (`String "val"))
+  Alcotest.(check bool) "found" true (Figma_mcp_protocol.member "key" json = Some (`String "val"))
 
 let test_mcp_member_missing () =
   let json = `Assoc [] in
-  Alcotest.(check bool) "missing" true (Mcp_protocol.member "key" json = None)
+  Alcotest.(check bool) "missing" true (Figma_mcp_protocol.member "key" json = None)
 
 let test_mcp_member_non_assoc () =
-  Alcotest.(check bool) "non-assoc" true (Mcp_protocol.member "key" (`List []) = None)
+  Alcotest.(check bool) "non-assoc" true (Figma_mcp_protocol.member "key" (`List []) = None)
 
 (* ================================================================ *)
 (* Test registration                                                *)

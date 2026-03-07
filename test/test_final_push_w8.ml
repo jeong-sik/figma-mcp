@@ -691,7 +691,7 @@ let () =
   (* --- tool definitions structural checks --- *)
   let test_all_tools_have_names () =
     let tools = Mcp_tools.all_tools in
-    List.iter (fun (t : Mcp_protocol.tool_def) ->
+    List.iter (fun (t : Figma_mcp_protocol.tool_def) ->
       check bool (Printf.sprintf "tool %s has name" t.name) true (t.name <> "")
     ) tools
   in
