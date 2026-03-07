@@ -5,6 +5,8 @@
 
 open Printf
 
+module Sdk_jsonrpc = Mcp_protocol.Jsonrpc
+
 (** SSE client registry for shutdown notification *)
 type sse_client = {
   body: Httpun.Body.Writer.t;
@@ -102,9 +104,15 @@ let send_sse_event client ~event ~data =
         eprintf "[sse] send error: %s\n%!" (Printexc.to_string exn)
 
 let broadcast_sse_shutdown reason =
-  let data = sprintf
-    {|{"jsonrpc":"2.0","method":"notifications/shutdown","params":{"reason":"%s","message":"Server is shutting down, please reconnect"}}|}
-    reason
+  let data =
+    Sdk_jsonrpc.make_notification_json
+      ~method_:"notifications/shutdown"
+      ~params:(`Assoc [
+        ("reason", `String reason);
+        ("message", `String "Server is shutting down, please reconnect");
+      ])
+      ()
+    |> Yojson.Safe.to_string
   in
   Hashtbl.iter (fun _ client ->
     if client.connected then
