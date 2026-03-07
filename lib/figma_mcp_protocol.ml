@@ -139,13 +139,19 @@ let make_success_response id result : Yojson.Safe.t =
   match Sdk_jsonrpc.make_response ~id:(sdk_id_of_json id) ~result with
   | Sdk_jsonrpc.Response response ->
       Sdk_jsonrpc.response_to_yojson response |> ensure_jsonrpc_field
-  | _ -> assert false
+  | msg ->
+      (* make_response always returns Response; guard against SDK changes *)
+      failwith (sprintf "make_success_response: unexpected message type: %s"
+        (Yojson.Safe.to_string (Sdk_jsonrpc.message_to_yojson msg)))
 
 let make_error_response id code message data : Yojson.Safe.t =
   match Sdk_jsonrpc.make_error ~id:(sdk_id_of_json id) ~code ~message ?data () with
   | Sdk_jsonrpc.Error response ->
       Sdk_jsonrpc.error_response_to_yojson response |> ensure_jsonrpc_field
-  | _ -> assert false
+  | msg ->
+      (* make_error always returns Error; guard against SDK changes *)
+      failwith (sprintf "make_error_response: unexpected message type: %s"
+        (Yojson.Safe.to_string (Sdk_jsonrpc.message_to_yojson msg)))
 
 (** ============== Tool 정의 → JSON ============== *)
 
