@@ -369,6 +369,30 @@ let () =
     Mcp_progress.broadcast_fn := old
   in
 
+  (* send_progress: emitted payload stays valid JSON with escaping *)
+  let test_progress_send_json_escaped () =
+    let received = ref "" in
+    let old = !(Mcp_progress.broadcast_fn) in
+    Mcp_progress.set_broadcast_fn (fun data -> received := data);
+    let message = "step \"1\"\nnext" in
+    Mcp_progress.send_progress
+      ~token:"tok-json" ~current:2 ~total:4 ~message ();
+    let json = Yojson.Safe.from_string !received in
+    let open Yojson.Safe.Util in
+    check string "jsonrpc" "2.0" (json |> member "jsonrpc" |> to_string);
+    check string "method" "notifications/progress"
+      (json |> member "method" |> to_string);
+    check string "token" "tok-json"
+      (json |> member "params" |> member "progressToken" |> to_string);
+    check int "progress" 2
+      (json |> member "params" |> member "progress" |> to_int);
+    check int "total" 4
+      (json |> member "params" |> member "total" |> to_int);
+    check string "message preserved" message
+      (json |> member "params" |> member "message" |> to_string);
+    Mcp_progress.broadcast_fn := old
+  in
+
   (* update_progress is an alias for send_progress *)
   let test_progress_update_alias () =
     let received = ref "" in
@@ -1131,6 +1155,7 @@ let () =
       test_case "make token" `Quick test_progress_make_token;
       test_case "send no broadcast" `Quick test_progress_send_no_broadcast;
       test_case "send with broadcast" `Quick test_progress_send_with_broadcast;
+      test_case "send json escaped" `Quick test_progress_send_json_escaped;
       test_case "update alias" `Quick test_progress_update_alias;
     ]);
 
