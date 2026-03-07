@@ -5,8 +5,35 @@
 
 open Figma_types
 
-let re_script = Str.regexp "<script[^>]*>.*?</script>"
-let re_style = Str.regexp "<style[^>]*>.*?</style>"
+(** Strip all occurrences of <tag ...>...</tag> from [html].
+    OCaml's [Str] module does not support non-greedy [.*?], so we locate
+    each open/close pair iteratively instead of using a single regex. *)
+let strip_tag_blocks ~(open_tag : string) ~(close_tag : string) (html : string) : string =
+  let open_re = Str.regexp_case_fold open_tag in
+  let buf = Buffer.create (String.length html) in
+  let len = String.length html in
+  let rec loop pos =
+    if pos >= len then ()
+    else
+      match Str.search_forward open_re html pos with
+      | exception Not_found ->
+          Buffer.add_string buf (String.sub html pos (len - pos))
+      | open_start ->
+          (* copy everything before the opening tag *)
+          if open_start > pos then
+            Buffer.add_string buf (String.sub html pos (open_start - pos));
+          (* find the matching close tag *)
+          let close_re = Str.regexp_string_case_fold close_tag in
+          (match Str.search_forward close_re html (Str.match_end ()) with
+           | exception Not_found ->
+               (* no closing tag — drop the rest *)
+               ()
+           | _close_start ->
+               loop (Str.match_end ()))
+  in
+  loop 0;
+  Buffer.contents buf
+
 let re_tag = Str.regexp "<[^>]*>"
 let re_nbsp = Str.regexp_string "&nbsp;"
 let re_lt = Str.regexp_string "&lt;"
@@ -44,8 +71,8 @@ let rec extract_texts_from_node (node: ui_node) : string list =
 (** HTML에서 텍스트 추출 (간단한 태그 제거) *)
 let extract_texts_from_html (html: string) : string list =
   (* 1. script, style 태그 내용 제거 *)
-  let html = Str.global_replace re_script "" html in
-  let html = Str.global_replace re_style "" html in
+  let html = strip_tag_blocks ~open_tag:"<script[^>]*>" ~close_tag:"</script>" html in
+  let html = strip_tag_blocks ~open_tag:"<style[^>]*>" ~close_tag:"</style>" html in
 
   (* 2. HTML 태그 제거 *)
   let html = Str.global_replace re_tag "\n" html in
