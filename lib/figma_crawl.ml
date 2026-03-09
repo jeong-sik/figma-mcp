@@ -69,19 +69,12 @@ let create_neo4j_config_from_env () =
   let password = Sys.getenv_opt "NEO4J_PASSWORD" |> Option.value ~default:"" in
   create_neo4j_config ~uri ~database ~user ~password ()
 
-(** JSON 헬퍼 *)
-let get_string key json =
-  match Yojson.Safe.Util.member key json with
-  | `String s -> Some s
-  | _ -> None
-
-let get_string_or key default json =
-  get_string key json |> Option.value ~default
-
-let get_list key json =
-  match Yojson.Safe.Util.member key json with
-  | `List l -> l
-  | _ -> []
+(** JSON helpers — delegate to Mcp_helpers (SSOT).
+    Note: [get_string] applies [normalize_node_id_key] for
+    "node_id" / "node_a_id" / "node_b_id" keys (hyphen → colon). *)
+let get_string = Mcp_helpers.get_string
+let get_string_or = Mcp_helpers.get_string_or
+let get_list = Mcp_helpers.get_list
 
 [@@@coverage off]
 

@@ -84,6 +84,7 @@ val get_json : string -> Yojson.Safe.t -> Yojson.Safe.t option
 val get_bool : string -> Yojson.Safe.t -> bool option
 val get_int : string -> Yojson.Safe.t -> int option
 val get_float : string -> Yojson.Safe.t -> float option
+val get_list : string -> Yojson.Safe.t -> Yojson.Safe.t list
 
 val get_string_or : string -> string -> Yojson.Safe.t -> string
 val get_int_or : string -> int -> Yojson.Safe.t -> int
