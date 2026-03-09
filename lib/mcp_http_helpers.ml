@@ -105,7 +105,7 @@ module Request = struct
     try
       let v = int_of_string value in
       if v > 0 then Some v else None
-    with _ -> None
+    with Failure _ -> None
 
   let max_body_bytes =
     let from_env name =

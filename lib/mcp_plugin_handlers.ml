@@ -347,7 +347,7 @@ let handle_plugin_export_node_image args : (Yojson.Safe.t, string) result =
                        close_out oc;
                        Some path
                    | _ -> None)
-                with _ -> None)
+                with Invalid_argument _ | Sys_error _ -> None)
              else None
            in
            let response = `Assoc (
@@ -595,7 +595,7 @@ let handle_plugin_subscribe_events args : (Yojson.Safe.t, string) result =
             let waiter_id =
               Figma_plugin_bridge.register_event_waiter ~channel_id ~notify:(fun () ->
                 try Eio.Promise.resolve resolver ()
-                with _ -> ())
+                with Invalid_argument _ -> ())
             in
             let wait_s = float_of_int timeout_ms /. 1000.0 in
             let _ = Eio.Time.with_timeout clock wait_s (fun () -> Eio.Promise.await promise; Ok `Woke) in

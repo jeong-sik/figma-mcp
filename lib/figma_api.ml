@@ -139,4 +139,4 @@ let parse_figma_url url =
     | "proto" :: file_key :: _ ->
         { empty with file_key = Some file_key; node_id }
     | _ -> empty
-  with _ -> empty
+  with Invalid_argument _ -> empty

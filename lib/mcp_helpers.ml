@@ -183,7 +183,7 @@ let classify_http_error ~status_code ~body =
       (* Rate limit - retry_after 파싱 시도 *)
       let retry_after = try
         Scanf.sscanf body "retry after %f" (fun f -> f)
-      with _ -> 60.0 in
+      with Scanf.Scan_failure _ | Failure _ -> 60.0 in
       RateLimited retry_after
   | n when n >= 500 -> ServerError (Printf.sprintf "HTTP %d: %s" n body)
   | _ -> UnknownError (Printf.sprintf "HTTP %d: %s" status_code body)

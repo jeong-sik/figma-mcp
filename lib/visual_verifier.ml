@@ -133,7 +133,7 @@ let render_html_to_png ?(width=375) ?(height=812) html =
         Ok output_path
       else
         Error (json |> member "error" |> to_string_option |> Option.value ~default:"Unknown error")
-    with _ ->
+    with Yojson.Json_error _ ->
       if Sys.file_exists output_path then Ok output_path
       else Error ("Failed to parse render output: " ^ output.stdout))
   | Error e -> Error e
@@ -902,7 +902,7 @@ let generate_diff_images ~figma_png ~html_png =
                 with Not_found -> trimmed
             in
             try float_of_string first_token
-            with _ -> 0.0
+            with Failure _ -> 0.0
           in
           (* 이미지 크기로 비율 계산 *)
           let get_image_size path =
@@ -915,7 +915,7 @@ let generate_diff_images ~figma_png ~html_png =
                   match parts with
                   | [w; h] -> Some (int_of_string w * int_of_string h)
                   | _ -> None
-                with _ -> None)
+                with Failure _ -> None)
             | Error _ -> None
           in
           let total_pixels =
@@ -1062,7 +1062,7 @@ let get_recent_logs ?(count=20) () =
       match String.split_on_char '|' line with
       | [ts; node_id; ssim_str; notes] ->
           (try Some (ts, node_id, float_of_string ssim_str, notes)
-           with _ -> None)
+           with Failure _ -> None)
       | _ -> None
     ) recent
   end else []

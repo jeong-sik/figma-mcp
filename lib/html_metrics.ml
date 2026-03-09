@@ -85,7 +85,7 @@ let rgba_of_css s =
         let l = String.index s '(' in
         let r = String.rindex s ')' in
         String.sub s (l + 1) (r - l - 1)
-      with _ -> ""
+      with Not_found -> ""
     in
     let parts =
       inside
@@ -93,7 +93,7 @@ let rgba_of_css s =
       |> List.map (fun p -> String.trim p)
     in
     let to_int p =
-      try int_of_string p with _exn -> 0  (* malformed color value, default to 0 *)
+      try int_of_string p with Failure _ -> 0
     in
     let to_float p =
       try float_of_string p with _exn -> 0.0  (* unparseable numeric CSS value *)

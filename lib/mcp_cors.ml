@@ -33,7 +33,7 @@ let parse_origin_components value =
         else if scheme <> "http" && scheme <> "https" then None
         else Some (scheme, host, Uri.port uri)
     | _ -> None
-  with _ -> None
+  with Invalid_argument _ -> None
 
 type origin_value =
   | Origin_null

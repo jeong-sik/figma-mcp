@@ -46,7 +46,7 @@ let parse_positive_int value =
   try
     let v = int_of_string value in
     if v > 0 then Some v else None
-  with _ -> None
+  with Failure _ -> None
 
 let env_int ~name ~default =
   match Sys.getenv_opt name with

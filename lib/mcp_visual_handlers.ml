@@ -201,7 +201,7 @@ let handle_fidelity_loop args : (Yojson.Safe.t, string) result =
                      in
                      let dsl_json =
                        try Yojson.Safe.from_string dsl_str
-                       with _ -> `Null
+                       with Yojson.Json_error _ -> `Null
                      in
                      let (overall, missing_total, sections) =
                        match dsl_json with
@@ -783,7 +783,7 @@ let handle_compare_regions args : (Yojson.Safe.t, string) result =
       match Sys.getenv_opt "FIGMA_MCP_COMPARE_IMAGE_MAX_BYTES" with
       | None -> max_bytes_default
       | Some v ->
-          (try int_of_string (trim v) with _ -> max_bytes_default)
+          (try int_of_string (trim v) with Failure _ -> max_bytes_default)
     in
     let validate_png_path ~label path =
       if trim path = "" then
@@ -810,7 +810,7 @@ let handle_compare_regions args : (Yojson.Safe.t, string) result =
               else
                 let rp =
                   try Ok (Unix.realpath path)
-                  with _ -> Error (Printf.sprintf "Failed to resolve %s path" label)
+                  with Unix.Unix_error _ -> Error (Printf.sprintf "Failed to resolve %s path" label)
                 in
                 match rp with
                 | Error e -> Error e
@@ -1106,7 +1106,7 @@ let handle_compare_elements args : (Yojson.Safe.t, string) result =
     match String.split_on_char ',' str |> List.map String.trim with
     | [x; y; w; h] ->
         (try Some (float_of_string x, float_of_string y, float_of_string w, float_of_string h)
-         with _ -> None)
+         with Failure _ -> None)
     | _ -> None
   in
 

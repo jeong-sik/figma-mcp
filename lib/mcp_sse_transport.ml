@@ -154,7 +154,7 @@ let broadcast_sse_data data =
   Hashtbl.iter (fun client_id client ->
     if client.connected then
       try send_sse_event client ~event:"notification" ~data
-      with _ -> failed := client_id :: !failed
+      with _exn -> failed := client_id :: !failed (* write failure = client disconnected *)
   ) sse_clients;
   (* Remove failed clients to prevent zombie accumulation *)
   List.iter unregister_sse_client !failed
@@ -179,7 +179,7 @@ let mcp_sse_handler ~clock _request reqd =
         let timestamp = string_of_float (Unix.gettimeofday ()) in
         send_sse_event client ~event:"ping" ~data:timestamp;
         ping_loop ()
-      with _ ->
+      with _exn ->
         (* Client disconnected or error - unregister and close *)
         unregister_sse_client client_id;
         Httpun.Body.Writer.close body
