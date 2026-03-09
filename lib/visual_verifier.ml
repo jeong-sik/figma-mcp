@@ -232,7 +232,9 @@ type comparison_with_regions = {
 
 (** ssim-compare.js 스크립트 경로 찾기 *)
 let ssim_script_path =
-  resolve_script_path "ssim-compare.js"
+  resolve_script_path
+    ?configured:Figma_config.Visual.ssim_script
+    "ssim-compare.js"
 
 (** JSON에서 diff_regions 파싱 *)
 let parse_diff_regions json =
