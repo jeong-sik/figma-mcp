@@ -133,7 +133,7 @@ let render_html_to_png ?(width=375) ?(height=812) html =
         Ok output_path
       else
         Error (json |> member "error" |> to_string_option |> Option.value ~default:"Unknown error")
-    with Yojson.Json_error _ ->
+    with Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ ->
       if Sys.file_exists output_path then Ok output_path
       else Error ("Failed to parse render output: " ^ output.stdout))
   | Error e -> Error e

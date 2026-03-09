@@ -96,7 +96,7 @@ let rgba_of_css s =
       try int_of_string p with Failure _ -> 0
     in
     let to_float p =
-      try float_of_string p with _exn -> 0.0  (* unparseable numeric CSS value *)
+      try float_of_string p with Failure _ -> 0.0
     in
     match parts with
     | [r; g; b] ->

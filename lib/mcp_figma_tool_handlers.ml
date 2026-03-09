@@ -1481,7 +1481,7 @@ let export_assets_handler ~sw:_ ~eio_ctx:_ _request reqd =
           if is_image || is_icon || is_logo then begin
             let export_settings = List.map (fun fmt ->
               let (format, scale) = match String.split_on_char '@' fmt with
-                | [f; s] -> (f, (try float_of_string (String.sub s 0 (String.length s - 1)) with Failure _ | Invalid_argument _ -> 1.0))
+                | [f; s] -> (f, (try float_of_string (String.sub s 0 (String.length s - 1)) with Failure _ -> 1.0))
                 | _ -> (fmt, 1.0)
               in
               `Assoc [
