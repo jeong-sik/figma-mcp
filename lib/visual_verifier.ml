@@ -16,18 +16,28 @@ open Printf
 
 let temp_dir = Figma_config.Visual.temp_dir
 
-let render_script_path =
-  match Figma_config.Visual.render_script with
+let resolve_script_path_with ~cwd ~exe_dir ?configured script_name =
+  match configured with
   | Some path -> path
   | None ->
-      (* 상대 경로로 scripts/render-html.js 찾기 *)
       let candidates = [
-        Filename.concat (Sys.getcwd ()) "scripts/render-html.js";
-        Filename.concat (Filename.dirname Sys.executable_name) "../scripts/render-html.js";
-        "/Users/dancer/me/.worktrees/figma-mcp-streaming/features/figma-mcp/scripts/render-html.js";
+        Filename.concat cwd ("scripts/" ^ script_name);
+        Filename.concat exe_dir ("../scripts/" ^ script_name);
       ] in
       List.find_opt Sys.file_exists candidates
-      |> Option.value ~default:"scripts/render-html.js"
+      |> Option.value ~default:("scripts/" ^ script_name)
+
+let resolve_script_path ?configured script_name =
+  resolve_script_path_with
+    ~cwd:(Sys.getcwd ())
+    ~exe_dir:(Filename.dirname Sys.executable_name)
+    ?configured
+    script_name
+
+let render_script_path =
+  resolve_script_path
+    ?configured:Figma_config.Visual.render_script
+    "render-html.js"
 
 let default_target_ssim = 0.99
 let default_max_iterations = 5
@@ -222,13 +232,7 @@ type comparison_with_regions = {
 
 (** ssim-compare.js 스크립트 경로 찾기 *)
 let ssim_script_path =
-  let candidates = [
-    Filename.concat (Sys.getcwd ()) "scripts/ssim-compare.js";
-    Filename.concat (Filename.dirname Sys.executable_name) "../scripts/ssim-compare.js";
-    "/Users/dancer/me/.worktrees/figma-mcp-streaming/features/figma-mcp/scripts/ssim-compare.js";
-  ] in
-  List.find_opt Sys.file_exists candidates
-  |> Option.value ~default:"scripts/ssim-compare.js"
+  resolve_script_path "ssim-compare.js"
 
 (** JSON에서 diff_regions 파싱 *)
 let parse_diff_regions json =

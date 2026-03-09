@@ -7,8 +7,8 @@
 
     <key>ProgramArguments</key>
     <array>
-        <string>/opt/homebrew/bin/python3</string>
-        <string>/Users/dancer/me/workspace/yousleepwhen/figma-mcp/scripts/figma-agent.py</string>
+        <string>__PYTHON3__</string>
+        <string>__FIGMA_MCP_ROOT__/scripts/figma-agent.py</string>
     </array>
 
     <key>RunAtLoad</key>
@@ -27,7 +27,7 @@
     <string>/tmp/figma-agent.err</string>
 
     <key>WorkingDirectory</key>
-    <string>/Users/dancer/me/workspace/yousleepwhen/figma-mcp</string>
+    <string>__FIGMA_MCP_ROOT__</string>
 
     <key>EnvironmentVariables</key>
     <dict>
