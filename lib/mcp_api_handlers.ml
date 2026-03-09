@@ -1034,7 +1034,7 @@ let handle_get_node_chunk args : (Yojson.Safe.t, string) result =
 
              let root_children_count =
                try (node_data |> member "children" |> to_list |> List.length)
-               with _ -> 0
+               with Yojson.Safe.Util.Type_error _ -> 0
              in
 
              let effective_max_children =

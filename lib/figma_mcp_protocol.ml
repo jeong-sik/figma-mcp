@@ -77,12 +77,10 @@ let normalize_protocol_version version =
 
 let protocol_version_from_params params =
   match params with
-  | Some (`Assoc _ as p) ->
-      (try
-        match List.assoc_opt "protocolVersion" (match p with `Assoc lst -> lst | _ -> []) with
-        | Some (`String v) -> v
-        | _ -> default_protocol_version
-       with _ -> default_protocol_version)
+  | Some (`Assoc lst) ->
+      (match List.assoc_opt "protocolVersion" lst with
+       | Some (`String v) -> v
+       | _ -> default_protocol_version)
   | _ -> default_protocol_version
 
 let protocol_version = default_protocol_version  (* for backward compat *)

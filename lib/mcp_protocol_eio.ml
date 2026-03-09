@@ -315,7 +315,7 @@ let plugin_result_handler _request reqd =
           match get_payload_field "payload" json with
           | Some (`String s) -> (
               try Yojson.Safe.from_string s
-              with _ -> `Assoc [
+              with Yojson.Json_error _ -> `Assoc [
                 ("error", `String "Failed to parse payload string");
                 ("raw", `String s);
               ])

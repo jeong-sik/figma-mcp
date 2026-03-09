@@ -349,7 +349,7 @@ let decode_chunked body =
       else
         let chunk_size =
           try int_of_string ("0x" ^ size_str)
-          with _ -> 0
+          with Failure _ -> 0
         in
         if chunk_size = 0 then Buffer.contents buf
         else
@@ -376,7 +376,7 @@ let parse_http_response response =
         match parts with
         | _ :: code :: _ -> int_of_string code
         | _ -> 500
-      with _ -> 500
+      with Failure _ -> 500
     in
     (* 헤더와 본문 분리 (빈 줄로 구분) + chunked 체크 *)
     let rec find_body_and_check_chunked headers_acc is_chunked = function
@@ -762,7 +762,8 @@ let http_get ~sw ~net ~clock ~client ~headers ?(timeout=default_timeout) ?(max_r
              (status2, Cohttp.Header.init (), body2)
            else
              (status, resp_headers, body_str)
-         with _ ->
+         with _exn ->
+           (* HTTPS fallback retry failed - return original response *)
            (status, resp_headers, body_str))
       else
         (status, resp_headers, body_str)
@@ -1269,4 +1270,4 @@ let parse_figma_url url =
     | "proto" :: file_key :: _ ->
         { empty with file_key = Some file_key; node_id }
     | _ -> empty
-  with _ -> empty
+  with Invalid_argument _ -> empty

@@ -314,7 +314,7 @@ let parse_json_string s =
   try
     let json = Yojson.Safe.from_string s in
     parse_node json
-  with _ -> None
+  with Yojson.Json_error _ -> None
 
 (** JSON에서 파싱 *)
 let parse_json json = parse_node json

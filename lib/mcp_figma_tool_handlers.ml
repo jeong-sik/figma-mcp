@@ -411,7 +411,7 @@ let plugin_codegen_handler ~sw ~eio_ctx _request reqd =
               let resp, resp_body = Cohttp_eio.Client.post cohttp ~sw ~headers ~body:req_body uri in
               let status_code = Cohttp.Response.status resp |> Cohttp.Code.code_of_status in
               if status_code < 200 || status_code >= 300 then begin
-                let err_body = try Eio.Buf_read.(parse_exn take_all) resp_body ~max_size:4096 with _ -> "" in
+                let err_body = try Eio.Buf_read.(parse_exn take_all) resp_body ~max_size:4096 with Eio.Buf_read.Buffer_limit_exceeded | Eio.Io _ -> "" in
                 printf "[Codegen] Claude HTTP %d: %s\n%!" status_code err_body;
                 raise (Codegen_http_error (status_code, "Claude"))
               end;
@@ -1481,7 +1481,7 @@ let export_assets_handler ~sw:_ ~eio_ctx:_ _request reqd =
           if is_image || is_icon || is_logo then begin
             let export_settings = List.map (fun fmt ->
               let (format, scale) = match String.split_on_char '@' fmt with
-                | [f; s] -> (f, (try float_of_string (String.sub s 0 (String.length s - 1)) with _ -> 1.0))
+                | [f; s] -> (f, (try float_of_string (String.sub s 0 (String.length s - 1)) with Failure _ -> 1.0))
                 | _ -> (fmt, 1.0)
               in
               `Assoc [
@@ -1923,7 +1923,7 @@ let validate_reference_image_path ~roots ~max_bytes path : (string, string) resu
           else
             let rp =
               try Ok (Unix.realpath path)
-              with _ -> Error "Failed to resolve reference image path"
+              with Unix.Unix_error _ -> Error "Failed to resolve reference image path"
             in
             match rp with
             | Error e -> Error e
@@ -2007,7 +2007,7 @@ body { font-family: 'Inter', -apple-system, sans-serif; }
                    let delta_e = metrics.delta_e in
                    let human_ssim = Visual_verifier.calculate_human_ssim ssim_score delta_e in
                    let passed = ssim_score >= threshold in
-                   if passed then (try Sys.remove rendered_path with _ -> ());
+                   if passed then (try Sys.remove rendered_path with Sys_error _ -> ());
                    let advanced_json =
                      match metrics.advanced with
                      | None -> `Null
