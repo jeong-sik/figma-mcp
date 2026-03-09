@@ -324,6 +324,11 @@ let get_int key json =
   | Some (`Float f) -> Some (int_of_float f)
   | _ -> None
 
+let get_list key json =
+  match member key json with
+  | Some (`List l) -> l
+  | _ -> []
+
 (** Get int with default value *)
 let get_int_or key default json =
   match get_int key json with

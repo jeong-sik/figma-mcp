@@ -40,12 +40,9 @@ let () =
     check (option string) "assoc -> None" None (Figma_crawl.get_string "k" json)
   in
   let test_get_string_from_list_root () =
-    (* When the root JSON is a list, Yojson.Safe.Util.member raises Type_error *)
+    (* Non-Assoc root returns None (Mcp_helpers.member handles gracefully) *)
     let json = `List [ `String "a" ] in
-    let raised = ref false in
-    (try ignore (Figma_crawl.get_string "k" json)
-     with Yojson.Safe.Util.Type_error _ -> raised := true);
-    check bool "raises Type_error on list root" true !raised
+    check (option string) "list root -> None" None (Figma_crawl.get_string "k" json)
   in
 
   (* ================================================================ *)
