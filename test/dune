@@ -508,3 +508,13 @@
 (executable
  (name proof_experiment)
  (libraries figma_mcp))
+
+; Eval Harness tests (P3 — scenario-based visual evaluation with pass@k)
+(test
+ (name test_eval_harness)
+ (libraries figma_mcp alcotest yojson unix))
+
+; Trajectory JSONL logging tests (P3 — pipeline step recording)
+(test
+ (name test_trajectory)
+ (libraries figma_mcp alcotest yojson unix))
