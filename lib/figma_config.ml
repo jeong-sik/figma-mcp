@@ -119,6 +119,10 @@ module Visual = struct
   (** Path to render script *)
   let render_script =
     Sys.getenv_opt "FIGMA_MCP_RENDER_SCRIPT"
+
+  (** Path to SSIM comparison script *)
+  let ssim_script =
+    Sys.getenv_opt "FIGMA_MCP_SSIM_SCRIPT"
 end
 
 (** {1 HTTP Configuration} *)

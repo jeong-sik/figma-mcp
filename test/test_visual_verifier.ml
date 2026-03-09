@@ -39,6 +39,26 @@ let test_create_evolution_dir_unique () =
   cleanup dir1;
   cleanup dir2
 
+let test_script_paths_are_not_user_specific () =
+  let render_default =
+    Visual_verifier.resolve_script_path_with
+      ~cwd:"/tmp/nowhere"
+      ~exe_dir:"/tmp/bin"
+      "render-html.js"
+  in
+  let ssim_default =
+    Visual_verifier.resolve_script_path_with
+      ~cwd:"/tmp/nowhere"
+      ~exe_dir:"/tmp/bin"
+      "ssim-compare.js"
+  in
+  check bool "render script avoids hardcoded user path"
+    false
+    (String.starts_with ~prefix:"/Users/" render_default);
+  check bool "ssim script avoids hardcoded user path"
+    false
+    (String.starts_with ~prefix:"/Users/" ssim_default)
+
 (** ============== Correction Hint 테스트 ============== *)
 
 let test_hint_to_json_padding () =
@@ -197,6 +217,7 @@ let utility_tests = [
   "temp file generation", `Quick, test_temp_file_generation;
   "ensure dir", `Quick, test_ensure_dir;
   "create evolution dir unique", `Quick, test_create_evolution_dir_unique;
+  "script paths are not user specific", `Quick, test_script_paths_are_not_user_specific;
 ]
 
 let hint_tests = [

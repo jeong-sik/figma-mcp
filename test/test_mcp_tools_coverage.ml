@@ -1678,6 +1678,19 @@ let test_tool_get_node_chunk_schema () =
        | _ -> fail "Expected properties")
   | _ -> fail "Expected Assoc"
 
+let test_tool_figma_plugin_schema_has_unique_keys () =
+  let tool = Mcp_tools.tool_figma_plugin in
+  check bool "name" true (tool.name = "figma_plugin");
+  match tool.input_schema with
+  | `Assoc fields ->
+      (match List.assoc_opt "properties" fields with
+       | Some (`Assoc props) ->
+           let keys = List.map fst props in
+           let unique_keys = List.sort_uniq String.compare keys in
+           check int "no duplicate property keys" (List.length unique_keys) (List.length keys)
+       | _ -> fail "Expected properties")
+  | _ -> fail "Expected Assoc"
+
 let test_all_tool_schemas_are_objects () =
   let all_obj = List.for_all (fun (t : Figma_mcp_protocol.tool_def) ->
     match t.input_schema with
@@ -1701,6 +1714,7 @@ let tool_schema_tests = [
   "select_nodes schema", `Quick, test_tool_select_nodes_schema;
   "fidelity_loop schema", `Quick, test_tool_fidelity_loop_schema;
   "get_node_chunk schema", `Quick, test_tool_get_node_chunk_schema;
+  "figma_plugin schema unique keys", `Quick, test_tool_figma_plugin_schema_has_unique_keys;
   "all tool schemas are objects", `Quick, test_all_tool_schemas_are_objects;
 ]
 
