@@ -78,6 +78,11 @@ let () =
     let json = `Assoc [ ("items", `List [ `List [ `Int 1 ] ]) ] in
     check int "nested list" 1 (List.length (Figma_crawl.get_list "items" json))
   in
+  let test_get_list_non_assoc_root () =
+    (* Non-Assoc root returns empty (Mcp_helpers.member handles gracefully) *)
+    let json = `List [ `Int 1 ] in
+    check int "list root -> empty" 0 (List.length (Figma_crawl.get_list "items" json))
+  in
 
   (* ================================================================ *)
   (*  flatten_nodes — deeper edge cases                               *)
@@ -476,6 +481,7 @@ let () =
           test_case "int value" `Quick test_get_list_int;
           test_case "empty list" `Quick test_get_list_empty_list;
           test_case "nested list" `Quick test_get_list_nested;
+          test_case "non-assoc root" `Quick test_get_list_non_assoc_root;
         ] );
       ( "flatten_nodes extra",
         [

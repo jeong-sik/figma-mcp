@@ -69,7 +69,9 @@ let create_neo4j_config_from_env () =
   let password = Sys.getenv_opt "NEO4J_PASSWORD" |> Option.value ~default:"" in
   create_neo4j_config ~uri ~database ~user ~password ()
 
-(** JSON helpers — delegate to Mcp_helpers (SSOT). *)
+(** JSON helpers — delegate to Mcp_helpers (SSOT).
+    Note: [get_string] applies [normalize_node_id_key] for
+    "node_id" / "node_a_id" / "node_b_id" keys (hyphen → colon). *)
 let get_string = Mcp_helpers.get_string
 let get_string_or = Mcp_helpers.get_string_or
 let get_list = Mcp_helpers.get_list
