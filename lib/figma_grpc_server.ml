@@ -996,11 +996,14 @@ module Handlers = struct
         Grpc_eio.Stream.add stream payload;
         close_stream stream
 
-  (** PlanTasks: Generate ROI-based implementation tasks from Figma node
+  (** PlanTasks: Legacy heuristic implementation planning from Figma node
 
       Hybrid Architecture (gRPC + Agent):
       - gRPC side (this handler): Fast parsing, ROI tier classification, Task skeleton generation
       - Agent side: Context-aware dependency analysis, TodoWrite/MASC generation
+
+      New standard path:
+      - MCP figma_get_planning_context → external agent planning → figma_validate_agent_plan
 
       ROI Tiers (UIFormer research-based):
       - P1_Layout: row/col, size, gap, padding - 80% SSIM contribution
@@ -1218,7 +1221,7 @@ let serve ~sw ~env ?(port=default_port) () =
   printf "   - GetFileMeta (Unary) - File metadata only\n%!";
   printf "   - FidelityLoop (Server Streaming) - Auto depth iteration\n%!";
   printf "   - GetSplitStream (Server Streaming) - Style/Layout/Content split\n%!";
-  printf "   - PlanTasks (Unary) - ROI-based implementation task planning\n%!";
+  printf "   - PlanTasks (Unary, legacy heuristic planning)\n%!";
   printf "\n%!";
   printf "   Test with:\n%!";
   printf "   grpcurl -plaintext -d '{\"file_key\":\"...\",\"node_id\":\"...\",\"token\":\"...\"}' \\\n%!";

@@ -49,30 +49,33 @@ figma_get_node_bundle
 
 If you get `status: large_result`, use the progressive recipes below.
 
-## 1.5) Smart Selection (Layout-first)
+## 1.5) Agent-First Planning (Recommended)
 
-Score and select meaningful parent nodes before pulling heavy DSL or plugin data.
+Gather planning context first, let the caller agent decide, then validate the resulting plan.
 ```
-figma_select_nodes
+figma_get_planning_context
   url: "https://www.figma.com/file/KEY/NAME?node-id=123-456"
   token: "$FIGMA_TOKEN"
-  summary_depth: 1
-  layout_only: true
-  text_mode: "exclude"
-  score_threshold: 2.0
-  max_parents: 8
+  summary_depth: 2
+  preview: true
 ```
 
-Optional filters:
+Validate the agent-authored plan before execution:
 ```
-figma_select_nodes
+figma_validate_agent_plan
   file_key: "KEY"
   node_id: "123:456"
   token: "$FIGMA_TOKEN"
-  exclude_patterns: ["guide", "spec", "annotation", "순서도", "주석"]
-  note_patterns: ["note", "memo", "설명", "참고"]
-  notes_limit: 50
+  plan: {
+    "root_node_id": "123:456",
+    "tasks": [
+      {"id": "task-shell", "node_id": "123:789"},
+      {"id": "task-title", "node_id": "123:790", "depends_on": ["task-shell"]}
+    ]
+  }
 ```
+
+Legacy heuristic path remains available as `figma_select_nodes`, but it is no longer the recommended default.
 
 ## 2) High-Fidelity Bundle (Recommended)
 
@@ -149,19 +152,18 @@ figma_get_node_chunk
 ```
 
 3) Repeat for deeper ranges.
-   - If a node is very large, use `max_children`/`auto_trim_children` and then narrow with `figma_select_nodes`.
+   - If a node is very large, prefer `figma_get_planning_context` for subtree candidate extraction and let the caller agent pick the next node.
 
-### 3.0) Targeted Subtree (Select Nodes → Chunk)
+### 3.0) Targeted Subtree (Planning Context → Chunk)
 
-Use when a large node has many children. Select candidate parents, then load a shallow chunk.
+Use when a large node has many children. Extract candidates, choose with the caller agent, then load a shallow chunk.
 ```
-figma_select_nodes
+figma_get_planning_context
   file_key: "KEY"
   node_id: "123:456"
   token: "$FIGMA_TOKEN"
-  summary_depth: 1
-  layout_only: true
-  score_threshold: 2.0
+  summary_depth: 2
+  preview: false
 ```
 
 ```
@@ -188,9 +190,9 @@ Safety knobs:
 - `recursive_max_nodes` (default 5000)
 - `recursive_depth_per_call` (default 1)
 
-### 3.2) gRPC PlanTasks (Divide & Conquer)
+### 3.2) gRPC PlanTasks (Legacy Heuristic)
 
-Generate a prioritized task list + requirements summary from a recursive tree.
+Generate a prioritized task list + requirements summary from a recursive tree. This is retained for backward compatibility and is no longer the preferred planning path.
 ```
 grpcurl -plaintext -import-path proto -proto figma.proto \
   -d '{"file_key":"KEY","node_id":"123-456","token":"$FIGMA_TOKEN","recursive":true}' \
