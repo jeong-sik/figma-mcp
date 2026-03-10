@@ -22,14 +22,6 @@ if [ -z "${SSL_CERT_FILE:-}" ]; then
   done
 fi
 
-# Load FIGMA_TOKEN from Keychain if not already set
-if [ -z "$FIGMA_TOKEN" ]; then
-  FIGMA_TOKEN=$(security find-generic-password -s "figma-mcp" -a "FIGMA_TOKEN" -w 2>/dev/null || true)
-  if [ -n "$FIGMA_TOKEN" ]; then
-    export FIGMA_TOKEN
-  fi
-fi
-
 # Ensure OCaml environment
 if command -v opam >/dev/null 2>&1; then
   eval "$(opam env 2>/dev/null)" >/dev/null 2>/dev/null || true
