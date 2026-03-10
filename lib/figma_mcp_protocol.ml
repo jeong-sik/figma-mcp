@@ -264,7 +264,7 @@ F(Card 320×200 col gap:12 ax:min cx:stretch bg:#FFF r:12,16,12,16)
 - 반복되는 스타일은 CSS 변수로 추출
 - 전체 재귀가 필요하면 gRPC `GetNodeStream`의 `recursive=true` 사용
 - planning은 `figma_get_planning_context` → 상위 에이전트 계획 → `figma_validate_agent_plan` 검증 경로를 우선 사용
-- gRPC `PlanTasks`는 legacy heuristic path로만 유지
+- gRPC `PlanTasks`는 legacy heuristic path로만 유지되며 기본 비활성화
 
 ### 🔄 권장 워크플로우
 1. `figma_parse_url` → **먼저** URL 파싱 (Parse, Don't Validate)

@@ -397,6 +397,13 @@ module Handlers = struct
     | Some raw -> (match int_of_string_opt raw with Some v -> v | None -> default)
     | None -> default
 
+  let env_bool name default =
+    match Sys.getenv_opt name with
+    | Some ("1" | "true" | "yes" | "on" | "enabled") -> true
+    | Some ("0" | "false" | "no" | "off" | "") -> false
+    | Some _ -> default
+    | None -> default
+
   let close_stream stream =
     Grpc_eio.Stream.close stream;
     stream
@@ -1013,6 +1020,19 @@ module Handlers = struct
   *)
   let plan_tasks request_bytes =
     let req = Proto.decode_plan_tasks_request request_bytes in
+    let root_node_id =
+      match req.node_id with
+      | Some node_id -> normalize_node_id node_id
+      | None -> ""
+    in
+    if not (env_bool "FIGMA_MCP_ENABLE_LEGACY_PLAN_TASKS" false) then
+      Proto.encode_plan_tasks_response
+        ~summary:(Some "[DEPRECATED] PlanTasks is disabled by default. Use figma_get_planning_context -> external agent planning -> figma_validate_agent_plan.")
+        ~requirements_json:(Some "{\"deprecated\":true,\"replacement\":[\"figma_get_planning_context\",\"figma_validate_agent_plan\"]}")
+        ~tasks:[]
+        ~total_estimated_tokens:0
+        ~root_node_id
+    else
     let limit_tasks tasks =
       match req.max_tasks with
       | Some limit when limit > 0 ->

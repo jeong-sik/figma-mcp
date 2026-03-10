@@ -12,6 +12,7 @@ open Figma_mcp [@@warning "-33"]
 
 (* Set FIGMA_TOKEN for resolve_token *)
 let () = Unix.putenv "FIGMA_TOKEN" "test-token-w4"
+let () = Unix.putenv "FIGMA_MCP_ENABLE_LEGACY_SELECT_NODES" "1"
 
 (* ================================================================
    Helpers

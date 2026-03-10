@@ -9,6 +9,7 @@ open Figma_mcp [@@warning "-33"]
 
 (* Set FIGMA_TOKEN for resolve_token *)
 let () = Unix.putenv "FIGMA_TOKEN" "test-token-12345"
+let () = Unix.putenv "FIGMA_MCP_ENABLE_LEGACY_SELECT_NODES" "1"
 
 (* ================================================================
    Mock effect handler — intercepts ALL Figma effects with canned OK

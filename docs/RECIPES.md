@@ -75,7 +75,7 @@ figma_validate_agent_plan
   }
 ```
 
-Legacy heuristic path remains available as `figma_select_nodes`, but it is no longer the recommended default.
+Legacy heuristic path remains available as `figma_select_nodes`, but it is disabled by default and requires `allow_legacy: true` or `FIGMA_MCP_ENABLE_LEGACY_SELECT_NODES=1`.
 
 ## 2) High-Fidelity Bundle (Recommended)
 
@@ -192,7 +192,7 @@ Safety knobs:
 
 ### 3.2) gRPC PlanTasks (Legacy Heuristic)
 
-Generate a prioritized task list + requirements summary from a recursive tree. This is retained for backward compatibility and is no longer the preferred planning path.
+Generate a prioritized task list + requirements summary from a recursive tree. This path is disabled by default and retained only for backward compatibility (`FIGMA_MCP_ENABLE_LEGACY_PLAN_TASKS=1`).
 ```
 grpcurl -plaintext -import-path proto -proto figma.proto \
   -d '{"file_key":"KEY","node_id":"123-456","token":"$FIGMA_TOKEN","recursive":true}' \

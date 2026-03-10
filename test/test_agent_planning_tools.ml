@@ -73,6 +73,14 @@ let test_core_category_hides_legacy_select_nodes () =
       check bool "validate plan in core category" true
         (List.mem "validate_agent_plan" cat.tools)
 
+let test_legacy_select_nodes_blocked_by_default () =
+  Unix.putenv "FIGMA_MCP_ENABLE_LEGACY_SELECT_NODES" "";
+  match Mcp_api_handlers.handle_select_nodes (`Assoc []) with
+  | Error msg ->
+      check bool "deprecation error" true
+        (contains_substring ~needle:"figma_select_nodes is disabled by default" msg)
+  | Ok _ -> fail "expected legacy select_nodes to be blocked"
+
 let test_planning_context_is_agent_first () =
   let keep = make_frame "1:2" "Card" in
   let note = make_text "1:3" "Note Layer" "Implementation note" in
@@ -206,6 +214,8 @@ let () =
           test_public_tools_include_agent_planning;
         test_case "core category hides legacy select_nodes" `Quick
           test_core_category_hides_legacy_select_nodes;
+        test_case "legacy select_nodes blocked by default" `Quick
+          test_legacy_select_nodes_blocked_by_default;
       ]);
       ("planning_context", [
         test_case "context is agent first" `Quick test_planning_context_is_agent_first;

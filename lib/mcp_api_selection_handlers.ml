@@ -3,7 +3,22 @@
 open Mcp_helpers
 open Mcp_api_handler_support
 
+let env_flag name =
+  match Sys.getenv_opt name with
+  | Some ("1" | "true" | "yes" | "on" | "enabled") -> true
+  | Some _ | None -> false
+
+let legacy_select_nodes_enabled args =
+  get_bool_or "allow_legacy" false args
+  || env_flag "FIGMA_MCP_ENABLE_LEGACY_SELECT_NODES"
+
+let legacy_select_nodes_error =
+  "[DEPRECATED] figma_select_nodes is disabled by default. Use figma_get_planning_context + external agent planning + figma_validate_agent_plan. Temporary opt-in: pass allow_legacy=true or set FIGMA_MCP_ENABLE_LEGACY_SELECT_NODES=1."
+
 let handle_select_nodes args : (Yojson.Safe.t, string) result =
+  if not (legacy_select_nodes_enabled args) then
+    Error legacy_select_nodes_error
+  else
   let (file_key, node_id) = resolve_file_key_node_id args in
   let token = resolve_token args in
   let max_summary_depth = 6 in
@@ -58,7 +73,7 @@ let handle_select_nodes args : (Yojson.Safe.t, string) result =
         notes_limit;
         excluded_limit;
       } in
-      let warnings = ref [] in
+      let warnings = ref ["legacy_heuristic_path"] in
       if raw_text_mode <> text_mode then
         warnings := "Invalid text_mode, fallback to include" :: !warnings;
       if raw_summary_depth <> summary_depth then

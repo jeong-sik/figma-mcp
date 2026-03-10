@@ -149,7 +149,7 @@ let tool_figma_get_planning_context : tool_def = {
 (** 노드 자동 선택 - 점수 기반 후보 선별 *)
 let tool_figma_select_nodes : tool_def = {
   name = "figma_select_nodes";
-  description = "🎯 LEGACY: heuristic 후보 점수화 선택. ⚠️ REQUIRED: url 또는 (file_key + node_id) 중 하나를 반드시 제공하세요. 새 경로는 figma_get_planning_context + agent planning + figma_validate_agent_plan 조합을 권장합니다.";
+  description = "[DEPRECATED] heuristic 후보 점수화 선택. 기본 비활성화 경로입니다. 새 경로는 figma_get_planning_context + agent planning + figma_validate_agent_plan 조합을 사용하세요.";
   input_schema = object_schema [
     ("file_key", string_prop "Figma 파일 키");
     ("node_id", string_prop "노드 ID (예: 123:456)");
@@ -168,6 +168,7 @@ let tool_figma_select_nodes : tool_def = {
     ("note_patterns", array_prop "노트로 분리할 텍스트 패턴 (기본값: note/memo/설명 등)");
     ("notes_limit", number_prop "노트 텍스트 최대 개수 (기본값: 50)");
     ("excluded_limit", number_prop "제외 목록 최대 개수 (기본값: 50)");
+    ("allow_legacy", bool_prop "임시 legacy opt-in. true면 기본 차단을 우회합니다.");
     ("version", string_prop "특정 파일 버전 ID");
   ] [];
 }
