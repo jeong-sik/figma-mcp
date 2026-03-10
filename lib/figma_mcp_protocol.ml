@@ -263,15 +263,19 @@ F(Card 320×200 col gap:12 ax:min cx:stretch bg:#FFF r:12,16,12,16)
 - `depth` 파라미터로 탐색 깊이 제한
 - 반복되는 스타일은 CSS 변수로 추출
 - 전체 재귀가 필요하면 gRPC `GetNodeStream`의 `recursive=true` 사용
-- 분할정복 플랜은 gRPC `PlanTasks`의 `recursive=true`로 생성
+- planning은 `figma_get_planning_context` → 상위 에이전트 계획 → `figma_validate_agent_plan` 검증 경로를 우선 사용
+- gRPC `PlanTasks`는 legacy heuristic path로만 유지되며 기본 비활성화
 
 ### 🔄 권장 워크플로우
 1. `figma_parse_url` → **먼저** URL 파싱 (Parse, Don't Validate)
 2. `figma_list_screens` → 화면 목록 확인
 3. `figma_get_node_summary` → 구조 파악 (Outside-In)
-4. `figma_tree` → 계층 시각화
-5. `figma_get_node` → 상세 구현
-6. `figma_export_tokens` → 디자인 토큰 추출
+4. `figma_get_planning_context` → agent-first planning context 수집
+5. 상위 에이전트가 task plan 생성
+6. `figma_validate_agent_plan` → 구조/의존성 검증
+7. `figma_tree` → 필요 시 계층 시각화
+8. `figma_get_node` → 상세 구현
+9. `figma_export_tokens` → 디자인 토큰 추출
 
 ### 🔐 Parse, Don't Validate (필수 원칙)
 

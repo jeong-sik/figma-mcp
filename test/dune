@@ -14,6 +14,16 @@
  (name test_mcp_protocol_coverage)
  (libraries figma_mcp alcotest yojson str))
 
+; SDK adapter seam tests
+(test
+ (name test_mcp_sdk_adapter_figma)
+ (libraries figma_mcp alcotest yojson str eio_main))
+
+; Agent-first planning context + deterministic validator
+(test
+ (name test_agent_planning_tools)
+ (libraries figma_mcp alcotest yojson str))
+
 ; Semantic Style DSL Mapper 테스트 (Phase 1 - Tier 1)
 (test
  (name test_semantic_mapper)
