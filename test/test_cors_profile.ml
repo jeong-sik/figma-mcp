@@ -58,7 +58,7 @@ let test_strict_disables_private_network_by_default () =
       check bool "no private network header" false
         (has_header "access-control-allow-private-network" headers))
 
-let test_compat_allows_null_and_private_network_by_default () =
+let test_compat_allows_null_without_private_network_by_default () =
   with_envs
     [ ("FIGMA_MCP_CORS_PROFILE", Some "compat");
       ("FIGMA_MCP_CORS_ALLOWED_ORIGINS", None);
@@ -73,7 +73,7 @@ let test_compat_allows_null_and_private_network_by_default () =
       (match find_header "access-control-allow-origin" headers with
        | Some (_, v) -> check string "allow-origin value" "null" v
        | None -> fail "expected access-control-allow-origin");
-      check bool "private network header present" true
+      check bool "no private network header" false
         (has_header "access-control-allow-private-network" headers))
 
 let test_strict_override_allowed_origins_and_private_network () =
@@ -97,8 +97,7 @@ let () =
         [ test_case "strict denies null by default" `Quick test_strict_denies_null_by_default;
           test_case "strict disables private network by default" `Quick
             test_strict_disables_private_network_by_default;
-          test_case "compat allows null + private network by default" `Quick
-            test_compat_allows_null_and_private_network_by_default;
+          test_case "compat allows null without private network by default" `Quick
+            test_compat_allows_null_without_private_network_by_default;
           test_case "strict override envs" `Quick
             test_strict_override_allowed_origins_and_private_network ] ) ]
-
