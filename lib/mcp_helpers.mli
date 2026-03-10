@@ -2,6 +2,17 @@
 
     Foundation module used by all other mcp_* modules. *)
 
+(** {1 String search} *)
+
+(** Case-insensitive substring check. Trims and lowercases needle. *)
+val string_contains : haystack:string -> needle:string -> bool
+
+(** [matches_any patterns text] returns true if any pattern matches [text]. *)
+val matches_any : string list -> string -> bool
+
+(** [find_matching_pattern patterns text] returns the first matching pattern. *)
+val find_matching_pattern : string list -> string -> string option
+
 (** {1 JSON → DSL conversion} *)
 
 val process_json_string : format:string -> string -> (string, string) result
@@ -73,6 +84,7 @@ val get_json : string -> Yojson.Safe.t -> Yojson.Safe.t option
 val get_bool : string -> Yojson.Safe.t -> bool option
 val get_int : string -> Yojson.Safe.t -> int option
 val get_float : string -> Yojson.Safe.t -> float option
+val get_list : string -> Yojson.Safe.t -> Yojson.Safe.t list
 
 val get_string_or : string -> string -> Yojson.Safe.t -> string
 val get_int_or : string -> int -> Yojson.Safe.t -> int

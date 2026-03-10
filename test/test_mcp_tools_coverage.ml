@@ -770,36 +770,36 @@ let test_all_tools_not_empty () =
   check bool "all_tools not empty" true (List.length Mcp_tools.all_tools > 0)
 
 let test_all_tools_have_names () =
-  let all_have_names = List.for_all (fun (t : Mcp_protocol.tool_def) ->
+  let all_have_names = List.for_all (fun (t : Figma_mcp_protocol.tool_def) ->
     String.length t.name > 0
   ) Mcp_tools.all_tools in
   check bool "all tools have names" true all_have_names
 
 let test_all_tools_have_descriptions () =
-  let all_have_desc = List.for_all (fun (t : Mcp_protocol.tool_def) ->
+  let all_have_desc = List.for_all (fun (t : Figma_mcp_protocol.tool_def) ->
     String.length t.description > 0
   ) Mcp_tools.all_tools in
   check bool "all tools have descriptions" true all_have_desc
 
 let test_all_tools_unique_names () =
-  let names = List.map (fun (t : Mcp_protocol.tool_def) -> t.name) Mcp_tools.all_tools in
+  let names = List.map (fun (t : Figma_mcp_protocol.tool_def) -> t.name) Mcp_tools.all_tools in
   let unique_names = List.sort_uniq String.compare names in
   check int "unique tool names" (List.length names) (List.length unique_names)
 
 let test_tool_codegen_exists () =
-  let exists = List.exists (fun (t : Mcp_protocol.tool_def) ->
+  let exists = List.exists (fun (t : Figma_mcp_protocol.tool_def) ->
     t.name = "figma_codegen"
   ) Mcp_tools.all_tools in
   check bool "figma_codegen exists" true exists
 
 let test_tool_get_file_exists () =
-  let exists = List.exists (fun (t : Mcp_protocol.tool_def) ->
+  let exists = List.exists (fun (t : Figma_mcp_protocol.tool_def) ->
     t.name = "figma_get_file"
   ) Mcp_tools.all_tools in
   check bool "figma_get_file exists" true exists
 
 let test_tool_parse_url_exists () =
-  let exists = List.exists (fun (t : Mcp_protocol.tool_def) ->
+  let exists = List.exists (fun (t : Figma_mcp_protocol.tool_def) ->
     t.name = "figma_parse_url"
   ) Mcp_tools.all_tools in
   check bool "figma_parse_url exists" true exists
@@ -900,21 +900,21 @@ let token_resolution_tests = [
 
 let test_create_figma_server () =
   let server = Mcp_tools.create_figma_server () in
-  check bool "has tools" true (List.length server.Mcp_protocol.tools > 0);
-  check bool "has handlers" true (List.length server.Mcp_protocol.handlers_sync > 0);
-  check bool "has resources" true (List.length server.Mcp_protocol.resources > 0);
-  check bool "has prompts" true (List.length server.Mcp_protocol.prompts > 0)
+  check bool "has tools" true (List.length server.Figma_mcp_protocol.tools > 0);
+  check bool "has handlers" true (List.length server.Figma_mcp_protocol.handlers_sync > 0);
+  check bool "has resources" true (List.length server.Figma_mcp_protocol.resources > 0);
+  check bool "has prompts" true (List.length server.Figma_mcp_protocol.prompts > 0)
 
 let tool_names tools =
   tools
-  |> List.map (fun (t : Mcp_protocol.tool_def) -> t.name)
+  |> List.map (fun (t : Figma_mcp_protocol.tool_def) -> t.name)
   |> List.sort String.compare
 
 let test_server_tools_match_public_tools () =
   let server = Mcp_tools.create_figma_server () in
   check (list string) "tool names match public_tools"
     (tool_names Mcp_tools.public_tools)
-    (tool_names server.Mcp_protocol.tools)
+    (tool_names server.Figma_mcp_protocol.tools)
 
 let server_tests = [
   "create_figma_server", `Quick, test_create_figma_server;
@@ -924,10 +924,10 @@ let server_tests = [
 (** ============== Main ============== *)
 
 let test_string_contains_basic () =
-  check bool "basic match" true (Mcp_tools.string_contains "Hello World" "world");
-  check bool "no match" false (Mcp_tools.string_contains "Hello" "bye");
-  check bool "empty sub" true (Mcp_tools.string_contains "Hello" "");
-  check bool "case insensitive" true (Mcp_tools.string_contains "BROKEN PIPE" "broken pipe")
+  check bool "basic match" true (Mcp_helpers.string_contains ~haystack:"Hello World" ~needle:"world");
+  check bool "no match" false (Mcp_helpers.string_contains ~haystack:"Hello" ~needle:"bye");
+  check bool "empty sub" false (Mcp_helpers.string_contains ~haystack:"Hello" ~needle:"");
+  check bool "case insensitive" true (Mcp_helpers.string_contains ~haystack:"BROKEN PIPE" ~needle:"broken pipe")
 
 let test_is_network_error_structural () =
   check bool "Unix EPIPE" true (Mcp_tools.is_network_error (Unix.Unix_error (Unix.EPIPE, "write", "")));
@@ -1036,7 +1036,7 @@ let test_category_tools_count () =
     (List.length Mcp_tools.category_tools)
 
 let test_category_tools_names_prefixed () =
-  let all_prefixed = List.for_all (fun (t : Mcp_protocol.tool_def) ->
+  let all_prefixed = List.for_all (fun (t : Figma_mcp_protocol.tool_def) ->
     String.length t.name >= 6 && String.sub t.name 0 6 = "figma_"
   ) Mcp_tools.category_tools in
   check bool "all category tools prefixed with figma_" true all_prefixed
@@ -1049,8 +1049,8 @@ let test_make_category_tool_name () =
 let test_make_category_tool_description_contains_tools () =
   let cat : Mcp_tools.tool_category = { name = "mycat"; description = "My description"; tools = ["foo"; "bar"] } in
   let tool = Mcp_tools.make_category_tool cat in
-  check bool "description contains foo" true (Mcp_tools.string_contains tool.description "foo");
-  check bool "description contains bar" true (Mcp_tools.string_contains tool.description "bar")
+  check bool "description contains foo" true (Mcp_helpers.string_contains ~haystack:tool.description ~needle:"foo");
+  check bool "description contains bar" true (Mcp_helpers.string_contains ~haystack:tool.description ~needle:"bar")
 
 let test_make_category_tool_has_mode_enum () =
   let cat : Mcp_tools.tool_category = { name = "test"; description = "Test"; tools = ["x"] } in
@@ -1074,8 +1074,8 @@ let test_featured_tools_not_empty () =
     (List.length Mcp_tools.featured_tools > 0)
 
 let test_featured_tools_subset_of_all () =
-  let all_names = List.map (fun (t : Mcp_protocol.tool_def) -> t.name) Mcp_tools.all_tools in
-  let all_featured_in_all = List.for_all (fun (t : Mcp_protocol.tool_def) ->
+  let all_names = List.map (fun (t : Figma_mcp_protocol.tool_def) -> t.name) Mcp_tools.all_tools in
+  let all_featured_in_all = List.for_all (fun (t : Figma_mcp_protocol.tool_def) ->
     List.mem t.name all_names
   ) Mcp_tools.featured_tools in
   check bool "all featured tools in all_tools" true all_featured_in_all
@@ -1678,8 +1678,21 @@ let test_tool_get_node_chunk_schema () =
        | _ -> fail "Expected properties")
   | _ -> fail "Expected Assoc"
 
+let test_tool_figma_plugin_schema_has_unique_keys () =
+  let tool = Mcp_tools.tool_figma_plugin in
+  check bool "name" true (tool.name = "figma_plugin");
+  match tool.input_schema with
+  | `Assoc fields ->
+      (match List.assoc_opt "properties" fields with
+       | Some (`Assoc props) ->
+           let keys = List.map fst props in
+           let unique_keys = List.sort_uniq String.compare keys in
+           check int "no duplicate property keys" (List.length unique_keys) (List.length keys)
+       | _ -> fail "Expected properties")
+  | _ -> fail "Expected Assoc"
+
 let test_all_tool_schemas_are_objects () =
-  let all_obj = List.for_all (fun (t : Mcp_protocol.tool_def) ->
+  let all_obj = List.for_all (fun (t : Figma_mcp_protocol.tool_def) ->
     match t.input_schema with
     | `Assoc fields ->
         (match List.assoc_opt "type" fields with
@@ -1701,6 +1714,7 @@ let tool_schema_tests = [
   "select_nodes schema", `Quick, test_tool_select_nodes_schema;
   "fidelity_loop schema", `Quick, test_tool_fidelity_loop_schema;
   "get_node_chunk schema", `Quick, test_tool_get_node_chunk_schema;
+  "figma_plugin schema unique keys", `Quick, test_tool_figma_plugin_schema_has_unique_keys;
   "all tool schemas are objects", `Quick, test_all_tool_schemas_are_objects;
 ]
 
@@ -1708,61 +1722,61 @@ let tool_schema_tests = [
 
 let test_resources_count () =
   let server = Mcp_tools.create_figma_server () in
-  check bool "has resources" true (List.length server.Mcp_protocol.resources >= 3)
+  check bool "has resources" true (List.length server.Figma_mcp_protocol.resources >= 3)
 
 let test_resources_have_uris () =
   let server = Mcp_tools.create_figma_server () in
-  let all_have_uri = List.for_all (fun (r : Mcp_protocol.mcp_resource) ->
+  let all_have_uri = List.for_all (fun (r : Figma_mcp_protocol.mcp_resource) ->
     String.length r.uri > 0
-  ) server.Mcp_protocol.resources in
+  ) server.Figma_mcp_protocol.resources in
   check bool "all resources have uris" true all_have_uri
 
 let test_resources_have_mime_types () =
   let server = Mcp_tools.create_figma_server () in
-  let all_have_mime = List.for_all (fun (r : Mcp_protocol.mcp_resource) ->
+  let all_have_mime = List.for_all (fun (r : Figma_mcp_protocol.mcp_resource) ->
     String.length r.mime_type > 0
-  ) server.Mcp_protocol.resources in
+  ) server.Figma_mcp_protocol.resources in
   check bool "all resources have mime_types" true all_have_mime
 
 let test_resource_templates_exist () =
   let server = Mcp_tools.create_figma_server () in
   check bool "has resource_templates" true
-    (List.length server.Mcp_protocol.resource_templates > 0)
+    (List.length server.Figma_mcp_protocol.resource_templates > 0)
 
 let test_resource_template_tokens () =
   let server = Mcp_tools.create_figma_server () in
-  let has_tokens = List.exists (fun (rt : Mcp_protocol.mcp_resource_template) ->
+  let has_tokens = List.exists (fun (rt : Figma_mcp_protocol.mcp_resource_template) ->
     rt.uri_template = "figma://tokens/{file_key}"
-  ) server.Mcp_protocol.resource_templates in
+  ) server.Figma_mcp_protocol.resource_templates in
   check bool "tokens template exists" true has_tokens
 
 let test_prompts_exist () =
   let server = Mcp_tools.create_figma_server () in
-  check bool "has prompts" true (List.length server.Mcp_protocol.prompts > 0)
+  check bool "has prompts" true (List.length server.Figma_mcp_protocol.prompts > 0)
 
 let test_prompts_have_names () =
   let server = Mcp_tools.create_figma_server () in
-  let all_named = List.for_all (fun (p : Mcp_protocol.mcp_prompt) ->
+  let all_named = List.for_all (fun (p : Figma_mcp_protocol.mcp_prompt) ->
     String.length p.name > 0
-  ) server.Mcp_protocol.prompts in
+  ) server.Figma_mcp_protocol.prompts in
   check bool "all prompts have names" true all_named
 
 let test_prompts_have_text () =
   let server = Mcp_tools.create_figma_server () in
-  let all_have_text = List.for_all (fun (p : Mcp_protocol.mcp_prompt) ->
+  let all_have_text = List.for_all (fun (p : Figma_mcp_protocol.mcp_prompt) ->
     String.length p.text > 0
-  ) server.Mcp_protocol.prompts in
+  ) server.Figma_mcp_protocol.prompts in
   check bool "all prompts have text" true all_have_text
 
 let test_prompt_fidelity_review_args () =
   let server = Mcp_tools.create_figma_server () in
-  let prompt = List.find_opt (fun (p : Mcp_protocol.mcp_prompt) ->
+  let prompt = List.find_opt (fun (p : Figma_mcp_protocol.mcp_prompt) ->
     p.name = "figma_fidelity_review"
-  ) server.Mcp_protocol.prompts in
+  ) server.Figma_mcp_protocol.prompts in
   match prompt with
   | Some p ->
       check bool "has arguments" true (List.length p.arguments > 0);
-      let has_file_key = List.exists (fun (a : Mcp_protocol.prompt_arg) ->
+      let has_file_key = List.exists (fun (a : Figma_mcp_protocol.prompt_arg) ->
         a.name = "file_key" && a.required
       ) p.arguments in
       check bool "file_key required arg" true has_file_key
@@ -1773,7 +1787,7 @@ let test_read_resource_tokens_docs () =
   | Ok (mime, body) ->
       check string "mime type" "text/markdown" mime;
       check bool "body not empty" true (String.length body > 0);
-      check bool "mentions Variables" true (Mcp_tools.string_contains body "variables")
+      check bool "mentions Variables" true (Mcp_helpers.string_contains ~haystack:body ~needle:"variables")
   | Error e -> fail ("read_resource tokens error: " ^ e)
 
 let test_read_resource_unknown_scheme () =
@@ -1799,31 +1813,31 @@ let resource_prompt_tests = [
 
 let test_string_contains_sub_longer_than_string () =
   check bool "sub longer" false
-    (Mcp_tools.string_contains "hi" "hello world")
+    (Mcp_helpers.string_contains ~haystack:"hi" ~needle:"hello world")
 
 let test_string_contains_equal_strings () =
   check bool "equal strings" true
-    (Mcp_tools.string_contains "hello" "hello")
+    (Mcp_helpers.string_contains ~haystack:"hello" ~needle:"hello")
 
 let test_string_contains_single_char () =
   check bool "single char match" true
-    (Mcp_tools.string_contains "abc" "b")
+    (Mcp_helpers.string_contains ~haystack:"abc" ~needle:"b")
 
 let test_string_contains_single_char_no_match () =
   check bool "single char no match" false
-    (Mcp_tools.string_contains "abc" "z")
+    (Mcp_helpers.string_contains ~haystack:"abc" ~needle:"z")
 
 let test_string_contains_at_end () =
   check bool "match at end" true
-    (Mcp_tools.string_contains "Hello World" "world")
+    (Mcp_helpers.string_contains ~haystack:"Hello World" ~needle:"world")
 
 let test_string_contains_at_start () =
   check bool "match at start" true
-    (Mcp_tools.string_contains "Hello World" "hello")
+    (Mcp_helpers.string_contains ~haystack:"Hello World" ~needle:"hello")
 
 let test_string_contains_mixed_case () =
   check bool "mixed case" true
-    (Mcp_tools.string_contains "aBcDeF" "BcDe")
+    (Mcp_helpers.string_contains ~haystack:"aBcDeF" ~needle:"BcDe")
 
 let string_contains_extra_tests = [
   "string_contains sub longer", `Quick, test_string_contains_sub_longer_than_string;
@@ -1880,27 +1894,27 @@ let network_error_extra_tests = [
 let test_all_handlers_sync_not_empty () =
   let server = Mcp_tools.create_figma_server () in
   check bool "handlers_sync not empty" true
-    (List.length server.Mcp_protocol.handlers_sync > 0)
+    (List.length server.Figma_mcp_protocol.handlers_sync > 0)
 
 let test_all_handlers_sync_have_names () =
   let server = Mcp_tools.create_figma_server () in
   let all_named = List.for_all (fun (name, _) ->
     String.length name > 0
-  ) server.Mcp_protocol.handlers_sync in
+  ) server.Figma_mcp_protocol.handlers_sync in
   check bool "all handlers have names" true all_named
 
 let test_all_handlers_sync_prefixed () =
   let server = Mcp_tools.create_figma_server () in
   let all_prefixed = List.for_all (fun (name, _) ->
     String.length name >= 6 && String.sub name 0 6 = "figma_"
-  ) server.Mcp_protocol.handlers_sync in
+  ) server.Figma_mcp_protocol.handlers_sync in
   check bool "all handlers prefixed with figma_" true all_prefixed
 
 let test_handlers_cover_all_tools () =
   let server = Mcp_tools.create_figma_server () in
-  let handler_names = List.map fst server.Mcp_protocol.handlers_sync in
-  let tool_names = List.map (fun (t : Mcp_protocol.tool_def) -> t.name)
-    server.Mcp_protocol.tools in
+  let handler_names = List.map fst server.Figma_mcp_protocol.handlers_sync in
+  let tool_names = List.map (fun (t : Figma_mcp_protocol.tool_def) -> t.name)
+    server.Figma_mcp_protocol.tools in
   let all_covered = List.for_all (fun name ->
     List.mem name handler_names
   ) tool_names in
@@ -1916,7 +1930,7 @@ let handler_sync_tests = [
 (** ============== Additional Tool Existence Checks ============== *)
 
 let test_tool_exists name =
-  let exists = List.exists (fun (t : Mcp_protocol.tool_def) ->
+  let exists = List.exists (fun (t : Figma_mcp_protocol.tool_def) ->
     t.name = name
   ) Mcp_tools.all_tools in
   check bool (name ^ " exists") true exists

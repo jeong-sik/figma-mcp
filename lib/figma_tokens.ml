@@ -2,6 +2,9 @@
 
 open Figma_types
 
+let re_dash = Str.regexp "-"
+let re_space = Str.regexp " "
+
 (** ============== 토큰 타입 ============== *)
 
 type color_token = {
@@ -74,7 +77,7 @@ let extract_typography nodes =
         else begin
           Hashtbl.add seen key true;
           let name = Printf.sprintf "text-%s-%d"
-            (String.lowercase_ascii (Str.global_replace (Str.regexp " ") "-" t.font_family))
+            (String.lowercase_ascii (Str.global_replace re_space "-" t.font_family))
             (int_of_float t.font_size)
           in
           Some {
@@ -238,7 +241,7 @@ let to_swiftui tokens =
   (* Colors *)
   Buffer.add_string lines "// MARK: - Colors\nextension Color {\n";
   List.iter (fun (c: color_token) ->
-    let name = Str.global_replace (Str.regexp "-") "_" c.name in
+    let name = Str.global_replace re_dash "_" c.name in
     Buffer.add_string lines (Printf.sprintf "    static let %s = Color(hex: \"%s\")\n" name c.hex)
   ) tokens.colors;
   Buffer.add_string lines "}\n\n";
@@ -262,7 +265,7 @@ let to_swiftui tokens =
   (* Typography *)
   Buffer.add_string lines "// MARK: - Typography\nenum Typography {\n";
   List.iter (fun (t: typography_token) ->
-    let name = Str.global_replace (Str.regexp "-") "_" t.name in
+    let name = Str.global_replace re_dash "_" t.name in
     let weight = match t.font_weight with
       | w when w >= 700 -> "bold"
       | w when w >= 500 -> "medium"
@@ -284,7 +287,7 @@ let to_compose tokens =
   (* Colors *)
   Buffer.add_string lines "object AppColors {\n";
   List.iter (fun (c: color_token) ->
-    let name = Str.global_replace (Str.regexp "-") "" c.name |> String.capitalize_ascii in
+    let name = Str.global_replace re_dash "" c.name |> String.capitalize_ascii in
     let hex = String.sub c.hex 1 6 in
     Buffer.add_string lines (Printf.sprintf "    val %s = Color(0xFF%s)\n" name (String.uppercase_ascii hex))
   ) tokens.colors;
@@ -309,7 +312,7 @@ let to_compose tokens =
   (* Typography *)
   Buffer.add_string lines "object AppTypography {\n";
   List.iter (fun (t: typography_token) ->
-    let name = Str.global_replace (Str.regexp "-") "" t.name |> String.capitalize_ascii in
+    let name = Str.global_replace re_dash "" t.name |> String.capitalize_ascii in
     let weight = match t.font_weight with
       | w when w >= 700 -> "Bold"
       | w when w >= 500 -> "Medium"
@@ -330,7 +333,7 @@ let to_flutter tokens =
   (* Colors *)
   Buffer.add_string lines "class AppColors {\n  AppColors._();\n\n";
   List.iter (fun (c: color_token) ->
-    let name = Str.global_replace (Str.regexp "-") "" c.name in
+    let name = Str.global_replace re_dash "" c.name in
     let name = String.mapi (fun i c -> if i = 0 then Char.lowercase_ascii c else c) name in
     let hex = String.sub c.hex 1 6 in
     Buffer.add_string lines (Printf.sprintf "  static const %s = Color(0xFF%s);\n" name (String.uppercase_ascii hex))
@@ -357,7 +360,7 @@ let to_flutter tokens =
   (* Typography *)
   Buffer.add_string lines "class AppTextStyles {\n  AppTextStyles._();\n\n";
   List.iter (fun (t: typography_token) ->
-    let name = Str.global_replace (Str.regexp "-") "" t.name in
+    let name = Str.global_replace re_dash "" t.name in
     let name = String.mapi (fun i c -> if i = 0 then Char.lowercase_ascii c else c) name in
     let weight = match t.font_weight with
       | w when w >= 700 -> "w700"

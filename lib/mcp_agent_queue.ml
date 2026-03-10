@@ -46,7 +46,7 @@ let parse_positive_int value =
   try
     let v = int_of_string value in
     if v > 0 then Some v else None
-  with _ -> None
+  with Failure _ -> None
 
 let env_int ~name ~default =
   match Sys.getenv_opt name with
@@ -67,7 +67,7 @@ let hex_of_bytes (b : bytes) =
     Bytes.set out (i * 2) hex.[v lsr 4];
     Bytes.set out (i * 2 + 1) hex.[v land 0x0f];
   done;
-  Bytes.unsafe_to_string out
+  Bytes.to_string out
 
 let random_bytes len =
   let fd = Unix.openfile "/dev/urandom" [Unix.O_RDONLY] 0 in

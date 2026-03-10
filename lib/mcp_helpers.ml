@@ -1,5 +1,23 @@
 (** Figma MCP shared helpers — JSON, Schema, Cache, Error, Parameter extraction *)
 
+(** ============== String search ============== *)
+
+let string_contains ~haystack ~needle =
+  let needle = String.lowercase_ascii (String.trim needle) in
+  if needle = "" then false
+  else
+    let haystack = String.lowercase_ascii haystack in
+    try
+      ignore (Str.search_forward (Str.regexp_string needle) haystack 0);
+      true
+    with Not_found -> false
+
+let matches_any patterns text =
+  List.exists (fun p -> string_contains ~needle:p ~haystack:text) patterns
+
+let find_matching_pattern patterns text =
+  List.find_opt (fun p -> string_contains ~needle:p ~haystack:text) patterns
+
 (** ============== JSON → DSL 변환 (Figma_mcp 순환 의존 방지) ============== *)
 let process_json_string ~format json_str =
   try
@@ -165,7 +183,7 @@ let classify_http_error ~status_code ~body =
       (* Rate limit - retry_after 파싱 시도 *)
       let retry_after = try
         Scanf.sscanf body "retry after %f" (fun f -> f)
-      with _ -> 60.0 in
+      with Scanf.Scan_failure _ | Failure _ -> 60.0 in
       RateLimited retry_after
   | n when n >= 500 -> ServerError (Printf.sprintf "HTTP %d: %s" n body)
   | _ -> UnknownError (Printf.sprintf "HTTP %d: %s" status_code body)
@@ -305,6 +323,11 @@ let get_int key json =
   | Some (`Int i) -> Some i
   | Some (`Float f) -> Some (int_of_float f)
   | _ -> None
+
+let get_list key json =
+  match member key json with
+  | Some (`List l) -> l
+  | _ -> []
 
 (** Get int with default value *)
 let get_int_or key default json =

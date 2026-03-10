@@ -1,6 +1,6 @@
 (lang dune 3.15)
 (name figma_mcp)
-(version 0.8.3)
+(version 0.8.5)
 
 (generate_opam_files true)
 
@@ -20,6 +20,7 @@
   (dune (>= 3.13))
   ; External dependencies (opam pin)
   (grpc-direct (>= 0.1.0))
+  (mcp_protocol (>= 0.1.0))
   ; Standard dependencies
   (yojson (>= 2.0))
   (uri (>= 4.2))

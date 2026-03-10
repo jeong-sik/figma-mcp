@@ -898,13 +898,13 @@ let test_is_under_dir_nonexistent () =
    ============================================================ *)
 
 let test_string_contains_found () =
-  check bool "found" true (Mcp_tools.string_contains "Hello World" "world")
+  check bool "found" true (Mcp_helpers.string_contains ~haystack:"Hello World" ~needle:"world")
 
 let test_string_contains_not_found () =
-  check bool "not found" false (Mcp_tools.string_contains "Hello World" "xyz")
+  check bool "not found" false (Mcp_helpers.string_contains ~haystack:"Hello World" ~needle:"xyz")
 
 let test_string_contains_empty_sub () =
-  check bool "empty sub" true (Mcp_tools.string_contains "anything" "")
+  check bool "empty sub" false (Mcp_helpers.string_contains ~haystack:"anything" ~needle:"")
 
 let test_is_network_error_epipe () =
   check bool "epipe" true

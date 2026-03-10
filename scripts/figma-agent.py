@@ -9,6 +9,7 @@ Uses only stdlib - no external dependencies.
 """
 
 import json
+import os
 import time
 import signal
 import logging
@@ -16,8 +17,8 @@ import urllib.request
 import urllib.error
 
 # Configuration
-FIGMA_MCP_URL = "http://localhost:8940"
-OLLAMA_URL = "http://localhost:11434/api/generate"
+FIGMA_MCP_URL = os.getenv("FIGMA_MCP_URL", "").rstrip("/")
+OLLAMA_URL = os.getenv("OLLAMA_URL", "").strip()
 OLLAMA_MODEL = "qwen3-coder:30b"
 POLL_INTERVAL = 2  # seconds
 TIMEOUT = 120  # Ollama can be slow
@@ -100,6 +101,10 @@ def call_ollama(prompt: str, platform: str) -> str:
 
 def poll_and_process():
     """Main polling loop"""
+    if not FIGMA_MCP_URL:
+        raise RuntimeError("FIGMA_MCP_URL is required")
+    if not OLLAMA_URL:
+        raise RuntimeError("OLLAMA_URL is required")
     log.info("🤖 Figma Agent started")
     log.info(f"   MCP: {FIGMA_MCP_URL}")
     log.info(f"   Ollama: {OLLAMA_URL} ({OLLAMA_MODEL})")

@@ -274,6 +274,11 @@
  (name test_crawl_coverage)
  (libraries figma_mcp alcotest yojson))
 
+; PR #131: file fetch error accumulation in figma_crawl.ml
+(test
+ (name test_crawl_file_fetch_errors)
+ (libraries figma_mcp alcotest))
+
 ; Coverage: visual_verifier.ml extra (hints, corrections, parse_diff_regions)
 (test
  (name test_visual_verifier_extra)
@@ -363,7 +368,8 @@
 ; Coverage Wave 6: mcp_plugin_handlers.ml (success paths, deep branches)
 (test
  (name test_plugin_handlers_w6)
- (libraries figma_mcp alcotest yojson unix str base64))
+ (libraries figma_mcp alcotest yojson unix str base64)
+ (action (run %{test} --color=always)))
 
 ; Coverage Wave 6: mcp_tools.ml (uncovered branches — compact_json, chunkify, plugin stats, etc.)
 (test
@@ -497,3 +503,18 @@
 (test
  (name test_iou)
  (libraries figma_mcp alcotest))
+
+; Multi-Metric Similarity Proof Experiment (manual execution, not auto-test)
+(executable
+ (name proof_experiment)
+ (libraries figma_mcp))
+
+; Eval Harness tests (P3 — scenario-based visual evaluation with pass@k)
+(test
+ (name test_eval_harness)
+ (libraries figma_mcp alcotest yojson unix))
+
+; Trajectory JSONL logging tests (P3 — pipeline step recording)
+(test
+ (name test_trajectory)
+ (libraries figma_mcp alcotest yojson unix))

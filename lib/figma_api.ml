@@ -4,15 +4,18 @@ open Printf
 
 (** ============== Node ID 변환 ============== *)
 
+let re_dash = Str.regexp "-"
+let re_colon = Str.regexp ":"
+
 (** URL 형식 (2089-11127) → API 형식 (2089:11127)
     Figma URL에서 추출한 node-id를 API 호출용으로 변환 *)
 let url_to_api_node_id id =
-  Str.global_replace (Str.regexp "-") ":" id
+  Str.global_replace re_dash ":" id
 
 (** API 형식 (2089:11127) → URL 형식 (2089-11127)
     API 응답의 node id를 URL용으로 변환 *)
 let api_to_url_node_id id =
-  Str.global_replace (Str.regexp ":") "-" id
+  Str.global_replace re_colon "-" id
 
 (** Normalize node ID input. Convert hyphen form when colon is missing. *)
 let normalize_node_id id =
@@ -136,4 +139,4 @@ let parse_figma_url url =
     | "proto" :: file_key :: _ ->
         { empty with file_key = Some file_key; node_id }
     | _ -> empty
-  with _ -> empty
+  with Invalid_argument _ -> empty

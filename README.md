@@ -1,6 +1,6 @@
 # Figma MCP Server
 
-[![Version](https://img.shields.io/badge/version-0.8.2-blue.svg)](https://github.com/jeong-sik/figma-mcp)
+[![Version](https://img.shields.io/badge/version-0.8.4-blue.svg)](https://github.com/jeong-sik/figma-mcp)
 [![Coverage](https://img.shields.io/badge/coverage-87.54%25-brightgreen.svg)]()
 [![OCaml](https://img.shields.io/badge/OCaml-5.x-orange.svg)](https://ocaml.org/)
 [![MCP](https://img.shields.io/badge/MCP-2025--11--25-blue.svg)](https://spec.modelcontextprotocol.io/)
@@ -205,6 +205,8 @@ Plugin adds REST/layout/style data that the Figma API alone does not provide.
 HTTP endpoints: `POST /plugin/connect`, `POST /plugin/poll`, `POST /plugin/result`, `GET /plugin/status`.
 
 For detailed setup, troubleshooting, and configuration: `docs/plugin-workflow.md`.
+
+Supported actions for `figma_plugin` (authoritative list) are documented in `docs/figma_plugin_actions.md`.
 
 ## gRPC Streaming
 

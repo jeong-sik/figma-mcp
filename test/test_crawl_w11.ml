@@ -40,12 +40,9 @@ let () =
     check (option string) "assoc -> None" None (Figma_crawl.get_string "k" json)
   in
   let test_get_string_from_list_root () =
-    (* When the root JSON is a list, Yojson.Safe.Util.member raises Type_error *)
+    (* Non-Assoc root returns None (Mcp_helpers.member handles gracefully) *)
     let json = `List [ `String "a" ] in
-    let raised = ref false in
-    (try ignore (Figma_crawl.get_string "k" json)
-     with Yojson.Safe.Util.Type_error _ -> raised := true);
-    check bool "raises Type_error on list root" true !raised
+    check (option string) "list root -> None" None (Figma_crawl.get_string "k" json)
   in
 
   (* ================================================================ *)
@@ -80,6 +77,11 @@ let () =
   let test_get_list_nested () =
     let json = `Assoc [ ("items", `List [ `List [ `Int 1 ] ]) ] in
     check int "nested list" 1 (List.length (Figma_crawl.get_list "items" json))
+  in
+  let test_get_list_non_assoc_root () =
+    (* Non-Assoc root returns empty (Mcp_helpers.member handles gracefully) *)
+    let json = `List [ `Int 1 ] in
+    check int "list root -> empty" 0 (List.length (Figma_crawl.get_list "items" json))
   in
 
   (* ================================================================ *)
@@ -479,6 +481,7 @@ let () =
           test_case "int value" `Quick test_get_list_int;
           test_case "empty list" `Quick test_get_list_empty_list;
           test_case "nested list" `Quick test_get_list_nested;
+          test_case "non-assoc root" `Quick test_get_list_non_assoc_root;
         ] );
       ( "flatten_nodes extra",
         [

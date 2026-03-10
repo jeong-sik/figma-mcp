@@ -6,15 +6,16 @@
 
 open Printf
 
-let string_contains s sub =
-  let len_s = String.length s in
-  let len_sub = String.length sub in
-  let rec loop i =
-    if i + len_sub > len_s then false
-    else if String.sub s i len_sub = sub then true
-    else loop (i + 1)
-  in
-  if len_sub = 0 then true else loop 0
+(** Case-insensitive substring check (local — cannot depend on Mcp_helpers due to cycle) *)
+let string_contains_ci ~haystack ~needle =
+  let needle = String.lowercase_ascii (String.trim needle) in
+  if needle = "" then false
+  else
+    let haystack = String.lowercase_ascii haystack in
+    try
+      ignore (Str.search_forward (Str.regexp_string needle) haystack 0);
+      true
+    with Not_found -> false
 
 (** ============== Types ============== *)
 
@@ -40,7 +41,7 @@ type error_recovery = {
 
 (** Body 기반 에러 키워드 감지 *)
 let body_contains body keyword =
-  string_contains (String.lowercase_ascii body) keyword
+  string_contains_ci ~haystack:body ~needle:keyword
 
 let body_contains_any body keywords =
   List.exists (body_contains body) keywords
@@ -198,12 +199,13 @@ let max_body_size = Figma_config.Http.max_body_bytes
 let log_response_body = Figma_config.Http.log_response_body
 
 let is_dns_failure exn =
-  let msg = Printexc.to_string exn |> String.lowercase_ascii in
-  string_contains msg "resolve" || string_contains msg "dns"
+  let msg = Printexc.to_string exn in
+  string_contains_ci ~haystack:msg ~needle:"resolve" ||
+  string_contains_ci ~haystack:msg ~needle:"dns"
 
 let is_html_response body =
   let trimmed = String.trim body in
-  string_contains (String.lowercase_ascii trimmed) "<html"
+  string_contains_ci ~haystack:trimmed ~needle:"<html"
 
 let retry_after_of_headers headers =
   match Cohttp.Header.get headers "retry-after" with
@@ -347,7 +349,7 @@ let decode_chunked body =
       else
         let chunk_size =
           try int_of_string ("0x" ^ size_str)
-          with _ -> 0
+          with Failure _ -> 0
         in
         if chunk_size = 0 then Buffer.contents buf
         else
@@ -374,7 +376,7 @@ let parse_http_response response =
         match parts with
         | _ :: code :: _ -> int_of_string code
         | _ -> 500
-      with _ -> 500
+      with Failure _ -> 500
     in
     (* 헤더와 본문 분리 (빈 줄로 구분) + chunked 체크 *)
     let rec find_body_and_check_chunked headers_acc is_chunked = function
@@ -514,12 +516,12 @@ let read_http_response_from_flow br =
   let headers = read_headers br in
   let connection_close =
     match header_value headers "connection" with
-    | Some value -> string_contains (String.lowercase_ascii value) "close"
+    | Some value -> string_contains_ci ~haystack:value ~needle:"close"
     | None -> false
   in
   let is_chunked =
     match header_value headers "transfer-encoding" with
-    | Some value -> string_contains (String.lowercase_ascii value) "chunked"
+    | Some value -> string_contains_ci ~haystack:value ~needle:"chunked"
     | None -> false
   in
   let content_length =
@@ -760,7 +762,8 @@ let http_get ~sw ~net ~clock ~client ~headers ?(timeout=default_timeout) ?(max_r
              (status2, Cohttp.Header.init (), body2)
            else
              (status, resp_headers, body_str)
-         with _ ->
+         with _exn ->
+           (* HTTPS fallback retry failed - return original response *)
            (status, resp_headers, body_str))
       else
         (status, resp_headers, body_str)
@@ -1267,4 +1270,4 @@ let parse_figma_url url =
     | "proto" :: file_key :: _ ->
         { empty with file_key = Some file_key; node_id }
     | _ -> empty
-  with _ -> empty
+  with Invalid_argument _ -> empty

@@ -16,18 +16,28 @@ open Printf
 
 let temp_dir = Figma_config.Visual.temp_dir
 
-let render_script_path =
-  match Figma_config.Visual.render_script with
+let resolve_script_path_with ~cwd ~exe_dir ?configured script_name =
+  match configured with
   | Some path -> path
   | None ->
-      (* 상대 경로로 scripts/render-html.js 찾기 *)
       let candidates = [
-        Filename.concat (Sys.getcwd ()) "scripts/render-html.js";
-        Filename.concat (Filename.dirname Sys.executable_name) "../scripts/render-html.js";
-        "/Users/dancer/me/.worktrees/figma-mcp-streaming/features/figma-mcp/scripts/render-html.js";
+        Filename.concat cwd ("scripts/" ^ script_name);
+        Filename.concat exe_dir ("../scripts/" ^ script_name);
       ] in
       List.find_opt Sys.file_exists candidates
-      |> Option.value ~default:"scripts/render-html.js"
+      |> Option.value ~default:("scripts/" ^ script_name)
+
+let resolve_script_path ?configured script_name =
+  resolve_script_path_with
+    ~cwd:(Sys.getcwd ())
+    ~exe_dir:(Filename.dirname Sys.executable_name)
+    ?configured
+    script_name
+
+let render_script_path =
+  resolve_script_path
+    ?configured:Figma_config.Visual.render_script
+    "render-html.js"
 
 let default_target_ssim = 0.99
 let default_max_iterations = 5
@@ -133,7 +143,7 @@ let render_html_to_png ?(width=375) ?(height=812) html =
         Ok output_path
       else
         Error (json |> member "error" |> to_string_option |> Option.value ~default:"Unknown error")
-    with _ ->
+    with Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ ->
       if Sys.file_exists output_path then Ok output_path
       else Error ("Failed to parse render output: " ^ output.stdout))
   | Error e -> Error e
@@ -222,13 +232,9 @@ type comparison_with_regions = {
 
 (** ssim-compare.js 스크립트 경로 찾기 *)
 let ssim_script_path =
-  let candidates = [
-    Filename.concat (Sys.getcwd ()) "scripts/ssim-compare.js";
-    Filename.concat (Filename.dirname Sys.executable_name) "../scripts/ssim-compare.js";
-    "/Users/dancer/me/.worktrees/figma-mcp-streaming/features/figma-mcp/scripts/ssim-compare.js";
-  ] in
-  List.find_opt Sys.file_exists candidates
-  |> Option.value ~default:"scripts/ssim-compare.js"
+  resolve_script_path
+    ?configured:Figma_config.Visual.ssim_script
+    "ssim-compare.js"
 
 (** JSON에서 diff_regions 파싱 *)
 let parse_diff_regions json =
@@ -902,7 +908,7 @@ let generate_diff_images ~figma_png ~html_png =
                 with Not_found -> trimmed
             in
             try float_of_string first_token
-            with _ -> 0.0
+            with Failure _ -> 0.0
           in
           (* 이미지 크기로 비율 계산 *)
           let get_image_size path =
@@ -915,7 +921,7 @@ let generate_diff_images ~figma_png ~html_png =
                   match parts with
                   | [w; h] -> Some (int_of_string w * int_of_string h)
                   | _ -> None
-                with _ -> None)
+                with Failure _ -> None)
             | Error _ -> None
           in
           let total_pixels =
@@ -1062,7 +1068,7 @@ let get_recent_logs ?(count=20) () =
       match String.split_on_char '|' line with
       | [ts; node_id; ssim_str; notes] ->
           (try Some (ts, node_id, float_of_string ssim_str, notes)
-           with _ -> None)
+           with Failure _ -> None)
       | _ -> None
     ) recent
   end else []

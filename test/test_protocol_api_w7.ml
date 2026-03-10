@@ -1,6 +1,6 @@
 (** Coverage Wave 7: mcp_protocol.ml (52 uncov) + figma_api.ml (21 uncov) — pure functions *)
 
-open Mcp_protocol
+open Figma_mcp_protocol
 open Figma_api
 
 let check_string = Alcotest.(check string)
@@ -237,14 +237,14 @@ let test_prompt_to_detail_json () =
 
 let test_proto_member_found () =
   let json = `Assoc [("key", `String "value")] in
-  Alcotest.(check bool) "found" true (Mcp_protocol.member "key" json = Some (`String "value"))
+  Alcotest.(check bool) "found" true (Figma_mcp_protocol.member "key" json = Some (`String "value"))
 
 let test_proto_member_not_found () =
   let json = `Assoc [("key", `String "value")] in
-  Alcotest.(check bool) "not found" true (Mcp_protocol.member "other" json = None)
+  Alcotest.(check bool) "not found" true (Figma_mcp_protocol.member "other" json = None)
 
 let test_proto_member_non_assoc () =
-  Alcotest.(check bool) "non-assoc" true (Mcp_protocol.member "x" (`String "s") = None)
+  Alcotest.(check bool) "non-assoc" true (Figma_mcp_protocol.member "x" (`String "s") = None)
 
 (* ========== mcp_protocol.ml — handle_initialize ========== *)
 

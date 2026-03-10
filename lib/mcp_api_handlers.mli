@@ -22,7 +22,7 @@ type selection_config = {
 val default_exclude_patterns : string list
 val default_note_patterns : string list
 val normalize_patterns : string list -> string list
-val string_contains : needle:string -> haystack:string -> bool
+val string_contains : haystack:string -> needle:string -> bool
 val matches_any : string list -> string -> bool
 val find_matching_pattern : string list -> string -> string option
 val node_text_blob : Figma_types.ui_node -> string

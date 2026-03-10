@@ -30,6 +30,29 @@ class TestPluginSecurityRegression(unittest.TestCase):
         self.assertIn('type: "init"', CODE)
         self.assertIn("msg.nonce", CODE)
 
+    def test_version_handshake_exists(self):
+        self.assertRegex(CODE, r'const\s+PLUGIN_BRIDGE_VERSION\s*=\s*"[^"]+";')
+        self.assertIn('type: "init", nonce: sessionNonce, version: PLUGIN_BRIDGE_VERSION', CODE)
+        self.assertIn('id="pluginVersion"', UI)
+        self.assertIn('typeof msg.version === "string"', UI)
+        self.assertIn('pluginVersionEl.textContent = "v" + msg.version', UI)
+
+    def test_channel_refresh_guard_exists(self):
+        self.assertIn("function isChannelStaleError(err)", UI)
+        self.assertIn("status === 404 || status === 410", UI)
+        self.assertIn("if (!autoReconnect || channelRefreshAttempted) return false;", UI)
+        self.assertIn("channelRefreshAttempted = true;", UI)
+        self.assertIn('attemptChannelRefresh("stale-channel", e)', UI)
+        self.assertIn('attemptChannelRefresh("retry-exhausted", e)', UI)
+        self.assertIn("channelRefreshAttempted = false;", UI)
+
+    def test_advanced_connection_state_is_persisted(self):
+        self.assertIn("Advanced connection options", UI)
+        self.assertIn('id="bridgeAdvancedToggle"', UI)
+        self.assertIn('id="bridgeAdvancedFields"', UI)
+        self.assertIn("st.showBridgeAdvanced = showBridgeAdvanced;", UI)
+        self.assertIn("if (state.showBridgeAdvanced !== undefined)", UI)
+
     def test_render_html_blocks_network_by_default(self):
         # The render script should prevent SSRF / local file exfil by default.
         self.assertRegex(RENDER, r"page\.route\(\s*['\"]\*\*/\*['\"]")

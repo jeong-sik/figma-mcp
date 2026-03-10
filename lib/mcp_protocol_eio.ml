@@ -6,7 +6,7 @@
     Architecture:
     - HTTP Server: httpun-eio (Eio native, Effect-based)
     - HTTP Client: cohttp-eio (Pure Eio)
-    - JSON-RPC: Reuses types from mcp_protocol.ml
+    - JSON-RPC: Reuses types from figma_mcp_protocol.ml
 *)
 
 open Printf
@@ -42,15 +42,15 @@ module Request = Mcp_http_helpers.Request
 
 (** Process MCP request synchronously (Eio-native, no Lwt).
     Uses process_request_sync which calls handlers_sync directly. *)
-let process_mcp_request_sync (server : Mcp_protocol.mcp_server) body_str =
-  match Mcp_protocol.parse_request body_str with
+let process_mcp_request_sync (server : Figma_mcp_protocol.mcp_server) body_str =
+  match Figma_mcp_protocol.parse_request body_str with
   | Ok req ->
       (* process_request_sync: Lwt 없이 직접 실행 *)
-      let response_json = Mcp_protocol.process_request_sync server req in
+      let response_json = Figma_mcp_protocol.process_request_sync server req in
       Yojson.Safe.to_string response_json
   | Error msg ->
-      let err_response = Mcp_protocol.make_error_response
-        `Null Mcp_protocol.parse_error msg None in
+      let err_response = Figma_mcp_protocol.make_error_response
+        `Null Figma_mcp_protocol.parse_error msg None in
       Yojson.Safe.to_string err_response
 
 type mcp_message_kind =
@@ -79,9 +79,9 @@ include Mcp_sse_transport
 
 let health_handler _request reqd =
   let json = sprintf {|{"status":"ok","server":"%s","version":"%s","protocol":"%s"}|}
-    Mcp_protocol.server_name
-    Mcp_protocol.server_version
-    Mcp_protocol.protocol_version
+    Figma_mcp_protocol.server_name
+    Figma_mcp_protocol.server_version
+    Figma_mcp_protocol.protocol_version
   in
   Response.json json reqd
 
@@ -173,8 +173,8 @@ let mcp_post_handler ~sw ~domain_mgr ~eio_ctx server request reqd =
                  Response.json response_str reqd
              with exn ->
                eprintf "[MCP] request failed: %s\n%!" (Printexc.to_string exn);
-                let err = Mcp_protocol.make_error_response `Null
-                  Mcp_protocol.internal_error "Internal server error" None in
+                let err = Figma_mcp_protocol.make_error_response `Null
+                  Figma_mcp_protocol.internal_error "Internal server error" None in
                 if wants_sse then
                   Response.sse_message (Yojson.Safe.to_string err) reqd
                 else
@@ -315,7 +315,7 @@ let plugin_result_handler _request reqd =
           match get_payload_field "payload" json with
           | Some (`String s) -> (
               try Yojson.Safe.from_string s
-              with _ -> `Assoc [
+              with Yojson.Json_error _ -> `Assoc [
                 ("error", `String "Failed to parse payload string");
                 ("raw", `String s);
               ])
@@ -654,7 +654,7 @@ let route_request ~clock ~domain_mgr ~sw ~eio_ctx server request reqd =
           Response.json (Yojson.Safe.to_string result) reqd
 
       | `GET, "/" ->
-          Response.text (sprintf "🎨 %s MCP Server (Eio)" Mcp_protocol.server_name) reqd
+          Response.text (sprintf "🎨 %s MCP Server (Eio)" Figma_mcp_protocol.server_name) reqd
 
       | `GET, "/mcp" ->
           (* SSE stream for MCP streamable-http protocol *)
@@ -827,7 +827,7 @@ let run ~sw ~net ~clock ~domain_mgr config server =
     with exn ->
       let ip_str = Format.asprintf "%a" Eio.Net.Ipaddr.pp ip in
       eprintf "[%s] Failed to listen on %s:%d (%s)\n%!"
-        Mcp_protocol.server_name
+        Figma_mcp_protocol.server_name
         ip_str
         config.port
         (Printexc.to_string exn);
@@ -863,14 +863,14 @@ let run ~sw ~net ~clock ~domain_mgr config server =
                  flow
              with exn ->
                eprintf "[%s] Connection error: %s\n%!"
-                 Mcp_protocol.server_name
+                 Figma_mcp_protocol.server_name
                  (Printexc.to_string exn)
            )
          with exn ->
            if is_cancelled exn then raise exn;
            let delay = !backoff_s in
            eprintf "[%s] Accept error: %s (backoff %.2fs)\n%!"
-             Mcp_protocol.server_name
+             Figma_mcp_protocol.server_name
              (Printexc.to_string exn)
              delay;
            Eio.Time.sleep clock delay;
@@ -881,7 +881,7 @@ let run ~sw ~net ~clock ~domain_mgr config server =
         else
           let delay = !backoff_s in
           eprintf "[%s] Accept loop error: %s (backoff %.2fs)\n%!"
-            Mcp_protocol.server_name
+            Figma_mcp_protocol.server_name
             (Printexc.to_string exn)
             delay;
           Eio.Time.sleep clock delay;
@@ -902,8 +902,8 @@ let run ~sw ~net ~clock ~domain_mgr config server =
         socket
   in
 
-  eprintf "🎨 %s MCP Server %s (Eio)\n" Mcp_protocol.server_name Mcp_protocol.server_version;
-  eprintf "   Protocol: %s\n" Mcp_protocol.protocol_version;
+  eprintf "🎨 %s MCP Server %s (Eio)\n" Figma_mcp_protocol.server_name Figma_mcp_protocol.server_version;
+  eprintf "   Protocol: %s\n" Figma_mcp_protocol.protocol_version;
   eprintf "   HTTP:     http://%s:%d\n" config.host config.port;
   eprintf "   MCP:      GET  /mcp -> SSE stream (streamable-http)\n";
   eprintf "             POST /mcp -> JSON-RPC requests\n";
@@ -956,11 +956,11 @@ let start_server ?(config = default_config) server =
   let initiate_shutdown signal_name =
     if not !shutdown_initiated then begin
       shutdown_initiated := true;
-      eprintf "\n🎨 %s: Received %s, shutting down gracefully...\n%!" Mcp_protocol.server_name signal_name;
+      eprintf "\n🎨 %s: Received %s, shutting down gracefully...\n%!" Figma_mcp_protocol.server_name signal_name;
 
       (* Broadcast shutdown notification to all SSE clients *)
       broadcast_sse_shutdown signal_name;
-      eprintf "🎨 %s: Sent shutdown notification to %d SSE clients\n%!" Mcp_protocol.server_name (Hashtbl.length sse_clients);
+      eprintf "🎨 %s: Sent shutdown notification to %d SSE clients\n%!" Figma_mcp_protocol.server_name (Hashtbl.length sse_clients);
 
       (* Give clients 200ms to receive the notification.
          NOTE: Unix.sleepf is intentional here. This closure runs as a POSIX signal
@@ -990,9 +990,9 @@ let start_server ?(config = default_config) server =
     run ~sw ~net ~clock ~domain_mgr config server
   with
   | Shutdown ->
-      eprintf "🎨 %s: Shutdown complete.\n%!" Mcp_protocol.server_name
+      eprintf "🎨 %s: Shutdown complete.\n%!" Figma_mcp_protocol.server_name
   | Eio.Cancel.Cancelled _ ->
-      eprintf "🎨 %s: Shutdown complete.\n%!" Mcp_protocol.server_name)
+      eprintf "🎨 %s: Shutdown complete.\n%!" Figma_mcp_protocol.server_name)
 
 (** ============== stdio Server (Pure Eio) ============== *)
 
@@ -1003,7 +1003,7 @@ let run_stdio ~sw ~env ~net ~clock server =
   ignore (Mcp_helpers.set_eio_context ~sw ~net ~clock ~client:eio_client);
 
   eprintf "[%s] MCP Server started (protocol: %s, mode: stdio/Eio)\n%!"
-    Mcp_protocol.server_name Mcp_protocol.protocol_version;
+    Figma_mcp_protocol.server_name Figma_mcp_protocol.protocol_version;
 
   (* Create buffered reader for stdin *)
   let stdin_flow = Eio.Stdenv.stdin env in
@@ -1013,30 +1013,30 @@ let run_stdio ~sw ~env ~net ~clock server =
     match Eio.Buf_read.line buf_read with
     | line ->
         if String.trim line <> "" then begin
-          match Mcp_protocol.parse_request line with
+          match Figma_mcp_protocol.parse_request line with
           | Ok req ->
-              if Mcp_protocol.is_notification req then
+              if Figma_mcp_protocol.is_notification req then
                 (* Notification: no response on stdout per JSON-RPC *)
-                ignore (Mcp_protocol.process_request_sync server req)
+                ignore (Figma_mcp_protocol.process_request_sync server req)
               else begin
                 (* Process request using sync handler (runs in Eio context) *)
-                let response = Mcp_protocol.process_request_sync server req in
+                let response = Figma_mcp_protocol.process_request_sync server req in
                 let response_str = Yojson.Safe.to_string response in
                 print_endline response_str;
                 flush stdout
               end
           | Error msg ->
-              let err_response = Mcp_protocol.make_error_response `Null Mcp_protocol.parse_error msg None in
+              let err_response = Figma_mcp_protocol.make_error_response `Null Figma_mcp_protocol.parse_error msg None in
               print_endline (Yojson.Safe.to_string err_response);
               flush stdout
         end;
         read_loop ()
     | exception End_of_file ->
-        eprintf "[%s] Connection closed (EOF)\n%!" Mcp_protocol.server_name
+        eprintf "[%s] Connection closed (EOF)\n%!" Figma_mcp_protocol.server_name
     | exception Eio.Buf_read.Buffer_limit_exceeded ->
-        eprintf "[%s] Error: Input line too long\n%!" Mcp_protocol.server_name
+        eprintf "[%s] Error: Input line too long\n%!" Figma_mcp_protocol.server_name
     | exception exn ->
-        eprintf "[%s] Error: %s\n%!" Mcp_protocol.server_name (Printexc.to_string exn)
+        eprintf "[%s] Error: %s\n%!" Figma_mcp_protocol.server_name (Printexc.to_string exn)
   in
   read_loop ()
 
@@ -1054,7 +1054,7 @@ let start_stdio_server server =
   let initiate_shutdown signal_name =
     if not !shutdown_initiated then begin
       shutdown_initiated := true;
-      eprintf "\n[%s] Received %s, shutting down...\n%!" Mcp_protocol.server_name signal_name;
+      eprintf "\n[%s] Received %s, shutting down...\n%!" Figma_mcp_protocol.server_name signal_name;
       match !switch_ref with
       | Some sw -> Eio.Switch.fail sw Shutdown
       | None -> ()
@@ -1069,6 +1069,6 @@ let start_stdio_server server =
     run_stdio ~sw ~env ~net ~clock server
   with
   | Shutdown ->
-      eprintf "[%s] Shutdown complete.\n%!" Mcp_protocol.server_name
+      eprintf "[%s] Shutdown complete.\n%!" Figma_mcp_protocol.server_name
   | Eio.Cancel.Cancelled _ ->
-      eprintf "[%s] Shutdown complete.\n%!" Mcp_protocol.server_name)
+      eprintf "[%s] Shutdown complete.\n%!" Figma_mcp_protocol.server_name)
