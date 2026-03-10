@@ -1026,7 +1026,7 @@
       <div>
         <label>Server URL <span class="kbd">↵</span></label>
         <div class="input-row">
-          <input id="server" value="http://localhost:8940" />
+          <input id="server" placeholder="https://mcp.example.com" />
         </div>
       </div>
 
@@ -1438,7 +1438,7 @@
           <div style="padding: 6px; width: 100%;">
             <label>Provider</label>
             <select id="llmProvider" style="width:100%;" onchange="updateLlmUI()">
-              <option value="ollama">Ollama (Local)</option>
+              <option value="ollama">Ollama</option>
               <option value="openai">OpenAI</option>
               <option value="anthropic">Anthropic</option>
               <option value="custom">Custom Endpoint</option>
@@ -1446,7 +1446,7 @@
             <label style="margin-top:8px;display:block;">Model</label>
             <input id="llmModel" placeholder="e.g. qwen3-coder:30b" style="width:100%;">
             <label id="llmEndpointLabel" style="margin-top:8px;display:none;">Endpoint URL</label>
-            <input id="llmEndpoint" placeholder="http://localhost:8932" style="width:100%;display:none;">
+            <input id="llmEndpoint" placeholder="https://llm.example.com" style="width:100%;display:none;">
             <label id="llmApiKeyLabel" style="margin-top:8px;display:block;">API Key</label>
             <input type="password" id="llmApiKey" placeholder="sk-..." style="width:100%;">
             <label style="margin-top:8px;display:block;">Prompt</label>
@@ -1734,11 +1734,12 @@
         keyLabel.style.display = needsKey ? "block" : "none";
         keyInput.style.display = needsKey ? "block" : "none";
         // Show/hide endpoint
-        var needsEndpoint = (p === "custom");
+        var needsEndpoint = (p === "custom" || p === "ollama");
         endLabel.style.display = needsEndpoint ? "block" : "none";
         endInput.style.display = needsEndpoint ? "block" : "none";
         // For custom, show key fields too (optional)
         if (p === "custom") { keyLabel.style.display = "block"; keyInput.style.display = "block"; }
+        endInput.placeholder = p === "ollama" ? "https://ollama.example.com/api/chat" : "https://llm.example.com";
         // Default model placeholders
         var defaults = { ollama: "qwen3-coder:30b", openai: "gpt-4o", anthropic: "claude-sonnet-4-5-20250929", custom: "" };
         modelInput.placeholder = defaults[p] || "";
@@ -3137,7 +3138,8 @@
         };
 
         if (provider === "ollama") {
-          cfg.url = "http://localhost:11434/api/chat";
+          if (!endpoint) throw new Error("Endpoint URL required for Ollama");
+          cfg.url = endpoint;
           cfg.supportsImage = false;
           cfg.timeoutMs = 30000;
           cfg.headers = { "Content-Type": "application/json" };
@@ -3215,7 +3217,8 @@
         }
 
         if (provider === "custom") {
-          cfg.url = endpoint || "http://localhost:8932";
+          if (!endpoint) throw new Error("Endpoint URL required for custom provider");
+          cfg.url = endpoint;
           cfg.usePluginProxy = true;
           cfg.supportsImage = false;
           cfg.headers = { "Content-Type": "application/json" };

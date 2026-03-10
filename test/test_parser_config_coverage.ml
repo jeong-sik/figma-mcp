@@ -984,7 +984,8 @@ let test_config_cors_compat () =
     check bool "compat" true (p = Figma_config.Cors.Compat);
     let origins = Figma_config.Cors.allowed_origins_default () in
     check bool "has null" true (List.mem "null" origins);
-    check bool "private network" true (Figma_config.Cors.allow_private_network_default ()))
+    check bool "no localhost default" false (List.mem "http://localhost:*" origins);
+    check bool "private network" false (Figma_config.Cors.allow_private_network_default ()))
 
 let test_config_cors_unknown_profile () =
   with_env "FIGMA_MCP_CORS_PROFILE" "relaxed" (fun () ->

@@ -30,7 +30,7 @@ import urllib.error
 from typing import Any
 
 
-DEFAULT_MCP_URL = os.getenv("FIGMA_MCP_URL", "http://localhost:8940/mcp")
+DEFAULT_MCP_URL = os.getenv("FIGMA_MCP_URL", "")
 DEFAULT_MCP_API_KEY = os.getenv("FIGMA_MCP_API_KEY", "") or os.getenv("MCP_API_KEY", "")
 DEFAULT_INTERVAL_S = int(os.getenv("FIGMA_SSIM_HEARTBEAT_INTERVAL_S", "300"))
 DEFAULT_LOCK = os.getenv("FIGMA_SSIM_HEARTBEAT_LOCK", "/tmp/figma-ssim-heartbeat.lock")
@@ -726,6 +726,8 @@ def main() -> int:
     ap.add_argument("--once", action="store_true")
     ap.add_argument("--stale-lock-after-s", type=int, default=3600)
     args = ap.parse_args()
+    if not args.mcp_url:
+        ap.error("FIGMA_MCP_URL or --mcp-url is required")
 
     signal.signal(signal.SIGTERM, _request_stop)
     signal.signal(signal.SIGINT, _request_stop)

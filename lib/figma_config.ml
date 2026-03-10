@@ -180,12 +180,12 @@ module Cors = struct
 
   let allowed_origins_default () =
     match profile () with
-    | Compat -> ["http://localhost:*"; "http://127.0.0.1:*"; "https://www.figma.com"; "null"]
+    | Compat -> ["https://www.figma.com"; "null"]
     | Strict -> ["https://www.figma.com"]
 
   let allow_private_network_default () =
     match profile () with
-    | Compat -> true
+    | Compat -> false
     | Strict -> false
 
   let allow_headers_default () =
@@ -199,7 +199,7 @@ module Cors = struct
   let mode () =
     get_string_nonempty ~default:"restrict" "FIGMA_MCP_CORS_MODE"
 
-  (** Allowed origins, supports :* port wildcard (e.g., http://localhost:* ) *)
+  (** Allowed origins, supports :* port wildcard when explicitly configured. *)
   let allowed_origins () =
     get_string_list
       ~default:(allowed_origins_default ())
@@ -222,12 +222,9 @@ module Asset = struct
     match Sys.getenv_opt "FIGMA_MCP_ASSET_DIR" with
     | Some d -> d
     | None ->
-        match Sys.getenv_opt "ME_ROOT" with
-        | Some root -> Filename.concat root "workspace/yousleepwhen/figma-mcp/assets"
-        | None ->
-            match Sys.getenv_opt "HOME" with
-            | Some home -> Filename.concat home ".figma-mcp/assets"
-            | None -> "/tmp/figma-mcp/assets"
+        match Sys.getenv_opt "HOME" with
+        | Some home -> Filename.concat home ".figma-mcp/assets"
+        | None -> Filename.concat (Filename.get_temp_dir_name ()) "figma-mcp/assets"
 end
 
 (** {1 Authentication Configuration} *)

@@ -12,9 +12,6 @@
     "allowedDomains": [
       "https://www.figma.com"
     ],
-    "devAllowedDomains": [
-      "http://localhost:8940"
-    ],
-    "reasoning": "Connect to local MCP server for bidirectional Figma control"
+    "reasoning": "Connect only to explicitly configured MCP origins"
   }
 }
