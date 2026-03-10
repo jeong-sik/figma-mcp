@@ -854,17 +854,21 @@ let run ~sw ~net ~clock ~domain_mgr config server =
            let flow, client_addr = Eio.Net.accept ~sw socket in
            reset_backoff ();
            Eio.Fiber.fork ~sw (fun () ->
-             try
+             Eio.Switch.run (fun conn_sw ->
+               (* httpun_eio calls shutdown but not close; we close on release.
+                  Switch.on_release handles normal exit, exceptions, and cancellation. *)
+               Eio.Switch.on_release conn_sw (fun () ->
+                 try Eio.Flow.close flow
+                 with exn ->
+                   eprintf "[%s] Flow close error: %s\n%!"
+                     Figma_mcp_protocol.server_name
+                     (Printexc.to_string exn));
                Httpun_eio.Server.create_connection_handler
-                 ~sw
+                 ~sw:conn_sw
                  ~request_handler
                  ~error_handler
                  client_addr
-                 flow
-             with exn ->
-               eprintf "[%s] Connection error: %s\n%!"
-                 Figma_mcp_protocol.server_name
-                 (Printexc.to_string exn)
+                 flow)
            )
          with exn ->
            if is_cancelled exn then raise exn;
