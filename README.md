@@ -86,6 +86,10 @@ Each category router supports `mode=list|call|describe`:
 
 `figma_codegen`, `figma_doctor`, `figma_stats`, `figma_cache_stats`, `figma_cache_invalidate`, `figma_read_large_result`, `figma_code_connect`, `figma_post_comment`, `figma_get_file_comments`, `figma_plugin`, `figma_plugin_edit_node`, `figma_plugin_create_node`, `figma_plugin_delete_nodes`, `figma_plugin_batch`, `figma_plugin_subscribe_events`
 
+`figma_doctor` now also checks Figma access state:
+- no args: local runtime/dependency + token validity
+- `file_key=...`: token validity + whether that file is actually accessible with the current token
+
 ### Frequently Used
 
 - `figma_get_node_bundle` -- DSL + render + metadata + variables in one call

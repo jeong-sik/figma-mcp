@@ -647,8 +647,10 @@ let tool_figma_export_tokens : tool_def = {
 (** 환경/의존성 점검 도구 *)
 let tool_figma_doctor : tool_def = {
   name = "figma_doctor";
-  description = "🔧 UTIL: 로컬 의존성 점검. Node/Playwright/ImageMagick 확인.";
-  input_schema = object_schema [] [];
+  description = "🔧 UTIL: 로컬 의존성 + Figma access 점검. Node/Playwright/ImageMagick, FIGMA_TOKEN validity, optional file access 확인.";
+  input_schema = object_schema [
+    ("file_key", string_prop "Optional Figma file key to verify access with the current FIGMA_TOKEN");
+  ] [];
 }
 
 (** large_result 파일 읽기 *)
@@ -1796,6 +1798,25 @@ let handle_doctor _args : (Yojson.Safe.t, string) result =
       ("detail", `String detail);
     ]
   in
+  let classify_access_error err =
+    let body = String.lowercase_ascii (String.trim err) in
+    if string_contains ~haystack:body ~needle:"invalid token"
+       || string_contains ~haystack:body ~needle:"auth error"
+       || string_contains ~haystack:body ~needle:"check figma_token"
+    then ("invalid_token", "FIGMA_TOKEN is invalid or expired. Generate a new personal access token.")
+    else if string_contains ~haystack:body ~needle:"access denied"
+            || string_contains ~haystack:body ~needle:"permission"
+            || string_contains ~haystack:body ~needle:"forbidden"
+    then ("forbidden", "Token is valid but this file is not shared with the token owner, or the endpoint requires different access.")
+    else if string_contains ~haystack:body ~needle:"not found"
+    then ("not_found", "The file key may be wrong, deleted, or inaccessible.")
+    else if string_contains ~haystack:body ~needle:"network"
+            || string_contains ~haystack:body ~needle:"timeout"
+    then ("network", "Temporary network/TLS issue while contacting the Figma API.")
+    else ("unknown", err)
+  in
+  let file_key = get_string "file_key" _args in
+  let token = resolve_token _args in
   let node_ok = has_command "node" in
   let node_version =
     if node_ok then command_output "node" [| "node"; "-v" |] else "missing"
@@ -1825,6 +1846,49 @@ let handle_doctor _args : (Yojson.Safe.t, string) result =
     && ssim_script_ok
   in
 
+  let token_present = Option.is_some token in
+  let me_check =
+    match token with
+    | None -> (`Null, false, "FIGMA_TOKEN not found")
+    | Some token ->
+        (try
+           match Figma_effects.Perform.get_me ~token with
+           | Ok json ->
+               let email = get_string "email" json |> Option.value ~default:"(unknown)" in
+               let handle = get_string "handle" json |> Option.value ~default:"(unknown)" in
+               (`Assoc [("email", `String email); ("handle", `String handle)], true,
+                Printf.sprintf "Authenticated as %s (%s)" handle email)
+           | Error err ->
+               let (kind, detail) = classify_access_error err in
+               (`Assoc [("kind", `String kind); ("raw", `String err)], false, detail)
+         with
+         | Effect.Unhandled _ ->
+             (`Assoc [("kind", `String "unavailable"); ("raw", `String "Figma API effect handler unavailable in this runtime")],
+              false,
+              "Token validation requires the live Figma API handler (works in server runtime, skipped in pure test contexts)"))
+  in
+  let (me_json, token_valid, token_detail) = me_check in
+  let file_access_check =
+    match file_key, token with
+    | None, _ -> (`Null, true, "No file_key supplied")
+    | Some _, None -> (`Null, false, "Cannot check file access without FIGMA_TOKEN")
+    | Some file_key, Some token ->
+        (try
+           match Figma_effects.Perform.get_file_meta ~token ~file_key () with
+           | Ok _ ->
+               (`Assoc [("file_key", `String file_key); ("status", `String "ok")], true,
+                "File metadata accessible with current token")
+           | Error err ->
+               let (kind, detail) = classify_access_error err in
+               (`Assoc [("file_key", `String file_key); ("kind", `String kind); ("raw", `String err)], false, detail)
+         with
+         | Effect.Unhandled _ ->
+             (`Assoc [("file_key", `String file_key); ("kind", `String "unavailable"); ("raw", `String "Figma API effect handler unavailable in this runtime")],
+              false,
+              "File access check requires the live Figma API handler (works in server runtime, skipped in pure test contexts)"))
+  in
+  let (file_access_json, file_access_ok, file_access_detail) = file_access_check in
+
   let checks = `List [
     mk_check "node" node_ok node_version;
     mk_check "playwright" playwright_ok (if playwright_ok then "ok (fallback renderer)" else "missing");
@@ -1835,10 +1899,16 @@ let handle_doctor _args : (Yojson.Safe.t, string) result =
     mk_check "render_script" render_script_ok render_script;
     mk_check "ssim_script" ssim_script_ok ssim_script;
     mk_check "claude-in-chrome" true "preferred renderer (Claude Code built-in, runtime detection)";
+    mk_check "figma_token_present" token_present (if token_present then "ok" else "missing");
+    mk_check "figma_token_valid" token_valid token_detail;
+    mk_check "figma_file_access" file_access_ok file_access_detail;
   ] in
 
   let hints =
     List.filter_map Fun.id [
+      if not token_present then Some "Set FIGMA_TOKEN first. On macOS, storing it in Keychain and exporting it in the start script is recommended." else None;
+      if token_present && not token_valid then Some "The token is present but invalid. Refresh the PAT in Figma Settings > Personal Access Tokens." else None;
+      if Option.is_some file_key && token_valid && not file_access_ok then Some "The token works, but this file is not accessible. Check file sharing, team membership, or whether you are using the right Figma account." else None;
       if not node_ok then Some "Install Node.js (node required for render/compare scripts)." else None;
       if node_ok && not playwright_ok then Some "Playwright missing - will use claude-in-chrome if available, otherwise install: npm i -D playwright && npx playwright install chromium." else None;
       if node_ok && (not pngjs_ok || not pixelmatch_ok) then Some "Install image deps: npm i -D pngjs pixelmatch." else None;
@@ -1850,7 +1920,13 @@ let handle_doctor _args : (Yojson.Safe.t, string) result =
   in
 
   let result = `Assoc [
-    ("status", `String (if required_ok then "ok" else "needs_attention"));
+    ("status", `String (if required_ok && token_valid && file_access_ok then "ok" else "needs_attention"));
+    ("auth", `Assoc [
+      ("token_present", `Bool token_present);
+      ("token_valid", `Bool token_valid);
+      ("me", me_json);
+    ]);
+    ("file_access", file_access_json);
     ("checks", checks);
     ("hints", `List (List.map (fun h -> `String h) hints));
   ] in
