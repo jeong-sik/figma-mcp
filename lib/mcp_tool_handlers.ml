@@ -24,7 +24,18 @@ let normalize_path path =
   try Some (Unix.realpath path) with Unix.Unix_error _ -> None
 
 let is_under_dir ~dir path =
-  match (normalize_path dir, normalize_path path) with
+  (* #164: non-existent file causes normalize_path to return None on macOS
+     where /tmp → /private/tmp symlink. Normalize parent dir as fallback. *)
+  let normalize_or_parent p =
+    match normalize_path p with
+    | Some _ as ok -> ok
+    | None ->
+        let parent = Filename.dirname p in
+        match normalize_path parent with
+        | Some parent_norm -> Some (Filename.concat parent_norm (Filename.basename p))
+        | None -> None
+  in
+  match (normalize_path dir, normalize_or_parent path) with
   | (Some dir_norm, Some path_norm) ->
       let prefix = if String.ends_with ~suffix:"/" dir_norm then dir_norm else dir_norm ^ "/" in
       path_norm = dir_norm || String.starts_with ~prefix path_norm
@@ -1047,7 +1058,7 @@ let handle_read_large_result args : (Yojson.Safe.t, string) result =
 (** 캐시 통계 핸들러 *)
 let handle_cache_stats _args : (Yojson.Safe.t, string) result =
   let stats = Figma_cache.stats () in
-  Ok stats
+  Ok (make_text_content (Yojson.Safe.pretty_to_string stats))
 
 (** 캐시 무효화 핸들러 *)
 let handle_cache_invalidate args : (Yojson.Safe.t, string) result =
@@ -1059,7 +1070,8 @@ let handle_cache_invalidate args : (Yojson.Safe.t, string) result =
     | Some fk, None -> sprintf "Cache invalidated for file: %s" fk
     | Some fk, Some nid -> sprintf "Cache invalidated for node: %s/%s" fk nid
   in
-  Ok (`Assoc [("status", `String "ok"); ("message", `String message)])
+  let result = `Assoc [("status", `String "ok"); ("message", `String message)] in
+  Ok (make_text_content (Yojson.Safe.to_string result))
 
 (** Code Connect index cache (in-memory).
     This is intentionally small and bounded to avoid unbounded memory growth. *)
@@ -1343,6 +1355,12 @@ let handle_category category_name args =
   let tool_param = get_string "tool" args in
   let args_param = member "args" args in
 
+  (* #161: mode validation을 Eio 컨텍스트 진입 전에 즉시 수행 *)
+  match mode_param with
+  | Some m when m <> "list" && m <> "describe" && m <> "call" ->
+      Error (sprintf "Invalid mode: %s (use list|describe|call)" m)
+  | _ ->
+
   let find_tool_def (full_name : string) : tool_def option =
     List.find_opt (fun (t : tool_def) -> t.name = full_name) all_detailed_tools
   in
@@ -1353,8 +1371,7 @@ let handle_category category_name args =
       | Some "list" -> `List
       | Some "describe" -> `Describe
       | Some "call" -> `Call
-      | Some other ->
-          raise (Invalid_argument (sprintf "Invalid mode: %s (use list|describe|call)" other))
+      | Some _ -> assert false (* validated above *)
       | None ->
           match tool_param, args_param with
           | None, _ -> `List
@@ -1431,25 +1448,34 @@ let handle_category category_name args =
                let full_name = "figma_" ^ tool_name in
                match Hashtbl.find_opt handler_registry full_name with
                | Some handler ->
-                   (match args_param with
-                    | Some actual_args ->
-                        handler actual_args
+                   let actual_args = match args_param with
+                    | Some a -> Some a
                     | None ->
                         (* Flat params fallback: mode/tool을 제외한 나머지를 args로 취급 *)
-                        let implicit_args =
-                          match args with
-                          | `Assoc pairs ->
-                              let filtered = List.filter (fun (k, _) ->
-                                k <> "mode" && k <> "tool") pairs in
-                              if filtered = [] then None
-                              else Some (`Assoc filtered)
-                          | _ -> None
-                        in
-                        (match implicit_args with
-                         | Some actual_args -> handler actual_args
-                         | None ->
-                             Error (sprintf "Missing required parameter: args (mode=call). \
-                               Usage: figma_%s mode=call tool=%s args={...}" category_name tool_name)))
+                        match args with
+                        | `Assoc pairs ->
+                            let filtered = List.filter (fun (k, _) ->
+                              k <> "mode" && k <> "tool") pairs in
+                            if filtered = [] then None
+                            else Some (`Assoc filtered)
+                        | _ -> None
+                   in
+                   (match actual_args with
+                    | None ->
+                        Error (sprintf "Missing required parameter: args (mode=call). \
+                          Usage: figma_%s mode=call tool=%s args={...}" category_name tool_name)
+                    | Some a ->
+                        (* #160: handler 결과가 make_text_content 형태가 아니면 래핑 *)
+                        (match handler a with
+                         | Ok json ->
+                             let has_content =
+                               match json with
+                               | `Assoc fields -> List.mem_assoc "content" fields
+                               | _ -> false
+                             in
+                             if has_content then Ok json
+                             else Ok (make_text_content (Yojson.Safe.pretty_to_string json))
+                         | Error msg -> Error msg))
                | None ->
                    Error (sprintf "Tool '%s' exists but handler not found. Try 'figma_%s' directly." tool_name tool_name))
   with

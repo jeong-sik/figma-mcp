@@ -399,7 +399,7 @@ let handle_get_node_summary args : (Yojson.Safe.t, string) result =
                   | `String s -> s
                   | _ -> "UNKNOWN"
                 in
-                Ok (`Assoc [
+                let summary = `Assoc [
                   ("node_id", `String node_id);
                   ("name", `String node_name);
                   ("type", `String node_type);
@@ -407,7 +407,8 @@ let handle_get_node_summary args : (Yojson.Safe.t, string) result =
                   ("children", `List children_summary);
                   ("truncated", `Bool (children_count > max_children));
                   ("hint", `String "Use figma_get_node_chunk for progressive loading of specific depth ranges");
-                ])))
+                ] in
+                Ok (make_text_content (Yojson.Safe.pretty_to_string summary))))
   | _ -> Error "Missing required parameters: file_key/node_id or url, token"
 
 let handle_get_node_chunk args : (Yojson.Safe.t, string) result =

@@ -93,11 +93,13 @@ let extract_typography nodes =
   ) nodes
 
 let extract_spacing nodes : spacing_token list =
+  (* #165: float Hashtbl key hashing 불안정 → int key로 정규화하여 dedup *)
   let seen = Hashtbl.create 16 in
   let add_if_new value : spacing_token option =
-    if value > 0. && not (Hashtbl.mem seen value) then begin
-      Hashtbl.add seen value true;
-      Some { name = Printf.sprintf "space-%.0f" value; value }
+    let rounded = Float.to_int (Float.round value) in
+    if rounded > 0 && not (Hashtbl.mem seen rounded) then begin
+      Hashtbl.add seen rounded true;
+      Some { name = Printf.sprintf "space-%d" rounded; value = Float.of_int rounded }
     end
     else None
   in

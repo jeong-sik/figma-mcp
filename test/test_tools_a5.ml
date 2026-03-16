@@ -22,6 +22,15 @@
 
 open Alcotest
 
+(** Extract JSON from make_text_content wrapper:
+    {"content":[{"type":"text","text":"<json-string>"}]} → parsed JSON *)
+let unwrap_text_content json =
+  let module U = Yojson.Safe.Util in
+  match U.member "content" json with
+  | `List [`Assoc _ as item] ->
+    Yojson.Safe.from_string (U.to_string (U.member "text" item))
+  | _ -> json
+
 (* ============================================================
    Group 1: handle_parse_url — pure URL parsing
    ============================================================ *)
@@ -103,8 +112,8 @@ let test_parse_url_no_node_id () =
 let test_cache_stats () =
   match Mcp_tools.handle_cache_stats `Null with
   | Ok json ->
-    (* cache stats returns `Assoc with l1_entries, l2_entries, etc. *)
-    (match json with
+    let stats = unwrap_text_content json in
+    (match stats with
      | `Assoc fields ->
        check bool "has l1_entries" true (List.mem_assoc "l1_entries" fields)
      | _ -> ())
@@ -113,8 +122,9 @@ let test_cache_stats () =
 let test_cache_invalidate_all () =
   match Mcp_tools.handle_cache_invalidate (`Assoc []) with
   | Ok json ->
-    let status = Yojson.Safe.Util.(json |> member "status" |> to_string) in
-    let message = Yojson.Safe.Util.(json |> member "message" |> to_string) in
+    let result = unwrap_text_content json in
+    let status = Yojson.Safe.Util.(result |> member "status" |> to_string) in
+    let message = Yojson.Safe.Util.(result |> member "message" |> to_string) in
     check string "status ok" "ok" status;
     check bool "all invalidated" true
       (try let _ = Str.search_forward (Str.regexp_string "All") message 0 in true with Not_found -> false)
@@ -123,7 +133,8 @@ let test_cache_invalidate_all () =
 let test_cache_invalidate_file_key () =
   match Mcp_tools.handle_cache_invalidate (`Assoc [("file_key", `String "test-file-key")]) with
   | Ok json ->
-    let message = Yojson.Safe.Util.(json |> member "message" |> to_string) in
+    let result = unwrap_text_content json in
+    let message = Yojson.Safe.Util.(result |> member "message" |> to_string) in
     check bool "contains file key" true
       (try let _ = Str.search_forward (Str.regexp_string "test-file-key") message 0 in true with Not_found -> false)
   | Error msg -> fail msg
@@ -131,7 +142,8 @@ let test_cache_invalidate_file_key () =
 let test_cache_invalidate_file_and_node () =
   match Mcp_tools.handle_cache_invalidate (`Assoc [("file_key", `String "fk1"); ("node_id", `String "1:2")]) with
   | Ok json ->
-    let message = Yojson.Safe.Util.(json |> member "message" |> to_string) in
+    let result = unwrap_text_content json in
+    let message = Yojson.Safe.Util.(result |> member "message" |> to_string) in
     check bool "contains fk1/1:2" true
       (try let _ = Str.search_forward (Str.regexp_string "fk1/1:2") message 0 in true with Not_found -> false)
   | Error msg -> fail msg
