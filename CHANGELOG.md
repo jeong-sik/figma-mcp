@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.6] - 2026-03-16
+
+### Fixed
+- `/metrics` endpoint now public (auth-free for Prometheus scraping) (#151)
+- `try` scope in `handle_category` extended to cover `effective_mode` binding -- invalid mode no longer loses JSON-RPC id (#155)
+- Remove phantom `get_style` from components category (handler not implemented) (#156)
+- Token override warning log when `FIGMA_TOKEN` env takes precedence (#157)
+
+### Added
+- `code` category with `codegen` and `code_connect` tools (#153)
+- Flat params fallback for `mode=call` when `args` key is missing (#154)
+
 ## [0.8.1] - 2026-02-19
 
 ### Added
