@@ -1,7 +1,7 @@
 # Figma MCP Server
 
-[![Version](https://img.shields.io/badge/version-0.8.4-blue.svg)](https://github.com/jeong-sik/figma-mcp)
-[![Coverage](https://img.shields.io/badge/coverage-87.54%25-brightgreen.svg)]()
+[![Version](https://img.shields.io/badge/version-0.9.0-blue.svg)](https://github.com/jeong-sik/figma-mcp)
+[![Coverage](https://img.shields.io/badge/coverage-85.96%25-brightgreen.svg)]()
 [![OCaml](https://img.shields.io/badge/OCaml-5.x-orange.svg)](https://ocaml.org/)
 [![MCP](https://img.shields.io/badge/MCP-2025--11--25-blue.svg)](https://spec.modelcontextprotocol.io/)
 [![Status](https://img.shields.io/badge/status-Personal%20Project-lightgrey.svg)]()
@@ -38,11 +38,15 @@ export FIGMA_TOKEN="YOUR_TOKEN"
 - **Fidelity DSL** -- structured JSON preserving layout/paint/border/typography
 - **Type-safe parsing** -- OCaml variant/ADT-based Figma JSON parser
 - **Native binary** -- single executable, no runtime dependency
+- **Agent-first planning** -- `figma_get_planning_context` + `figma_validate_agent_plan` for structured task decomposition
+- **Eval harness** -- CIEDE2000, SSIM, pass@k trajectory for automated quality measurement
+- **Visual strict CI gate** -- pass/fail thresholds for design fidelity in CI pipelines
+- **Category router** -- 6 domain categories (core/visual/export/components/code/team) with `mode=list|call|describe`
 - **Request deduplication** -- Eio.Promise-based in-flight coalescing
 - **Concurrency limiting** -- Eio.Semaphore-based Figma API rate limiting
 - **Plugin bridge** -- bidirectional real-time sync with Figma Desktop plugin
-- **gRPC streaming** -- server streaming for large file traversal
-- **Multi-metric similarity** -- CIEDE2000 color + IoU layout comparison (B1/B2 done)
+- **gRPC streaming** -- 7 RPC methods for large file traversal
+- **Multi-metric similarity** -- CIEDE2000 color + IoU layout + SSIM visual comparison
 - **Visual verification** -- SSIM-based rendered HTML vs Figma comparison
 
 ## Capabilities
@@ -53,7 +57,7 @@ Capabilities: tools / resources / prompts
 
 | Capability | Description |
 |------------|-------------|
-| **tools** | 61 internal tools. Exposed as 5 category routers + 15 featured = 20 items in `tools/list` |
+| **tools** | 61 internal tools. Exposed as 6 category routers + 15 featured = 21 items in `tools/list` |
 | **resources** | `figma://docs/*` guides, `figma://tokens/{file_key}` dynamic tokens |
 | **prompts** | `figma_fidelity_review` prompt |
 
@@ -68,7 +72,7 @@ figma://tokens/{file_key}  # Per-file design token (dynamic)
 
 ## Tool Overview
 
-61 tools registered in `all_detailed_tools`. The `tools/list` endpoint exposes 20 items: 5 category routers + 15 featured tools.
+61 tools registered in `all_detailed_tools`. The `tools/list` endpoint exposes 21 items: 6 category routers + 15 featured tools.
 
 ### Category Routers
 
@@ -81,6 +85,7 @@ Each category router supports `mode=list|call|describe`:
 | `figma_team` | 8 | Project/file listing, team crawl |
 | `figma_export` | 4 | Image export, tokens, image fills |
 | `figma_components` | 8 | Components, styles, variables, code connect |
+| `figma_code` | 2 | Codegen, Code Connect |
 
 ### Featured Tools (direct access)
 
@@ -223,6 +228,8 @@ Server streaming for large Figma files. Use when responses exceed typical HTTP p
 | `GetSplitStream` | server streaming | Split large node trees |
 | `GetFileMeta` | unary | File metadata |
 | `PlanTasks` | server streaming | Divide-and-conquer task planning |
+| `GetPlanningContext` | unary | Agent-first planning context |
+| `ValidateAgentPlan` | unary | Plan structure validation |
 
 ```bash
 grpcurl -plaintext -import-path proto -proto figma.proto \
@@ -279,7 +286,7 @@ Color comparison uses CIEDE2000 with JND threshold (ΔE\*₀₀ < 2.3 = indistin
 
 ## Testing
 
-Coverage: 87.54% (bisect_ppx, v0.8.2).
+Coverage: 85.96% (bisect_ppx, v0.9.0).
 
 ```bash
 # Unit tests
@@ -295,7 +302,7 @@ dune exec ./test/bench_p0.exe
 echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' | ./start-figma-mcp.sh
 ```
 
-98 test files in `test/`.
+105 test files in `test/`.
 
 ## Environment Variables
 
@@ -330,8 +337,8 @@ Test: `alcotest (>= 1.8.0)`, `bisect_ppx (>= 2.8)`.
 ## Project Structure
 
 ```
-lib/           52 .ml + 6 .mli files (core logic)
-test/          98 .ml test files
+lib/           73 .ml + .mli files (core logic)
+test/          105 .ml test files
 plugin/        Figma Desktop plugin (code.js, manifest.json, ui.html)
 proto/         gRPC service definition (figma.proto)
 scripts/       Automation (render, SSIM compare, smoke test)
