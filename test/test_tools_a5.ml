@@ -409,17 +409,14 @@ let test_category_call_tool_not_found () =
   | Ok _ -> fail "Expected error"
 
 let test_category_invalid_mode () =
-  (* Invalid mode raises Invalid_argument before the try/with block *)
-  let raised = ref false in
-  (try
-    let _ = Mcp_tools.handle_category "core" (`Assoc [
-      ("mode", `String "invalid_mode");
-    ]) in ()
-  with Invalid_argument msg ->
-    raised := true;
+  (* Invalid mode now returns Error instead of raising *)
+  match Mcp_tools.handle_category "core" (`Assoc [
+    ("mode", `String "invalid_mode");
+  ]) with
+  | Error msg ->
     check bool "invalid mode msg" true
-      (try let _ = Str.search_forward (Str.regexp_string "Invalid mode") msg 0 in true with Not_found -> false));
-  check bool "raised Invalid_argument" true !raised
+      (try let _ = Str.search_forward (Str.regexp_string "Invalid mode") msg 0 in true with Not_found -> false)
+  | Ok _ -> fail "expected Error for invalid mode"
 
 let test_category_auto_list () =
   (* No tool, no args => auto-list *)

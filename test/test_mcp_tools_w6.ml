@@ -1394,18 +1394,11 @@ let test_handle_category_call_parse_url_implicit () =
 
 let test_handle_category_invalid_mode_caught () =
   let args = `Assoc [("mode", `String "execute")] in
-  (* handle_category raises Invalid_argument for unknown modes *)
-  (try
-    match handle_category "core" args with
-    | Error msg ->
-        check bool "mentions invalid" true (Mcp_helpers.string_contains ~haystack:msg ~needle:"invalid" || Mcp_helpers.string_contains ~haystack:msg ~needle:"Invalid")
-    | Ok _ -> fail "Expected Error for invalid mode"
-   with
-   | Invalid_argument msg ->
-       check bool "mentions invalid" true (Mcp_helpers.string_contains ~haystack:msg ~needle:"Invalid" || Mcp_helpers.string_contains ~haystack:msg ~needle:"invalid")
-   | exn ->
-       (* Other exception: still acceptable, the branch was exercised *)
-       check bool "exception raised" true (String.length (Printexc.to_string exn) > 0))
+  (* Invalid mode now returns Error instead of raising *)
+  match handle_category "core" args with
+  | Error msg ->
+      check bool "mentions invalid" true (Mcp_helpers.string_contains ~haystack:msg ~needle:"invalid" || Mcp_helpers.string_contains ~haystack:msg ~needle:"Invalid")
+  | Ok _ -> fail "Expected Error for invalid mode"
 
 let handle_category_extra_tests = [
   "list all categories", `Quick, test_handle_category_list_all_categories;

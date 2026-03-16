@@ -824,14 +824,13 @@ let test_handle_category_call_unknown_tool () =
 
 let test_handle_category_invalid_mode () =
   let args = `Assoc [("mode", `String "invalid_mode")] in
-  (* handle_category raises Invalid_argument for unknown modes *)
-  (try
-     let _result = handle_category "core" args in
-     fail "expected Invalid_argument for invalid mode"
-   with Invalid_argument msg ->
-     check bool "mentions invalid" true
-       (Mcp_helpers.string_contains ~haystack:msg ~needle:"invalid" ||
-        Mcp_helpers.string_contains ~haystack:msg ~needle:"Invalid"))
+  (* Invalid mode now returns Error instead of raising *)
+  match handle_category "core" args with
+  | Error msg ->
+      check bool "mentions invalid" true
+        (Mcp_helpers.string_contains ~haystack:msg ~needle:"invalid" ||
+         Mcp_helpers.string_contains ~haystack:msg ~needle:"Invalid")
+  | Ok _ -> fail "expected Error for invalid mode"
 
 let test_handle_category_unknown_category () =
   let args = `Assoc [("mode", `String "list")] in

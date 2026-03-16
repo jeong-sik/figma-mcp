@@ -71,6 +71,7 @@ let sdk_tool_of_local (tool : Figma_mcp_protocol.tool_def) : MT.tool =
     input_schema = tool.input_schema;
     title = None;
     annotations = None;
+    icon = None;
   }
 
 let sdk_resource_of_local (resource : Figma_mcp_protocol.mcp_resource) : MT.resource =
@@ -79,6 +80,7 @@ let sdk_resource_of_local (resource : Figma_mcp_protocol.mcp_resource) : MT.reso
     name = resource.name;
     description = Some resource.description;
     mime_type = Some resource.mime_type;
+    icon = None;
   }
 
 let sdk_resource_template_of_local
@@ -88,6 +90,7 @@ let sdk_resource_template_of_local
     name = template.name;
     description = Some template.description;
     mime_type = Some template.mime_type;
+    icon = None;
   }
 
 let sdk_prompt_of_local (prompt : Figma_mcp_protocol.mcp_prompt) : MT.prompt =
@@ -102,6 +105,7 @@ let sdk_prompt_of_local (prompt : Figma_mcp_protocol.mcp_prompt) : MT.prompt =
     name = prompt.name;
     description = Some prompt.description;
     arguments = Some (List.map sdk_arg_of_local prompt.arguments);
+    icon = None;
   }
 
 let normalize_local_tool_result json =

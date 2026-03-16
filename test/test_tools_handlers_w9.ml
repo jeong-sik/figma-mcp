@@ -894,14 +894,13 @@ let () =
      mcp_tools.ml: handle_category (edge cases)
      ================================================================= *)
   let test_category_invalid_mode () =
-    (* Invalid mode raises Invalid_argument before try-with catches it *)
-    try
-      ignore (Mcp_tools.handle_category "explore" (`Assoc [("mode", `String "bogus")]));
-      fail "expected Invalid_argument"
-    with Invalid_argument msg ->
-      check bool "says invalid mode" true
-        (try ignore (Str.search_forward (Str.regexp_string "Invalid mode") msg 0); true
-         with Not_found -> false)
+    (* Invalid mode now returns Error instead of raising *)
+    match Mcp_tools.handle_category "explore" (`Assoc [("mode", `String "bogus")]) with
+    | Error msg ->
+        check bool "says invalid mode" true
+          (try ignore (Str.search_forward (Str.regexp_string "Invalid mode") msg 0); true
+           with Not_found -> false)
+    | Ok _ -> fail "expected Error for invalid mode"
   in
 
   let test_category_describe_missing_tool () =

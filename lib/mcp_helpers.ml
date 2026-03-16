@@ -365,7 +365,13 @@ let resolve_token args =
      request-provided tokens to override it. This avoids accidental/abusive
      secret injection via tool args (e.g., MCP clients or logs). *)
   match Sys.getenv_opt "FIGMA_TOKEN" with
-  | Some t when String.length t > 0 -> Some t
+  | Some t when String.length t > 0 ->
+      (match get_string "token" args with
+       | Some _ ->
+           Printf.eprintf "[figma-mcp] Warning: explicit token parameter ignored \
+             (FIGMA_TOKEN env takes precedence for security)\n%!"
+       | None -> ());
+      Some t
   | _ ->
     match get_string "token" args with
     | Some t when String.length t > 0 ->
