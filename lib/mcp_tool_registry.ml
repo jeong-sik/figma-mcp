@@ -83,6 +83,7 @@ let all_handlers_sync : (string * tool_handler_sync) list = [
   ("figma_team", wrap_sync_pure (handle_category "team"));
   ("figma_export", wrap_sync_pure (handle_category "export"));
   ("figma_components", wrap_sync_pure (handle_category "components"));
+  ("figma_code", wrap_sync_pure (handle_category "code"));
 ]
 
 let find_sync_handler name = List.assoc_opt name all_handlers_sync

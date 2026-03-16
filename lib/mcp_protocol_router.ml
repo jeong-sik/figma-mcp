@@ -7,6 +7,7 @@ let is_public_path meth path =
   match (meth, path) with
   | (`OPTIONS, _) -> true
   | (`GET, "/health") -> true
+  | (`GET, "/metrics") -> true
   | _ -> false
 
 let normalize_env value =

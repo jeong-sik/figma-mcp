@@ -324,7 +324,7 @@ let test_ipp_options () = check_b "opt" true (is_public_path `OPTIONS "/x")
 let test_ipp_health () = check_b "health" true (is_public_path `GET "/health")
 let test_ipp_post_h () = check_b "post h" false (is_public_path `POST "/health")
 let test_ipp_get_r () = check_b "get /" false (is_public_path `GET "/")
-let test_ipp_get_m () = check_b "metrics" false (is_public_path `GET "/metrics")
+let test_ipp_get_m () = check_b "metrics" true (is_public_path `GET "/metrics")
 
 (* ---- normalize_env ---- *)
 

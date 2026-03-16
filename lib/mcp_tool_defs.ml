@@ -756,7 +756,10 @@ let tool_categories = [
   { name = "components";
     description = "컴포넌트/스타일/변수";
     tools = ["get_file_components"; "get_file_component_sets"; "get_file_styles";
-             "get_component"; "get_component_set"; "get_style"; "get_variables"; "code_connect"] };
+             "get_component"; "get_component_set"; "get_variables"] };
+  { name = "code";
+    description = "코드 생성/연결";
+    tools = ["codegen"; "code_connect"] };
 ]
 
 (** 카테고리에서 도구 찾기 *)

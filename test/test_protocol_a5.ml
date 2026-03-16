@@ -141,7 +141,7 @@ let test_ipp_get_root () =
   check bool "GET /" false (is_public_path `GET "/")
 
 let test_ipp_get_metrics () =
-  check bool "GET /metrics" false (is_public_path `GET "/metrics")
+  check bool "GET /metrics" true (is_public_path `GET "/metrics")
 
 let test_ipp_post_mcp () =
   check bool "POST /mcp" false (is_public_path `POST "/mcp")

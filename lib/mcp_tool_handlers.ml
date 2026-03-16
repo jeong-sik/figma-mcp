@@ -1347,22 +1347,21 @@ let handle_category category_name args =
     List.find_opt (fun (t : tool_def) -> t.name = full_name) all_detailed_tools
   in
 
-  let effective_mode : [ `List | `Describe | `Call ] =
-    match mode_param with
-    | Some "list" -> `List
-    | Some "describe" -> `Describe
-    | Some "call" -> `Call
-    | Some other ->
-        (* Fail fast for invalid modes: prevents accidental calls when user mistypes. *)
-        raise (Invalid_argument (sprintf "Invalid mode: %s (use list|describe|call)" other))
-    | None ->
-        match tool_param, args_param with
-        | None, _ -> `List
-        | Some _, None -> `Describe
-        | Some _, Some _ -> `Call
-  in
-
   try
+    let effective_mode : [ `List | `Describe | `Call ] =
+      match mode_param with
+      | Some "list" -> `List
+      | Some "describe" -> `Describe
+      | Some "call" -> `Call
+      | Some other ->
+          raise (Invalid_argument (sprintf "Invalid mode: %s (use list|describe|call)" other))
+      | None ->
+          match tool_param, args_param with
+          | None, _ -> `List
+          | Some _, None -> `Describe
+          | Some _, Some _ -> `Call
+    in
+
     match effective_mode with
     | `List ->
         (match List.find_opt (fun c -> c.name = category_name) tool_categories with
@@ -1433,10 +1432,24 @@ let handle_category category_name args =
                match Hashtbl.find_opt handler_registry full_name with
                | Some handler ->
                    (match args_param with
-                    | None ->
-                        Error "Missing required parameter: args (mode=call)"
                     | Some actual_args ->
-                        handler actual_args)
+                        handler actual_args
+                    | None ->
+                        (* Flat params fallback: mode/tool을 제외한 나머지를 args로 취급 *)
+                        let implicit_args =
+                          match args with
+                          | `Assoc pairs ->
+                              let filtered = List.filter (fun (k, _) ->
+                                k <> "mode" && k <> "tool") pairs in
+                              if filtered = [] then None
+                              else Some (`Assoc filtered)
+                          | _ -> None
+                        in
+                        (match implicit_args with
+                         | Some actual_args -> handler actual_args
+                         | None ->
+                             Error (sprintf "Missing required parameter: args (mode=call). \
+                               Usage: figma_%s mode=call tool=%s args={...}" category_name tool_name)))
                | None ->
                    Error (sprintf "Tool '%s' exists but handler not found. Try 'figma_%s' directly." tool_name tool_name))
   with
