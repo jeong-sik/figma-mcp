@@ -7,17 +7,90 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.8.6] - 2026-03-16
-
-### Fixed
-- `/metrics` endpoint now public (auth-free for Prometheus scraping) (#151)
-- `try` scope in `handle_category` extended to cover `effective_mode` binding -- invalid mode no longer loses JSON-RPC id (#155)
-- Remove phantom `get_style` from components category (handler not implemented) (#156)
-- Token override warning log when `FIGMA_TOKEN` env takes precedence (#157)
+## [0.9.0] - 2026-03-16
 
 ### Added
+- CHANGELOG backfill for versions 0.8.2 through 0.8.7
+- Coverage push: 110 new tests across 7 modules
+
+### Changed
+- README updated to reflect v0.9.0 capabilities (agent-first planning, eval harness, visual CI gate, code category)
+
+## [0.8.7] - 2026-03-16
+
+### Fixed
+- `get_node_summary` returns empty response on missing children (#160)
+- Category router hangs 300s on invalid mode parameter (#161)
+- `cache_stats` returns empty response (#162)
+- `cache_invalidate` returns empty response (silent success) (#163)
+- `read_large_result` shows wrong error on macOS `/tmp` symlink (#164)
+- `export_tokens` generates duplicate CSS spacing variables (#165)
+
+## [0.8.6] - 2026-03-16
+
+### Added
+- Agent-first planning: `figma_get_planning_context` and `figma_validate_agent_plan` (#148)
+- Visual strict CI gate with pass/fail thresholds (#129)
+- Eval harness with CIEDE2000, SSIM, pass@k trajectory (#130)
+- Multi-metric similarity proof experiment (#126)
 - `code` category with `codegen` and `code_connect` tools (#153)
 - Flat params fallback for `mode=call` when `args` key is missing (#154)
+- Figma access diagnostics in `figma_doctor` (#150)
+
+### Changed
+- Split MCP transport into modular components (#148)
+- Split figma API handlers by domain (#145)
+- Consolidate figma_crawl JSON helpers into Mcp_helpers (#146)
+- Remove local path fallbacks and split tool definitions (#143)
+- Require explicit Figma runtime endpoints (#147)
+
+### Fixed
+- Narrow 31 catch-all exception handlers to specific types (#144)
+- Close TCP flow to prevent FD leak in accept loop (#149)
+- `/metrics` endpoint now public (auth-free for Prometheus scraping) (#151)
+- `try` scope in `handle_category` extended to cover `effective_mode` binding (#155)
+- Remove phantom `get_style` from components category (#156)
+- Token override warning log when `FIGMA_TOKEN` env takes precedence (#157)
+
+## [0.8.4] - 2026-03-07
+
+### Added
+- Plugin onboarding improvements and reconnect recovery (#134)
+- Authoritative `figma_plugin` actions reference documentation (#136)
+
+### Changed
+- Consolidate 3 duplicate `string_contains` implementations (#137)
+- Hoist `Str.regexp` to module top-level in 4 files (#138)
+- Align figma protocol core with MCP SDK wire helpers (#140, #141)
+
+### Fixed
+- Wrap `safe_exec` blocking calls in `Eio_unix.run_in_systhread` (#139)
+- Replace broken Str non-greedy regex, remove `assert false` branches (#142)
+
+## [0.8.3] - 2026-03-01
+
+### Added
+- Error logging in `figma_crawl` for file fetch failures (#131)
+- Error accumulation verification test (#132)
+- CodeRabbit review configuration (#127)
+
+### Changed
+- Plugin action routing: remove fuzzy unknown-action heuristic (#128)
+- README rewritten to match v0.8.2 state (#125)
+
+### Fixed
+- Levenshtein distance calculation in plugin action suggestions (#128)
+- Plugin `suggest_action` fallback for short commands (#128)
+
+## [0.8.2] - 2026-02-19
+
+### Added
+- Plugin Quality Panel: SSIM score, layout metrics, color analysis (#121)
+- Plugin Code Preview with syntax highlighting (#121)
+- Design Tokens Export from plugin Bridge API (#121)
+
+### Changed
+- Plugin UI modernization: dark theme, CSS variables, typography (#121)
 
 ## [0.8.1] - 2026-02-19
 

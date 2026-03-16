@@ -528,3 +528,8 @@
 (test
  (name test_trajectory)
  (libraries figma_mcp alcotest yojson unix))
+
+; Coverage push for v0.9.0 release (pure functions across 7 modules)
+(test
+ (name test_coverage_push_v090)
+ (libraries figma_mcp alcotest yojson str unix httpun mcp_protocol))
