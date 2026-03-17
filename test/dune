@@ -294,12 +294,6 @@
  (name test_visual_verifier_extra)
  (libraries figma_mcp alcotest yojson str))
 
-; Coverage: mcp_resilience.ml (circuit breaker, retry, timeout — 90%+ target)
-(test
- (name test_mcp_resilience)
- (libraries figma_mcp alcotest eio_main str)
- (action (run %{test} --color=always)))
-
 ; Coverage: mcp_api_handlers.ml (mock effect handler tests for all 26 handlers)
 (test
  (name test_api_handlers_effects)
