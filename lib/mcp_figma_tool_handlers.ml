@@ -16,7 +16,17 @@ let get_string_field = Mcp_http_helpers.get_string_field
 let get_int_field = Mcp_http_helpers.get_int_field
 let get_bool_field = Mcp_http_helpers.get_bool_field
 let get_payload_field = Mcp_http_helpers.get_payload_field
-let env_int = Mcp_agent_queue.env_int
+
+let parse_positive_int value =
+  try
+    let v = int_of_string value in
+    if v > 0 then Some v else None
+  with Failure _ -> None
+
+let env_int ~name ~default =
+  match Sys.getenv_opt name with
+  | Some v -> (match parse_positive_int v with Some n -> n | None -> default)
+  | None -> default
 
 let allow_no_auth =
   ref (Mcp_http_auth.env_truthy "FIGMA_MCP_ALLOW_NO_AUTH"
@@ -2051,4 +2061,3 @@ body { font-family: 'Inter', -apple-system, sans-serif; }
 	                   Response.json (Yojson.Safe.to_string result) reqd)
         end
   )
-
