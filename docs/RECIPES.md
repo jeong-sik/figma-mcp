@@ -12,29 +12,20 @@ This server no longer exposes agent-planning or gRPC transport flows. Use the v2
 ./start-figma-mcp-http.sh --port 8940
 ```
 
-2. Parse a Figma URL:
-
-```text
-figma_parse_url
-  url: "https://www.figma.com/file/KEY/NAME?node-id=123-456"
-```
-
-3. Inspect large selections safely:
+2. Inspect large selections safely from a Figma URL:
 
 ```text
 figma_get_metadata
-  file_key: "KEY"
-  node_id: "123:456"
+  url: "https://www.figma.com/file/KEY/NAME?node-id=123-456"
   depth: 2
   max_children: 100
 ```
 
-4. Fetch full implementation context:
+3. Fetch full implementation context:
 
 ```text
 figma_get_design_context
-  file_key: "KEY"
-  node_id: "123:456"
+  url: "https://www.figma.com/file/KEY/NAME?node-id=123-456"
   include_variables: true
 ```
 

@@ -1,5 +1,12 @@
 open Alcotest
 
+let contains ~needle haystack =
+  let re = Str.regexp_string needle in
+  try
+    ignore (Str.search_forward re haystack 0);
+    true
+  with Not_found -> false
+
 let expected_tools =
   [
     "figma_get_design_context";
@@ -33,9 +40,18 @@ let test_initialize_instructions () =
     }
   in
   let response = Figma_mcp_protocol.process_request_sync server request in
-  let response_str = Yojson.Safe.to_string response in
-  check bool "mentions v2 surface" true
-    (String.contains response_str '2' || String.length response_str > 0)
+  let open Yojson.Safe.Util in
+  let instructions =
+    response |> member "result" |> member "instructions" |> to_string
+  in
+  check bool "mentions design context" true
+    (contains ~needle:"figma_get_design_context" instructions);
+  check bool "mentions metadata" true
+    (contains ~needle:"figma_get_metadata" instructions);
+  check bool "omits removed parse tool" false
+    (contains ~needle:"figma_parse_url" instructions);
+  check bool "omits removed summary tool" false
+    (contains ~needle:"figma_get_node_summary" instructions)
 
 let () =
   run "v2-surface"
