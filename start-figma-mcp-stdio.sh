@@ -34,6 +34,17 @@ fi
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
+for arg in "$@"; do
+  case "$arg" in
+    -h|--help)
+      echo "Usage:"
+      echo "  ./start-figma-mcp-stdio.sh              # stdio mode"
+      echo "  ./start-figma-mcp-stdio.sh --port 8940  # HTTP mode"
+      exit 0
+      ;;
+  esac
+done
+
 EXPECTED_VERSION=""
 if [ -f "$SCRIPT_DIR/dune-project" ]; then
   EXPECTED_VERSION=$(awk '/^[[:space:]]*[(]version[[:space:]]+/ { gsub(/[()]/, "", $2); print $2; exit }' "$SCRIPT_DIR/dune-project")
@@ -120,7 +131,7 @@ if [ -z "$FIGMA_EXE" ]; then
     echo "Error: dune not found. Install dune or download binary manually." >&2
     exit 1
   fi
-  dune build "./bin/$BINARY_NAME" >&2
+  dune build --root "$SCRIPT_DIR" "./bin/$BINARY_NAME" >&2
 
   if [ -x "$WORKSPACE_EXE" ]; then
     FIGMA_EXE="$WORKSPACE_EXE"

@@ -1,6 +1,6 @@
 #!/bin/bash
 # Figma MCP Server (HTTP) - Start Script
-# Usage: ./start-figma-mcp-http.sh [--port PORT] [--grpc-port PORT] [--host HOST] [--public] [--allow-no-auth]
+# Usage: ./start-figma-mcp-http.sh [--port PORT] [--host HOST] [--public] [--allow-no-auth]
 
 set -e
 
@@ -38,7 +38,6 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
 PORT="${FIGMA_MCP_PORT:-8940}"
-GRPC_PORT="${FIGMA_MCP_GRPC_PORT:-}"
 HOST="${FIGMA_MCP_HOST:-127.0.0.1}"
 PUBLIC="${FIGMA_MCP_PUBLIC:-}"
 ALLOW_NO_AUTH="${FIGMA_MCP_ALLOW_NO_AUTH:-}"
@@ -77,14 +76,6 @@ while [[ $# -gt 0 ]]; do
       HOST="${1#*=}"
       shift 1
       ;;
-    --grpc-port)
-      GRPC_PORT="$2"
-      shift 2
-      ;;
-    --grpc-port=*)
-      GRPC_PORT="${1#*=}"
-      shift 1
-      ;;
     --public)
       PUBLIC="1"
       shift 1
@@ -94,9 +85,8 @@ while [[ $# -gt 0 ]]; do
       shift 1
       ;;
     -h|--help)
-      echo "Usage: $0 [--port PORT] [--grpc-port PORT] [--host HOST] [--public] [--allow-no-auth]"
+      echo "Usage: $0 [--port PORT] [--host HOST] [--public] [--allow-no-auth]"
       echo "  --port PORT  Server port (default: 8940)"
-      echo "  --grpc-port PORT  gRPC port (optional, enables streaming)"
       echo "  --host HOST  Host to bind (default: 127.0.0.1)"
       echo "  --public  Allow non-loopback host (sets FIGMA_MCP_PUBLIC=1)"
       echo "  --allow-no-auth  Allow running without API key (not recommended)"
@@ -151,7 +141,7 @@ if [ -z "$FIGMA_EXE" ]; then
     echo "Error: dune not found. Install dune or build figma-mcp binary first." >&2
     exit 1
   fi
-  dune build ./bin/main.exe >&2
+  dune build --root "$SCRIPT_DIR" ./bin/main.exe >&2
 
   if [ -x "$WORKSPACE_EXE" ]; then
     FIGMA_EXE="$WORKSPACE_EXE"
@@ -166,9 +156,6 @@ if [ -z "$FIGMA_EXE" ]; then
 fi
 
 ARGS=(--port "$PORT" --host "$HOST")
-if [ -n "$GRPC_PORT" ]; then
-  ARGS+=(--grpc-port "$GRPC_PORT")
-fi
 if is_truthy "$PUBLIC"; then
   ARGS+=(--public)
 fi

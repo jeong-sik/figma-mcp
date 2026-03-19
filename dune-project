@@ -13,8 +13,8 @@
 
 (package
  (name figma_mcp)
- (synopsis "Figma MCP Server - OCaml 5.x Native with gRPC Streaming")
- (description "Type-safe Figma JSON parser with MCP protocol support and gRPC streaming for large files")
+ (synopsis "Figma MCP Server - fidelity-focused design context and verification")
+ (description "OCaml MCP server for Figma design context extraction, Code Connect lookup, and semantic or visual verification")
  (depends
   (ocaml (>= 5.1))
   (dune (>= 3.13))

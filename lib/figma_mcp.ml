@@ -9,7 +9,6 @@ module Protocol_eio = Mcp_protocol_eio
 module Mcp_http_auth = Mcp_http_auth
 module Tools = Mcp_tools
 module Effects = Figma_effects
-module Grpc_server = Figma_grpc_server
 
 (** stdin에서 JSON 읽어서 변환 *)
 let process_stdin ~format ~components =
