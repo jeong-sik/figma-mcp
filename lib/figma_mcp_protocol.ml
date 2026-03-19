@@ -262,20 +262,14 @@ F(Card 320×200 col gap:12 ax:min cx:stretch bg:#FFF r:12,16,12,16)
 - 500KB 이상 응답 시 구조 요약 먼저 확인
 - `depth` 파라미터로 탐색 깊이 제한
 - 반복되는 스타일은 CSS 변수로 추출
-- 전체 재귀가 필요하면 gRPC `GetNodeStream`의 `recursive=true` 사용
-- planning은 `figma_get_planning_context` → 상위 에이전트 계획 → `figma_validate_agent_plan` 검증 경로를 우선 사용
-- gRPC `PlanTasks`는 legacy heuristic path로만 유지되며 기본 비활성화
+- 큰 선택은 `figma_get_metadata`로 먼저 분해
+- 필요한 노드만 `figma_get_design_context`로 다시 읽기
 
 ### 🔄 권장 워크플로우
 1. `figma_parse_url` → **먼저** URL 파싱 (Parse, Don't Validate)
-2. `figma_list_screens` → 화면 목록 확인
-3. `figma_get_node_summary` → 구조 파악 (Outside-In)
-4. `figma_get_planning_context` → agent-first planning context 수집
-5. 상위 에이전트가 task plan 생성
-6. `figma_validate_agent_plan` → 구조/의존성 검증
-7. `figma_tree` → 필요 시 계층 시각화
-8. `figma_get_node` → 상세 구현
-9. `figma_export_tokens` → 디자인 토큰 추출
+2. `figma_get_metadata` → 큰 트리 구조 파악
+3. `figma_get_design_context` → 상세 구현
+4. `figma_get_variable_defs` → 디자인 토큰 추출
 
 ### 🔐 Parse, Don't Validate (필수 원칙)
 
@@ -296,15 +290,13 @@ URL: https://figma.com/design/ABC123/File?node-id=1-234
 | 상황 | 권장 도구 | 이유 |
 |------|----------|------|
 | URL만 있음 | `figma_parse_url` | file_key/node_id 추출, API 호출 없음 |
-| 구조 파악 | `figma_get_node_summary` | 경량, 자식 목록만 |
-| 텍스트/이름 검색 | `figma_search` | 키워드 기반 빠른 검색 |
-| 조건부 필터 | `figma_query` | type/크기/색상 조합 |
-| 단일 노드 구현 | `figma_get_node` | DSL 변환 |
-| 전체 번들 필요 | `figma_get_node_bundle` | DSL + 이미지 + 변수 한번에 |
-| 계층 시각화 | `figma_tree` | ASCII 트리 출력 |
+| 구조 파악 | `figma_get_metadata` | sparse XML 메타데이터 |
+| 구현 컨텍스트 | `figma_get_design_context` | fidelity-first 번들 |
+| 스크린샷 | `figma_get_screenshot` | export URL 또는 다운로드 |
+| 디자인 토큰 | `figma_get_variable_defs` | raw/resolved/summary |
+| Code Connect 매핑 | `figma_get_code_connect_map` | 로컬 매핑 인덱스/매치 |
 | 시각 검증 | `figma_verify_visual` | SSIM 자동 비교/보정 |
-| 대형 노드 분할 | `figma_get_node_chunk` | depth 범위 지정 |
-| 디자인 토큰 | `figma_export_tokens` | CSS/Tailwind/JSON 출력 |
+| 의미 검증 | `figma_verify_semantic` | 레이아웃/텍스트/스타일 비교 |
 
 ### ⚠️ 흔한 에러와 해결법
 

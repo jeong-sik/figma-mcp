@@ -13,9 +13,6 @@
 # opam 환경
 eval $(opam env)
 
-# 외부 의존성 pin (opam에 없음)
-opam pin add grpc-direct https://github.com/jeong-sik/grpc-direct.git -y
-
 # 의존성 설치
 opam install . --deps-only
 

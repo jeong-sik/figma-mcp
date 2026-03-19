@@ -18,8 +18,6 @@
  (depends
   (ocaml (>= 5.1))
   (dune (>= 3.13))
-  ; External dependencies (opam pin)
-  (grpc-direct (>= 0.1.0))
   (mcp_protocol (>= 0.13.0))
   ; Standard dependencies
   (yojson (>= 2.0))
