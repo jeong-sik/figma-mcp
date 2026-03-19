@@ -184,7 +184,11 @@ let handle_get_design_context args =
     |> assoc_set_if_missing "include_meta" (`Bool true)
     |> assoc_set_if_missing "include_variables" (`Bool true)
     |> assoc_set_if_missing "include_image_fills" (`Bool false)
-    |> assoc_set_if_missing "include_plugin" (`Bool false)
+    |> assoc_set_if_missing "include_plugin"
+         (`Bool
+            (match get_string "plugin_channel_id" args with
+             | Some _ -> true
+             | None -> false))
     |> assoc_set_if_missing "include_plugin_variables" (`Bool false)
   in
   match Mcp_api_bundle_handlers.handle_get_node_bundle bundle_args with

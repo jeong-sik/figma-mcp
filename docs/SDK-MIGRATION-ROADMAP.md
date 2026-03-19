@@ -1,5 +1,7 @@
 # figma-mcp SDK Migration Roadmap
 
+> Historical roadmap. v0.10.0 removed the in-process agent queue and legacy gRPC transport from the active server surface. Treat this document as background only.
+
 ## Summary
 
 This document fixes the current `codex-refactor-wave1` worktree as the Wave 1 baseline for `figma-mcp`, then defines a long-term migration path toward:
