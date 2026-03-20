@@ -1,6 +1,6 @@
 # figma-mcp SDK Migration Roadmap
 
-> Historical roadmap. v0.10.0 removed the in-process agent queue and legacy gRPC transport from the active server surface. Treat this document as background only.
+> Historical roadmap. v0.10.1 removed the in-process agent queue and legacy gRPC transport from the active server surface. Treat this document as background only.
 
 ## Summary
 

@@ -1,6 +1,6 @@
 # Figma MCP Recipes
 
-Authoritative for v0.10.0 and later.
+Authoritative for v0.10.1 and later.
 
 This server no longer exposes agent-planning or gRPC transport flows. Use the v2 MCP tools below.
 
