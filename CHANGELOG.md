@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.1] - 2026-03-20
+
+### Changed
+- Reset the MCP surface to 8 fidelity-focused tools
+- Remove in-process agent queue endpoints and state from the active server
+- Remove legacy gRPC transport and `grpc-direct` build dependency
+- Rewrite README and startup scripts around the v2 HTTP and stdio workflows
+
+### Fixed
+- Make worktree-local builds and startup scripts use `dune --root`
+- Align v2 docs and verification paths with the reduced server scope
+- Remove stale pre-v2 tool guidance from initialize instructions and recipes
+
 ## [0.9.0] - 2026-03-16
 
 ### Added

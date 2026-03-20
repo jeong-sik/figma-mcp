@@ -205,245 +205,39 @@ type mcp_server = {
 
 (** MCP Instructions: LLM이 읽고 따라야 할 개발 가이드라인 *)
 let mcp_instructions = {|
-## Figma MCP - UI 구현 가이드라인
+## figma-mcp v2
 
-### 💡 핵심 원칙 (Best Programmer Principles)
+This server is limited to design context extraction and verification.
 
-1. **Parse, Don't Validate**: URL은 항상 `figma_parse_url`로 파싱 먼저
-2. **Simple Made Easy**: 복잡한 워크플로우보다 단순한 3단계
-3. **Trust but Verify**: 생성한 코드는 `figma_verify_visual`로 항상 검증
-4. **Fail Fast**: 에러 메시지의 suggestion을 즉시 따르기
+### Public tools
 
-### 🔑 Token 자동 주입 (중요!)
+- `figma_get_design_context`
+- `figma_get_metadata`
+- `figma_get_variable_defs`
+- `figma_get_screenshot`
+- `figma_get_code_connect_map`
+- `figma_whoami`
+- `figma_verify_semantic`
+- `figma_verify_visual`
 
-**`token` 파라미터는 생략하세요** - 환경변수에서 자동 주입됩니다:
-- 모든 도구는 `FIGMA_TOKEN` 환경변수를 자동으로 사용
-- `token` 파라미터는 **optional** (명시하지 않아도 됨)
-- 명시적 token이 필요한 경우만 파라미터로 전달
+### Scope boundaries
 
-```
-# ✅ 올바른 호출 (token 생략)
-figma_get_node(file_key="ABC123", node_id="1:234")
+- Use `url` directly on the v2 tools when you have a Figma URL.
+- `FIGMA_TOKEN` is resolved from the environment by default.
+- Agent orchestration, planning flows, category routers, and gRPC transport are out of scope.
 
-# ❌ 불필요한 호출 (token 명시)
-figma_get_node(file_key="ABC123", node_id="1:234", token="...")
-```
+### Recommended workflow
 
-### 🎯 목표: 95%+ Fidelity UI 구현
+1. Use `figma_get_metadata` to inspect large selections safely.
+2. Use `figma_get_design_context` for implementation context.
+3. Use `figma_get_variable_defs` or `figma_get_code_connect_map` when token or component mapping data is needed.
+4. Use `figma_verify_semantic` first, then `figma_verify_visual` when visual parity matters.
 
-### 📐 두 가지 구현 패턴
+### Notes
 
-**1. Outside-In (Matryoshka) 패턴** - 대규모 디자인 추천
-- `figma_get_node_summary`로 전체 구조 파악
-- 최상위 컨테이너 먼저 구현 (레이아웃, 배경)
-- 자식은 `{/* TODO: Title */}` placeholder로 표시
-- `figma_get_node`로 각 자식을 점진적 확장
-- 장점: 컨텍스트 절약, 구조 유지
-
-**2. Inside-Out (Bottom-Up) 패턴** - 재사용 컴포넌트
-- 가장 작은 원자 컴포넌트부터 구현 (Button, Icon)
-- 조합하여 분자 → 유기체 → 템플릿 완성
-- 장점: 재사용성, Atomic Design 친화
-
-### 🔧 DSL 읽는 법
-```
-F(Card 320×200 col gap:12 ax:min cx:stretch bg:#FFF r:12,16,12,16)
-│ ├─ F = Frame
-│ ├─ 320×200 = 크기
-│ ├─ col = 세로 레이아웃
-│ ├─ gap:12 = 자식 간격
-│ ├─ ax:min = 주축 정렬 (시작)
-│ ├─ cx:stretch = 교차축 정렬 (늘리기)
-│ ├─ bg:#FFF = 배경색
-│ └─ r:12,16,12,16 = 모서리 (TL,TR,BR,BL)
-```
-
-### ⚠️ 대용량 응답 주의
-- 500KB 이상 응답 시 구조 요약 먼저 확인
-- `depth` 파라미터로 탐색 깊이 제한
-- 반복되는 스타일은 CSS 변수로 추출
-- 전체 재귀가 필요하면 gRPC `GetNodeStream`의 `recursive=true` 사용
-- planning은 `figma_get_planning_context` → 상위 에이전트 계획 → `figma_validate_agent_plan` 검증 경로를 우선 사용
-- gRPC `PlanTasks`는 legacy heuristic path로만 유지되며 기본 비활성화
-
-### 🔄 권장 워크플로우
-1. `figma_parse_url` → **먼저** URL 파싱 (Parse, Don't Validate)
-2. `figma_list_screens` → 화면 목록 확인
-3. `figma_get_node_summary` → 구조 파악 (Outside-In)
-4. `figma_get_planning_context` → agent-first planning context 수집
-5. 상위 에이전트가 task plan 생성
-6. `figma_validate_agent_plan` → 구조/의존성 검증
-7. `figma_tree` → 필요 시 계층 시각화
-8. `figma_get_node` → 상세 구현
-9. `figma_export_tokens` → 디자인 토큰 추출
-
-### 🔐 Parse, Don't Validate (필수 원칙)
-
-**항상 `figma_parse_url`로 시작하세요:**
-```
-URL: https://figma.com/design/ABC123/File?node-id=1-234
-     ↓ figma_parse_url
-{ file_key: "ABC123", node_id: "1:234" }  ← 파싱된 안전한 값
-```
-
-**왜 중요한가:**
-- URL의 `node-id=1-234`는 `-`를 사용 (API는 `:`를 요구)
-- 직접 추출하면 형식 오류 발생 → `figma_parse_url`이 자동 변환
-- 파싱 결과를 그대로 사용하면 에러 없음
-
-### 🎛️ 도구 선택 가이드 (언제 어떤 도구?)
-
-| 상황 | 권장 도구 | 이유 |
-|------|----------|------|
-| URL만 있음 | `figma_parse_url` | file_key/node_id 추출, API 호출 없음 |
-| 구조 파악 | `figma_get_node_summary` | 경량, 자식 목록만 |
-| 텍스트/이름 검색 | `figma_search` | 키워드 기반 빠른 검색 |
-| 조건부 필터 | `figma_query` | type/크기/색상 조합 |
-| 단일 노드 구현 | `figma_get_node` | DSL 변환 |
-| 전체 번들 필요 | `figma_get_node_bundle` | DSL + 이미지 + 변수 한번에 |
-| 계층 시각화 | `figma_tree` | ASCII 트리 출력 |
-| 시각 검증 | `figma_verify_visual` | SSIM 자동 비교/보정 |
-| 대형 노드 분할 | `figma_get_node_chunk` | depth 범위 지정 |
-| 디자인 토큰 | `figma_export_tokens` | CSS/Tailwind/JSON 출력 |
-
-### ⚠️ 흔한 에러와 해결법
-
-| 에러 | 원인 | 해결 |
-|------|------|------|
-| `Invalid node_id format` | node_id가 `123:456` 형식 아님 | URL에서 `node-id=` 파라미터 확인, `-`를 `:`로 변환 |
-| `404 Not Found` | file_key 또는 node_id 잘못됨 | `figma_parse_url`로 URL 파싱 재확인 |
-| `403 Forbidden` | 토큰 권한 부족 또는 파일 비공개 | FIGMA_TOKEN 환경변수 확인, 파일 공유 설정 확인 |
-| `Rate Limited` | API 호출 과다 | 대기 후 재시도, depth 제한으로 호출 수 줄이기 |
-| `large_result` 반환 | 응답이 너무 큼 | `figma_read_large_result`로 분할 읽기 |
-| `children_present=false` | depth 부족 | depth 파라미터 증가 |
-| `image_fills` 누락 | 이미지 데이터 미포함 | `include_image_fills=true` 추가 |
-| SSIM 낮음 | 색상/크기/폰트 불일치 | `figma_compare_elements`로 상세 비교 |
-
-### 🔄 에러 복구 (Simple Made Easy)
-
-**에러 발생 시 3단계:**
-1. **suggestion 읽기** → 에러 메시지에 해결책 포함
-2. **URL 재파싱** → `figma_parse_url`로 파라미터 검증
-3. **재시도** → 수정된 파라미터로 호출
-
-**복잡하게 생각하지 마세요:**
-- 대부분의 에러는 node_id 형식 문제 (`-` vs `:`)
-- `figma_parse_url` 한 번이면 해결
-
-### 🛡️ 에러 예방 체크리스트
-
-**API 호출 전 확인:**
-- [ ] URL을 `figma_parse_url`로 파싱했는가?
-- [ ] node_id가 `숫자:숫자` 형식인가? (예: `123:456`)
-- [ ] file_key가 영문+숫자인가? (예: `ABC123xyz`)
-- [ ] FIGMA_TOKEN 환경변수가 설정되어 있는가?
-
-**대형 노드 작업 전:**
-- [ ] `figma_get_node_summary`로 크기를 먼저 확인했는가?
-- [ ] 자식이 100개 이상이면 `depth` 제한을 설정했는가?
-
-### 🎯 99%+ SSIM 달성 핵심 (Visual Verification)
-
-**1. Flat HTML > Nested HTML**
-- Figma 계층 그대로 복제 ❌ → 시각적 동등 HTML ✅
-- 2-level 구조: 외부 컨테이너 + 내부 요소 + 텍스트
-
-**2. 정밀 색상 변환**
-- `#1F8CF8` (hex) ❌ → `rgb(32,141,249)` (rgb) ✅
-- 반올림 필수: `Float.round(r * 255)`
-
-**3. Typography 완전성**
-- `letter-spacing: -0.32px` 필수 (텍스트 폭 정확도)
-- `line-height: 24px` 필수 (텍스트 높이 정확도)
-
-**4. 중앙 정렬 공식**
-```css
-display: flex;
-align-items: center;
-justify-content: center;
-```
-
-**5. `figma_verify_visual` 도구 사용 (테스트 원칙)**
-
-**항상 검증하세요** - 작성한 코드가 워킹하지 않을 수 있음:
-```
-figma_verify_visual(
-  file_key="...",
-  node_id="...",
-  html="<생성한 HTML>",
-  target_ssim=0.95,      // 95% 이상 통과
-  max_iterations=3       // 자동 보정 시도
-)
-```
-
-**검증 실패 시:**
-1. `figma_compare_elements`로 색상/박스 상세 비교
-2. `figma_evolution_report`로 진화 과정 확인
-3. CSS 수동 조정 후 재검증
-
-### ⚠️ TEXT 노드 정확도 (Critical - SSIM은 텍스트를 검증하지 않음)
-
-**SSIM의 한계**: SSIM은 픽셀 구조 유사도만 측정 → 같은 폰트/크기/색상이면 **다른 텍스트도 높은 점수**
-
-**TEXT 노드 처리 규칙** (필수):
-1. DSL의 `"text":{"characters":"..."}` 필드를 **반드시 그대로** HTML에 사용
-2. **절대로** 텍스트를 hallucinate하거나 추측하지 말 것
-3. DSL 요약/압축 시에도 TEXT 노드의 `characters`는 **반드시 보존**
-4. 원본 텍스트가 한국어면 한국어 그대로 유지
-
-**TEXT 노드 확인 체크리스트**:
-- [ ] DSL에서 `characters` 필드 확인했는가?
-- [ ] HTML의 텍스트가 DSL의 `characters`와 **정확히** 일치하는가?
-- [ ] 어떤 텍스트도 임의로 생성하지 않았는가?
-
-**Example**:
-```
-DSL: T("일괄 등록하기" 15 #333C47 weight:500)
-HTML (✅): <span>일괄 등록하기</span>
-HTML (❌): <span>Bulk Register</span>  <!-- hallucinated! -->
-HTML (❌): <span>등록하기</span>  <!-- partial/modified! -->
-```
-
-### 🖥️ HTML 렌더링 우선순위 (Chrome-First Strategy)
-
-Visual Verification 시 HTML을 PNG로 렌더링할 때 다음 우선순위를 따릅니다:
-
-**1순위: claude-in-chrome (권장)**
-`mcp__claude-in-chrome__*` 도구가 사용 가능한 경우:
-1. `mcp__claude-in-chrome__navigate`로 HTML 파일 열기 (file:// 또는 data URI)
-2. `mcp__claude-in-chrome__computer` action="screenshot"으로 스크린샷 캡처
-3. `figma_image_similarity`로 Figma 렌더와 SSIM 비교
-4. 장점: 실제 브라우저 환경, 폰트 렌더링 정확도 높음
-
-**2순위: figma_verify_visual (Fallback)**
-chrome 도구 불가 시 `figma_verify_visual` 내장 Playwright 사용:
-- 자동 HTML 렌더링 + SSIM 비교 + CSS 자동 보정
-- Playwright 설치 필요: `npx playwright install chromium`
-
-**Chrome-First 워크플로우 예시**:
-```
-1. figma_get_node_bundle → DSL + Figma 렌더 이미지 획득
-2. HTML 코드 생성 → 임시 파일 저장
-3. [Chrome 가용 시]
-   - claude-in-chrome navigate → screenshot
-   - figma_image_similarity로 SSIM 측정
-4. [Chrome 불가 시]
-   - figma_verify_visual html=<생성한HTML>
-```
-
-### 🩺 환경 점검
-
-시각 검증이 실패하면 `figma_doctor`로 의존성 점검:
-- Node.js, Playwright, ImageMagick 설치 상태
-- 스크립트 경로 유효성
-- 필요 시 `npx playwright install chromium` 실행
-
-### 🔗 MCP 리소스 활용
-
-- `figma://docs/fidelity` - Fidelity DSL v3 스펙
-- `figma://docs/usage` - 사용 가이드 (도구 선택 예시)
-- `figma://docs/tokens` - Variables(Design Tokens) 리소스/템플릿 사용 가이드
-- `figma://tokens/{file_key}` - Variables를 토큰(JSON)으로 제공 (format=raw|resolved|dtcg)
+- `plugin_channel_id` on `figma_get_design_context` enables plugin enrichment automatically.
+- `figma_get_screenshot` returns export URLs or download results for a node.
+- `figma://docs/v2-surface` and `figma://docs/verification` are the authoritative MCP resources in v2.
 |}
 
 let handle_initialize params : Yojson.Safe.t =

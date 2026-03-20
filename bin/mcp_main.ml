@@ -2,4 +2,4 @@
 
 let () =
   let server = Figma_mcp.Tools.create_figma_server () in
-  Figma_mcp.Protocol_eio.start_stdio_server server
+  Mcp_protocol_server.start_stdio_server server

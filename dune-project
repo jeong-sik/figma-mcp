@@ -1,6 +1,6 @@
 (lang dune 3.15)
 (name figma_mcp)
-(version 0.9.0)
+(version 0.10.1)
 
 (generate_opam_files true)
 
@@ -13,13 +13,11 @@
 
 (package
  (name figma_mcp)
- (synopsis "Figma MCP Server - OCaml 5.x Native with gRPC Streaming")
- (description "Type-safe Figma JSON parser with MCP protocol support and gRPC streaming for large files")
+ (synopsis "Figma MCP Server - fidelity-focused design context and verification")
+ (description "OCaml MCP server for Figma design context extraction, Code Connect lookup, and semantic or visual verification")
  (depends
   (ocaml (>= 5.1))
   (dune (>= 3.13))
-  ; External dependencies (opam pin)
-  (grpc-direct (>= 0.1.0))
   (mcp_protocol (>= 0.13.0))
   ; Standard dependencies
   (yojson (>= 2.0))
@@ -37,5 +35,6 @@
   (bigstringaf (>= 0.9))
   (mirage-crypto-rng (>= 1.0))
   (ipaddr (>= 5.0))
+  "dune-build-info"
   (alcotest (and :with-test (>= 1.8.0)))
   (bisect_ppx (and :with-test (>= 2.8)))))

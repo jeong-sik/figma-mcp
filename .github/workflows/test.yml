@@ -23,20 +23,17 @@ jobs:
           opam pin add mcp_protocol https://github.com/jeong-sik/mcp-protocol-sdk.git#main -n -y
           opam pin add mcp_protocol_eio https://github.com/jeong-sik/mcp-protocol-sdk.git#main -n -y
           opam pin add mcp_protocol_http https://github.com/jeong-sik/mcp-protocol-sdk.git#main -n -y
-          opam pin add grpc-direct-core https://github.com/jeong-sik/grpc-direct.git#main -n -y
-          opam pin add grpc-direct https://github.com/jeong-sik/grpc-direct.git#main -n -y
 
       - name: Install dependencies
         run: |
           opam install . --deps-only --with-test -y
 
-      - name: Plugin regression smoke (bounded)
+      - name: v2 smoke tests
         run: |
           set -euo pipefail
-          timeout 180 opam exec -- dune exec -- test/test_plugin_bridge_w7.exe
-          timeout 180 opam exec -- dune exec -- test/test_plugin_features.exe
-          timeout 180 opam exec -- dune exec -- test/test_plugin_dispatch_coverage.exe
-          timeout 240 opam exec -- dune exec -- test/test_plugin_handlers_w6.exe
+          timeout 60 opam exec -- dune exec -- test/test_v2_surface.exe
+          timeout 60 opam exec -- dune exec -- test/test_v2_metadata.exe
+          timeout 60 opam exec -- dune exec -- test/test_v2_resources.exe
 
       - name: OCaml tests
         run: opam exec -- dune test --no-buffer -j 1

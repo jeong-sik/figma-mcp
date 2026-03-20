@@ -1,5 +1,4 @@
 open Printf
-open Mcp_agent_queue
 open Mcp_protocol_request
 (* ============== Router ============== *)
 
@@ -56,10 +55,7 @@ let route_request ~clock ~domain_mgr ~sw ~eio_ctx server request reqd =
           Response.text (Server_metrics.to_prometheus_text ()) reqd
 
       | `GET, "/stats" ->
-          let result = `Assoc [
-            ("server_metrics", Server_metrics.to_json ());
-            ("agent_queue", agent_queue_stats_json ());
-          ] in
+          let result = `Assoc [ ("server_metrics", Server_metrics.to_json ()) ] in
           Response.json (Yojson.Safe.to_string result) reqd
 
       | `GET, "/" ->

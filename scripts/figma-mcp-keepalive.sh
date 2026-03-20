@@ -5,7 +5,6 @@ set -euo pipefail
 
 ME_ROOT="${ME_ROOT:-$HOME/me}"
 PORT="${FIGMA_MCP_PORT:-8940}"
-GRPC_PORT="${FIGMA_MCP_GRPC_PORT:-50052}"
 RESTART_DELAY="${FIGMA_MCP_RESTART_DELAY:-2}"
 LOG_DIR="${FIGMA_MCP_LOG_DIR:-$ME_ROOT/logs}"
 LOG_FILE="${FIGMA_MCP_LOG_FILE:-$LOG_DIR/figma-mcp-${PORT}.log}"
@@ -42,9 +41,6 @@ trap cleanup INT TERM EXIT
 while true; do
   echo "[$(date -u +"%Y-%m-%dT%H:%M:%SZ")] starting figma-mcp..." >> "$LOG_FILE"
   args=(--port "$PORT")
-  if [ -n "$GRPC_PORT" ]; then
-    args+=(--grpc-port "$GRPC_PORT")
-  fi
   "$START_SCRIPT" "${args[@]}" >> "$LOG_FILE" 2>&1 &
   child_pid=$!
   if wait "$child_pid"; then

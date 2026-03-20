@@ -6,38 +6,13 @@ open Cmdliner
 
 let run_mcp_server_stdio () =
   let server = Figma_mcp.Tools.create_figma_server () in
-  (* Use Eio-based stdio server for pure Eio execution *)
-  Figma_mcp.Protocol_eio.start_stdio_server server
+  Mcp_protocol_server.start_stdio_server server
 
 let run_mcp_server_http ~host ~port ~allow_no_auth =
   let server = Figma_mcp.Tools.create_figma_server () in
-  let config = { Figma_mcp.Protocol_eio.default_config with port; host } in
-  Figma_mcp.Protocol_eio.set_allow_no_auth allow_no_auth;
-  Figma_mcp.Protocol_eio.start_server ~config server
-
-(** ============== gRPC 서버 모드 ============== *)
-
-let run_grpc_server ~port =
-  Figma_mcp.Grpc_server.run_standalone ~port ()
-
-(** ============== HTTP + gRPC 동시 실행 ============== *)
-
-let run_both_servers ~host ~http_port ~grpc_port ~allow_no_auth =
-  (* Initialize crypto RNG before Eio_main.run - required for TLS/HTTPS *)
-  Mirage_crypto_rng_unix.use_default ();
-  Eio_main.run @@ fun env ->
-  let net = Eio.Stdenv.net env in
-  let clock = Eio.Stdenv.clock env in
-  let domain_mgr = Some (Eio.Stdenv.domain_mgr env) in
-  Eio.Switch.run @@ fun sw ->
-  Eio.Fiber.both
-    (fun () ->
-      let server = Figma_mcp.Tools.create_figma_server () in
-      let config = { Figma_mcp.Protocol_eio.default_config with port = http_port; host } in
-      Figma_mcp.Protocol_eio.set_allow_no_auth allow_no_auth;
-      Figma_mcp.Protocol_eio.run ~sw ~net ~clock ~domain_mgr config server)
-    (fun () ->
-      Figma_mcp.Grpc_server.serve ~sw ~env ~port:grpc_port ())
+  let config = { Mcp_protocol_server.default_config with port; host } in
+  Mcp_figma_tool_handlers.set_allow_no_auth allow_no_auth;
+  Mcp_protocol_server.start_server ~config server
 
 (** ============== CLI 코드젠 모드 ============== *)
 
@@ -65,10 +40,6 @@ let host_arg =
 let port_arg =
   let doc = "Run as MCP HTTP server on specified port (e.g., --port 8933)" in
   Arg.(value & opt (some int) None & info ["port"] ~doc)
-
-let grpc_port_arg =
-  let doc = "Run as gRPC server on specified port for streaming large responses (default: 50052)" in
-  Arg.(value & opt (some int) None & info ["grpc-port"] ~doc)
 
 let public_arg =
   let doc = "Allow binding to non-loopback host (sets FIGMA_MCP_PUBLIC=1)" in
@@ -109,7 +80,7 @@ let require_api_key allow_no_auth =
       exit 2
     end
 
-let run format components server host port grpc_port public allow_no_auth =
+let run format components server host port public allow_no_auth =
   if public then Unix.putenv "FIGMA_MCP_PUBLIC" "1";
   if allow_no_auth then Unix.putenv "FIGMA_MCP_ALLOW_NO_AUTH" "1";
   let public_enabled = Figma_mcp.Mcp_http_auth.env_truthy "FIGMA_MCP_PUBLIC" in
@@ -131,15 +102,10 @@ let run format components server host port grpc_port public allow_no_auth =
     exit 2
   end;
   if http_enabled then require_api_key allow_no_auth_enabled;
-  match (port, grpc_port) with
-  | (Some http_p, Some grpc_p) ->
-      (* HTTP + gRPC 동시 실행 *)
-      run_both_servers ~host ~http_port:http_p ~grpc_port:grpc_p ~allow_no_auth:allow_no_auth_enabled
-  | (Some http_p, None) ->
+  match port with
+  | Some http_p ->
       run_mcp_server_http ~host ~port:http_p ~allow_no_auth:allow_no_auth_enabled
-  | (None, Some grpc_p) ->
-      run_grpc_server ~port:grpc_p
-  | (None, None) ->
+  | None ->
       if server then
         run_mcp_server_stdio ()
       else begin
@@ -191,7 +157,6 @@ let cmd =
       $ server_arg
       $ host_arg
       $ port_arg
-      $ grpc_port_arg
       $ public_arg
       $ allow_no_auth_arg)
 
