@@ -37,7 +37,7 @@ type session = {
 }
 
 let channels : (string, session) Hashtbl.t = Hashtbl.create 32
-let lock = Mutex.create ()
+let lock = Eio.Mutex.create ()
 let default_channel : string option ref = ref None
 let next_waiter_id = ref 0
 let last_cleanup_at = ref 0.0
@@ -125,14 +125,9 @@ let maybe_cleanup_unlocked () =
   end
 
 let with_lock f =
-  Mutex.lock lock;
-  Common.protect
-    ~module_name:"figma_plugin_bridge"
-    ~finally_label:"Mutex.unlock"
-    ~finally:(fun () -> Mutex.unlock lock)
-    (fun () ->
-      maybe_cleanup_unlocked ();
-      f ())
+  Eio.Mutex.use_rw ~protect:true lock (fun () ->
+    maybe_cleanup_unlocked ();
+    f ())
 
 let new_id prefix =
   Printf.sprintf "%s-%d-%d" prefix (int_of_float (now () *. 1000.0)) (Random.bits ())
