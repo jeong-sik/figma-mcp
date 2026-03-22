@@ -350,7 +350,7 @@ let invalidate ?file_key ?node_id () =
               | json ->
                   if should_invalidate_json ~file_key:fk ~node_id json then
                     FS.delete_file path
-              | exception _ -> ()));
+              | exception (Yojson.Json_error _) -> ()));
     eprintf "[Cache] INVALIDATE: %s/%s\n%!" fk (Option.value node_id ~default:"*")
 
 (** ============== Version Tracking (after invalidate is defined) ============== *)
