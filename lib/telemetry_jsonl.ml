@@ -32,30 +32,25 @@ let ensure_parent_dir path =
   with exn ->
     Printf.eprintf "[telemetry] Warning: failed to create dir %s: %s\n%!" dir (Printexc.to_string exn)
 
-let write_mutex = Mutex.create ()
+let write_mutex = Eio.Mutex.create ()
 
 let append_json (json : Yojson.Safe.t) =
   ensure_parent_dir telemetry_file;
-  Mutex.lock write_mutex;
-  Common.protect
-    ~module_name:"telemetry_jsonl"
-    ~finally_label:"Mutex.unlock"
-    ~finally:(fun () -> Mutex.unlock write_mutex)
-    (fun () ->
-      try
-        let oc =
-          open_out_gen [ Open_append; Open_creat; Open_text ] 0o644 telemetry_file
-        in
-        Common.protect
-          ~module_name:"telemetry_jsonl"
-          ~finally_label:"close_out"
-          ~finally:(fun () -> close_out oc)
-          (fun () ->
-            output_string oc (Yojson.Safe.to_string json);
-            output_char oc '\n';
-            flush oc)
-      with exn ->
-        Printf.eprintf "[telemetry] Warning: failed to write telemetry: %s\n%!" (Printexc.to_string exn))
+  Eio.Mutex.use_rw ~protect:true write_mutex (fun () ->
+    try
+      let oc =
+        open_out_gen [ Open_append; Open_creat; Open_text ] 0o644 telemetry_file
+      in
+      Common.protect
+        ~module_name:"telemetry_jsonl"
+        ~finally_label:"close_out"
+        ~finally:(fun () -> close_out oc)
+        (fun () ->
+          output_string oc (Yojson.Safe.to_string json);
+          output_char oc '\n';
+          flush oc)
+    with exn ->
+      Printf.eprintf "[telemetry] Warning: failed to write telemetry: %s\n%!" (Printexc.to_string exn))
 
 let log_tool_called ~tool_name ~duration_ms ~success ~error =
   let error_json = match error with Some e -> `String e | None -> `Null in
