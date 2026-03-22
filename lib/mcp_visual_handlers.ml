@@ -159,10 +159,10 @@ let handle_fidelity_loop args : (Yojson.Safe.t, string) result =
             let cached = Figma_cache.get ~file_key ~node_id ~options:cache_options () in
             let json_result = match cached with
               | Some json ->
-                  Printf.eprintf "[FidelityLoop] Cache HIT: depth=%d\n%!" depth;
+                  Log.Visual.info "FidelityLoop Cache HIT: depth=%d" depth;
                   Ok json
               | None ->
-                  Printf.eprintf "[FidelityLoop] Cache MISS: depth=%d → API call\n%!" depth;
+                  Log.Visual.info "FidelityLoop Cache MISS: depth=%d, API call" depth;
                   match Figma_effects.Perform.get_nodes ~token ~file_key ~node_ids:[node_id]
                           ?geometry ?plugin_data ~depth () with
                   | Error err -> Error err
@@ -760,7 +760,7 @@ let handle_compare_regions args : (Yojson.Safe.t, string) result =
       if p = "" then None
       else
         let rp = try Unix.realpath p with exn ->
-          Printf.eprintf "[mcp_tools] Warning: realpath failed for '%s': %s, using original\n%!" p (Printexc.to_string exn);
+          Log.Mcp.warn "realpath failed for '%s': %s, using original" p (Printexc.to_string exn);
           p
         in
         if rp = "/" then Some rp
@@ -881,10 +881,10 @@ let handle_compare_regions args : (Yojson.Safe.t, string) result =
                         let args_a = [| "magick"; image_a; "-crop"; Printf.sprintf "%dx%d+%d+%d" w h x y; "+repage"; crop_a |] in
                         let args_b = [| "magick"; image_b; "-crop"; Printf.sprintf "%dx%d+%d+%d" w h x y; "+repage"; crop_b |] in
                         (match Safe_exec.run_stdout ~timeout_ms:20000 ~output_limit:(64 * 1024) "magick" args_a with
-                         | Error msg -> Printf.eprintf "[visual] magick crop A failed: %s\n%!" msg
+                         | Error msg -> Log.Visual.error "magick crop A failed: %s" msg
                          | Ok _ -> ());
                         (match Safe_exec.run_stdout ~timeout_ms:20000 ~output_limit:(64 * 1024) "magick" args_b with
-                         | Error msg -> Printf.eprintf "[visual] magick crop B failed: %s\n%!" msg
+                         | Error msg -> Log.Visual.error "magick crop B failed: %s" msg
                          | Ok _ -> ());
 
                         (* SSIM 계산 *)
@@ -908,7 +908,7 @@ let handle_compare_regions args : (Yojson.Safe.t, string) result =
                               | first :: _ -> float_of_string first *. 100.0
                               | _ -> 0.0
                           with exn ->
-                            Printf.eprintf "[mcp_tools] Warning: SSIM parse failed for output '%s': %s\n%!" output (Printexc.to_string exn);
+                            Log.Visual.warn "SSIM parse failed for output '%s': %s" output (Printexc.to_string exn);
                             0.0
                         in
 
@@ -918,7 +918,7 @@ let handle_compare_regions args : (Yojson.Safe.t, string) result =
                             let diff_path = Filename.concat output_dir (Printf.sprintf "diff_%s.png" name) in
                             let args_diff = [| "magick"; "compare"; crop_a; crop_b; diff_path |] in
                             (match Safe_exec.run_stdout ~timeout_ms:20000 ~output_limit:(64 * 1024) "magick" args_diff with
-                             | Error msg -> Printf.eprintf "[visual] magick compare failed: %s\n%!" msg
+                             | Error msg -> Log.Visual.error "magick compare failed: %s" msg
                              | Ok _ -> ());
                             Some diff_path
                           end else None
@@ -1051,7 +1051,7 @@ let handle_evolution_report args : (Yojson.Safe.t, string) result =
             if Sys.file_exists figma_png && Sys.file_exists last_png then
               let args = [| "montage"; figma_png; last_png; "-tile"; "2x1"; "-geometry"; "+5+5"; "-background"; "#1a1a1a"; output |] in
               (match Safe_exec.run_stdout ~timeout_ms:20000 ~output_limit:(64 * 1024) "montage" args with
-               | Error msg -> Printf.eprintf "[visual] montage failed: %s\n%!" msg
+               | Error msg -> Log.Visual.error "montage failed: %s" msg
                | Ok _ -> ());
               if Sys.file_exists output then Some output else None
             else None

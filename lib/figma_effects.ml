@@ -738,17 +738,17 @@ let run_with_pure_eio_api ~sw ~net ~clock ~client computation =
 
         | Log_debug msg ->
             Some (fun (k : (a, _) Effect.Deep.continuation) ->
-              Printf.eprintf "[DEBUG] %s\n%!" msg;
+              Log.Effects.debug "%s" msg;
               Effect.Deep.continue k ())
 
         | Log_info msg ->
             Some (fun (k : (a, _) Effect.Deep.continuation) ->
-              Printf.eprintf "[INFO] %s\n%!" msg;
+              Log.Effects.info "%s" msg;
               Effect.Deep.continue k ())
 
         | Log_error msg ->
             Some (fun (k : (a, _) Effect.Deep.continuation) ->
-              Printf.eprintf "[ERROR] %s\n%!" msg;
+              Log.Effects.error "%s" msg;
               Effect.Deep.continue k ())
 
         (* Neo4j effects - HTTP calls to Neo4j Transactional API *)

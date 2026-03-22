@@ -445,7 +445,7 @@ let plugin_codegen_handler ~sw ~eio_ctx _request reqd =
         | _ ->
             (* No Claude key, use Ollama *)
             (try try_ollama () with exn ->
-              Printf.eprintf "[Codegen] Ollama fallback: %s, using template\n%!" (Printexc.to_string exn);
+              Log.Mcp.warn "Codegen Ollama fallback: %s, using template" (Printexc.to_string exn);
               send_template ()))
   )
 
@@ -1895,7 +1895,7 @@ let normalize_dir_prefix path =
   if p = "" then None
   else
     let rp = try Unix.realpath p with exn ->
-      Printf.eprintf "[mcp_protocol] Warning: realpath failed for '%s': %s, using original\n%!" p (Printexc.to_string exn);
+      Log.Mcp.warn "realpath failed for '%s': %s, using original" p (Printexc.to_string exn);
       p
     in
     if rp = "/" then Some rp

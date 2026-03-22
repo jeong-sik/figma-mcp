@@ -368,8 +368,7 @@ let resolve_token args =
   | Some t when String.length t > 0 ->
       (match get_string "token" args with
        | Some _ ->
-           Printf.eprintf "[figma-mcp] Warning: explicit token parameter ignored \
-             (FIGMA_TOKEN env takes precedence for security)\n%!"
+           Log.Mcp.warn "explicit token parameter ignored (FIGMA_TOKEN env takes precedence for security)"
        | None -> ());
       Some t
   | _ ->
