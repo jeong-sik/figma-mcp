@@ -108,7 +108,7 @@ let cleanup_oversized_dir () =
         | (path, _, size) :: rest ->
             (try Unix.unlink path
              with Unix.Unix_error (err, _, _) ->
-               Printf.eprintf "[large_response] Warning: failed to unlink %s: %s\n%!" path (Unix.error_message err));
+               Log.Mcp.warn "failed to unlink %s: %s" path (Unix.error_message err));
             remove_until (total_bytes - size) rest
       in
       remove_until total sorted
@@ -132,7 +132,7 @@ let handle_response ~prefix ~format content : Yojson.Safe.t =
     (* 작은 응답: 그대로 반환 *)
     (try Yojson.Safe.from_string content
      with exn ->
-       Printf.eprintf "[large_response] Warning: JSON parse failed (len=%d), wrapping as string: %s\n%!" (String.length content) (Printexc.to_string exn);
+       Log.Mcp.warn "JSON parse failed (len=%d), wrapping as string: %s" (String.length content) (Printexc.to_string exn);
        `String content)
   else begin
     (* 큰 응답: 파일로 저장하고 메타데이터 반환 *)

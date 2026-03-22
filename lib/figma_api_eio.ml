@@ -220,7 +220,7 @@ let retry_after_of_headers headers =
 
 (** 에러 로깅 - 침묵하지 않고 stderr로 출력 *)
 let log_error context msg =
-  Printf.eprintf "[figma_api_eio] %s: %s\n%!" context msg
+  Log.Api.error "%s: %s" context msg
 
 let strip_query_for_log url =
   match String.index_opt url '?' with
@@ -235,7 +235,7 @@ let log_http_error ~label ~status ~body ~url =
     log_error label (sprintf "HTTP %d (url: %s, body_bytes: %d)" status url (String.length body))
 
 let log_warning context msg =
-  Printf.eprintf "[figma_api_eio] WARN %s: %s\n%!" context msg
+  Log.Api.warn "%s: %s" context msg
 
 (** 에러를 기술적 문자열로 변환 (디버깅용) *)
 let api_error_to_string = function

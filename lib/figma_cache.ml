@@ -61,7 +61,7 @@ module FS = struct
       let now = Unix.gettimeofday () in
       try Unix.utimes path now now
         with exn ->
-          Printf.eprintf "[cache] Warning: failed to touch %s: %s\n%!" path (Printexc.to_string exn)
+          Log.Cache.warn "failed to touch %s: %s" path (Printexc.to_string exn)
 
   let delete_file path =
     if Sys.file_exists path then

@@ -58,10 +58,10 @@ let handle_get_node_bundle args : (Yojson.Safe.t, string) result =
       let cached_json = Figma_cache.get ~file_key ~node_id ~options:cache_options () in
       let json_result = match cached_json with
         | Some json ->
-            Printf.eprintf "[Cache] HIT for node %s\n%!" node_id;
+            Log.Cache.info "HIT for node %s" node_id;
             Ok json
         | None ->
-            Printf.eprintf "[Cache] MISS for node %s → fetching from API\n%!" node_id;
+            Log.Cache.info "MISS for node %s, fetching from API" node_id;
             match Figma_effects.Perform.get_nodes ~token ~file_key ~node_ids:[node_id] ?depth ?geometry ?plugin_data ?version () with
             | Error err -> Error err
             | Ok json ->
@@ -97,7 +97,7 @@ let handle_get_node_bundle args : (Yojson.Safe.t, string) result =
                 let dsl_json =
                   try Yojson.Safe.from_string dsl_str
                   with exn ->
-                    Printf.eprintf "[mcp_tools] Warning: DSL JSON parse failed for node %s: %s\n%!" node_id (Printexc.to_string exn);
+                    Log.Mcp.warn "DSL JSON parse failed for node %s: %s" node_id (Printexc.to_string exn);
                     `Null
                 in
                 let (image_url, image_download) =

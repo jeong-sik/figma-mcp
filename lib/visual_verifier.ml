@@ -266,7 +266,7 @@ let parse_diff_regions json =
         };
       }
   with exn ->
-    Printf.eprintf "[visual_verifier] Warning: diff regions parse failed: %s\n%!" (Printexc.to_string exn);
+    Log.Visual.warn "diff regions parse failed: %s" (Printexc.to_string exn);
     empty_diff_regions
 
 (** Node.js ssim-compare.js로 비교 (영역 정보 포함) *)

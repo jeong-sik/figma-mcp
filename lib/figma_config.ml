@@ -250,9 +250,9 @@ end
 
 (** Print configuration summary *)
 let print_summary () =
-  Printf.eprintf "[figma_config] Cache: dir=%s ttl=%.1fh l1_max=%d l2_max=%dMB\n%!"
+  Log.Config.info "Cache: dir=%s ttl=%.1fh l1_max=%d l2_max=%dMB"
     Cache.dir Cache.ttl_hours Cache.l1_max Cache.l2_max_mb;
-  Printf.eprintf "[figma_config] Plugin: ttl=%.0fs poll_max=%dms max_cmd=%d max_res=%d max_waiters=%d\n%!"
+  Log.Config.info "Plugin: ttl=%.0fs poll_max=%dms max_cmd=%d max_res=%d max_waiters=%d"
     Plugin.ttl_seconds Plugin.poll_max_ms Plugin.max_commands Plugin.max_results Plugin.max_waiters;
-  Printf.eprintf "[figma_config] Response: max_inline=%d dir=%s ttl=%ds\n%!"
+  Log.Config.info "Response: max_inline=%d dir=%s ttl=%ds"
     Response.max_inline Response.large_dir Response.ttl_seconds
