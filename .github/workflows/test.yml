@@ -20,9 +20,10 @@ jobs:
 
       - name: Pin git dependencies
         run: |
-          opam pin add mcp_protocol https://github.com/jeong-sik/mcp-protocol-sdk.git#main -n -y
-          opam pin add mcp_protocol_eio https://github.com/jeong-sik/mcp-protocol-sdk.git#main -n -y
-          opam pin add mcp_protocol_http https://github.com/jeong-sik/mcp-protocol-sdk.git#main -n -y
+          SDK_REF=refactor/mcp-correctness-audit
+          opam pin add mcp_protocol https://github.com/jeong-sik/mcp-protocol-sdk.git#${SDK_REF} -n -y
+          opam pin add mcp_protocol_eio https://github.com/jeong-sik/mcp-protocol-sdk.git#${SDK_REF} -n -y
+          opam pin add mcp_protocol_http https://github.com/jeong-sik/mcp-protocol-sdk.git#${SDK_REF} -n -y
 
       - name: Install dependencies
         run: |
