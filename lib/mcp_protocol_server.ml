@@ -150,6 +150,44 @@ let run ~sw ~net ~clock ~domain_mgr config server =
 (** Graceful shutdown exception *)
 exception Shutdown
 
+let install_shutdown_handlers pending_shutdown_signal =
+  let request_shutdown signal_name =
+    ignore
+      (Atomic.compare_and_set pending_shutdown_signal None (Some signal_name))
+  in
+  Sys.set_signal Sys.sigterm
+    (Sys.Signal_handle (fun _ -> request_shutdown "SIGTERM"));
+  Sys.set_signal Sys.sigint
+    (Sys.Signal_handle (fun _ -> request_shutdown "SIGINT"))
+
+let rec await_http_shutdown_signal ~clock pending_shutdown_signal =
+  match Atomic.get pending_shutdown_signal with
+  | Some signal_name ->
+      Atomic.set pending_shutdown_signal None;
+      eprintf "\n🎨 %s: Received %s, shutting down gracefully...\n%!"
+        Figma_mcp_protocol.server_name signal_name;
+      broadcast_sse_shutdown signal_name;
+      eprintf "🎨 %s: Sent shutdown notification to %d SSE clients\n%!"
+        Figma_mcp_protocol.server_name (Hashtbl.length sse_clients);
+      Eio.Time.sleep clock 0.2;
+      close_all_sse_connections ();
+      Eio.Time.sleep clock 0.2;
+      raise Shutdown
+  | None ->
+      Eio.Time.sleep clock 0.1;
+      await_http_shutdown_signal ~clock pending_shutdown_signal
+
+let rec await_stdio_shutdown_signal ~clock pending_shutdown_signal =
+  match Atomic.get pending_shutdown_signal with
+  | Some signal_name ->
+      Atomic.set pending_shutdown_signal None;
+      eprintf "\n[%s] Received %s, shutting down...\n%!"
+        Figma_mcp_protocol.server_name signal_name;
+      raise Shutdown
+  | None ->
+      Eio.Time.sleep clock 0.1;
+      await_stdio_shutdown_signal ~clock pending_shutdown_signal
+
 (** Start the server - entry point for main.ml (Pure Eio, no Lwt) *)
 let start_server ?(config = default_config) server =
   (* Initialize crypto RNG for HTTPS/TLS *)
@@ -159,44 +197,14 @@ let start_server ?(config = default_config) server =
   let clock = Eio.Stdenv.clock env in
   let domain_mgr = Some (Eio.Stdenv.domain_mgr env) in
 
-  (* Graceful shutdown setup *)
-  let switch_ref = ref None in
-  let shutdown_initiated = ref false in
-  let initiate_shutdown signal_name =
-    if not !shutdown_initiated then begin
-      shutdown_initiated := true;
-      eprintf "\n🎨 %s: Received %s, shutting down gracefully...\n%!" Figma_mcp_protocol.server_name signal_name;
-
-      (* Broadcast shutdown notification to all SSE clients *)
-      broadcast_sse_shutdown signal_name;
-      eprintf "🎨 %s: Sent shutdown notification to %d SSE clients\n%!" Figma_mcp_protocol.server_name (Hashtbl.length sse_clients);
-
-      (* Give clients 200ms to receive the notification.
-         NOTE: Unix.sleepf is intentional here. This closure runs as a POSIX signal
-         handler (Sys.set_signal) which executes outside Eio fiber context, so
-         Eio.Time.sleep is not available. Blocking the OS thread is acceptable
-         during shutdown. *)
-      Unix.sleepf 0.2;
-
-      (* Gracefully close all SSE connections before Switch.fail *)
-      close_all_sse_connections ();
-
-      (* Give connections 200ms to complete close handshake (same signal handler
-         context constraint as above) *)
-      Unix.sleepf 0.2;
-
-      match !switch_ref with
-      | Some sw -> Eio.Switch.fail sw Shutdown
-      | None -> ()
-    end
-  in
-  Sys.set_signal Sys.sigterm (Sys.Signal_handle (fun _ -> initiate_shutdown "SIGTERM"));
-  Sys.set_signal Sys.sigint (Sys.Signal_handle (fun _ -> initiate_shutdown "SIGINT"));
+  let pending_shutdown_signal = Atomic.make None in
+  install_shutdown_handlers pending_shutdown_signal;
 
   (try
     Eio.Switch.run @@ fun sw ->
-    switch_ref := Some sw;
-    run ~sw ~net ~clock ~domain_mgr config server
+    Eio.Fiber.first
+      (fun () -> run ~sw ~net ~clock ~domain_mgr config server)
+      (fun () -> await_http_shutdown_signal ~clock pending_shutdown_signal)
   with
   | Shutdown ->
       eprintf "🎨 %s: Shutdown complete.\n%!" Figma_mcp_protocol.server_name
@@ -257,25 +265,14 @@ let start_stdio_server server =
   let net = Eio.Stdenv.net env in
   let clock = Eio.Stdenv.clock env in
 
-  (* Graceful shutdown setup *)
-  let switch_ref = ref None in
-  let shutdown_initiated = ref false in
-  let initiate_shutdown signal_name =
-    if not !shutdown_initiated then begin
-      shutdown_initiated := true;
-      eprintf "\n[%s] Received %s, shutting down...\n%!" Figma_mcp_protocol.server_name signal_name;
-      match !switch_ref with
-      | Some sw -> Eio.Switch.fail sw Shutdown
-      | None -> ()
-    end
-  in
-  Sys.set_signal Sys.sigterm (Sys.Signal_handle (fun _ -> initiate_shutdown "SIGTERM"));
-  Sys.set_signal Sys.sigint (Sys.Signal_handle (fun _ -> initiate_shutdown "SIGINT"));
+  let pending_shutdown_signal = Atomic.make None in
+  install_shutdown_handlers pending_shutdown_signal;
 
   (try
     Eio.Switch.run @@ fun sw ->
-    switch_ref := Some sw;
-    run_stdio ~sw ~env ~net ~clock server
+    Eio.Fiber.first
+      (fun () -> run_stdio ~sw ~env ~net ~clock server)
+      (fun () -> await_stdio_shutdown_signal ~clock pending_shutdown_signal)
   with
   | Shutdown ->
       eprintf "[%s] Shutdown complete.\n%!" Figma_mcp_protocol.server_name

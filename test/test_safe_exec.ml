@@ -37,11 +37,20 @@ let test_run_stdout_exit () =
   | Ok _ -> fail "expected failure"
   | Error _ -> ()
 
+let test_missing_binary () =
+  match Safe_exec.run ~timeout_ms:2000 ~output_limit:1024
+          "/nonexistent/path/binary" [| "/nonexistent/path/binary" |] with
+  | Ok _ -> fail "expected missing binary error"
+  | Error msg ->
+      check bool "mentions unix error" true
+        (String.length msg > 0)
+
 let () =
   run "Safe Exec" [
     "limits", [
       "output cap", `Quick, test_output_cap;
       "timeout", `Quick, test_timeout;
       "nonzero exit", `Quick, test_run_stdout_exit;
+      "missing binary", `Quick, test_missing_binary;
     ];
   ]

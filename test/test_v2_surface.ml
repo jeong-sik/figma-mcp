@@ -53,9 +53,36 @@ let test_initialize_instructions () =
   check bool "omits removed summary tool" false
     (contains ~needle:"figma_get_node_summary" instructions)
 
+let test_streamable_accept_requires_json_and_sse () =
+  let request =
+    Httpun.Request.create
+      ~headers:
+        (Httpun.Headers.of_list
+           [ ("accept", "application/json, text/event-stream") ])
+      `POST "/mcp"
+  in
+  check bool "streamable accept" true
+    (Mcp_http_helpers.Request.accepts_sse request)
+
+let test_streamable_accept_rejects_sse_only () =
+  let request =
+    Httpun.Request.create
+      ~headers:(Httpun.Headers.of_list [ ("accept", "text/event-stream") ])
+      `POST "/mcp"
+  in
+  check bool "sse-only is insufficient" false
+    (Mcp_http_helpers.Request.accepts_sse request)
+
 let () =
   run "v2-surface"
     [
       ("server", [ test_case "public surface" `Quick test_public_surface ]);
-      ("protocol", [ test_case "initialize" `Quick test_initialize_instructions ]);
+      ( "protocol",
+        [
+          test_case "initialize" `Quick test_initialize_instructions;
+          test_case "streamable accept requires json+sse" `Quick
+            test_streamable_accept_requires_json_and_sse;
+          test_case "streamable accept rejects sse-only" `Quick
+            test_streamable_accept_rejects_sse_only;
+        ] );
     ]

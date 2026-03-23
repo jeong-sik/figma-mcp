@@ -9,3 +9,7 @@
 (test
  (name test_v2_resources)
  (libraries figma_mcp alcotest str))
+
+(test
+ (name test_safe_exec)
+ (libraries figma_mcp alcotest))

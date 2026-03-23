@@ -29,8 +29,22 @@ let command_exists name =
   | Some _ -> true
   | None -> false
 
+let format_unix_error ~context = function
+  | Unix.Unix_error (err, fn, arg) ->
+      let call =
+        if arg = "" then fn else Printf.sprintf "%s(%s)" fn arg
+      in
+      Printf.sprintf "%s: %s: %s" context call (Unix.error_message err)
+  | exn -> Printf.sprintf "%s: %s" context (Printexc.to_string exn)
+
+let close_fd_best_effort fd =
+  try Unix.close fd with Unix.Unix_error _ -> ()
+
 let set_nonblock fd =
-  try Unix.set_nonblock fd with Unix.Unix_error _ -> ()
+  try
+    Unix.set_nonblock fd;
+    Ok ()
+  with exn -> Error (format_unix_error ~context:"set_nonblock" exn)
 
 let read_available ~fd ~buf ~limit ~truncated ~closed =
   if !closed then ()
@@ -50,15 +64,27 @@ let read_available ~fd ~buf ~limit ~truncated ~closed =
 let waitpid_nohang pid =
   try
     match Unix.waitpid [Unix.WNOHANG] pid with
-    | 0, _ -> None
-    | _, status -> Some status
-  with Unix.Unix_error _ -> None
+    | 0, _ -> Ok None
+    | _, status -> Ok (Some status)
+  with
+  | Unix.Unix_error (Unix.ECHILD, _, _) -> Ok None
+  | exn -> Error (format_unix_error ~context:"waitpid" exn)
 
 let kill_process pid =
-  try Unix.kill pid Sys.sigterm with Unix.Unix_error _ -> ()
+  try
+    Unix.kill pid Sys.sigterm;
+    Ok ()
+  with
+  | Unix.Unix_error (Unix.ESRCH, _, _) -> Ok ()
+  | exn -> Error (format_unix_error ~context:"sigterm" exn)
 
 let kill_process_force pid =
-  try Unix.kill pid Sys.sigkill with Unix.Unix_error _ -> ()
+  try
+    Unix.kill pid Sys.sigkill;
+    Ok ()
+  with
+  | Unix.Unix_error (Unix.ESRCH, _, _) -> Ok ()
+  | exn -> Error (format_unix_error ~context:"sigkill" exn)
 
 let run_blocking ?(timeout_ms=default_timeout_ms) ?(output_limit=default_output_limit) cmd argv =
   try
@@ -67,8 +93,18 @@ let run_blocking ?(timeout_ms=default_timeout_ms) ?(output_limit=default_output_
     let pid = Unix.create_process cmd argv Unix.stdin stdout_w stderr_w in
     Unix.close stdout_w;
     Unix.close stderr_w;
-    set_nonblock stdout_r;
-    set_nonblock stderr_r;
+    (match set_nonblock stdout_r with
+     | Ok () -> ()
+     | Error msg ->
+         close_fd_best_effort stdout_r;
+         close_fd_best_effort stderr_r;
+         raise (Failure msg));
+    (match set_nonblock stderr_r with
+     | Ok () -> ()
+     | Error msg ->
+         close_fd_best_effort stdout_r;
+         close_fd_best_effort stderr_r;
+         raise (Failure msg));
 
     let stdout_buf = Buffer.create 1024 in
     let stderr_buf = Buffer.create 1024 in
@@ -84,7 +120,9 @@ let run_blocking ?(timeout_ms=default_timeout_ms) ?(output_limit=default_output_
       let now = Unix.gettimeofday () in
       if (not !timed_out) && now -. start > (float_of_int timeout_ms /. 1000.0) then begin
         timed_out := true;
-        kill_process pid
+        match kill_process pid with
+        | Ok () -> ()
+        | Error msg -> raise (Failure msg)
       end;
 
       let timeout = 0.1 in
@@ -107,11 +145,17 @@ let run_blocking ?(timeout_ms=default_timeout_ms) ?(output_limit=default_output_
          with Unix.Unix_error (Unix.EINTR, _, _) -> ());
 
       (match !status with
-       | None -> status := waitpid_nohang pid
+       | None ->
+           (match waitpid_nohang pid with
+            | Ok next_status -> status := next_status
+            | Error msg -> raise (Failure msg))
        | Some _ -> ());
 
-      if !timed_out && now -. start > (float_of_int timeout_ms /. 1000.0 +. kill_grace_seconds) then
-        kill_process_force pid;
+      if !timed_out && now -. start > (float_of_int timeout_ms /. 1000.0 +. kill_grace_seconds) then (
+        match kill_process_force pid with
+        | Ok () -> ()
+        | Error msg -> raise (Failure msg)
+      );
 
       if (!status <> None) && !stdout_closed && !stderr_closed then ()
       else loop ()

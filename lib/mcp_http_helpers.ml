@@ -62,7 +62,7 @@ module Response = struct
   (** SSE streaming response for MCP streamable-http protocol *)
   let sse_stream reqd ~on_write =
     let headers = Httpun.Headers.of_list ([
-      ("content-type", "text/event-stream");
+      ("content-type", Mcp_protocol.Http_negotiation.mcp_sse_content_type);
       ("cache-control", "no-cache");
       ("connection", "keep-alive");
     ] @ Mcp_cors.headers reqd ~include_methods:false ~include_headers:false) in
@@ -84,7 +84,7 @@ module Response = struct
     let body = prime ^ message in
     let session_headers = if session_id = "" then [] else [("mcp-session-id", session_id)] in
     let headers = Httpun.Headers.of_list ([
-      ("content-type", "text/event-stream");
+      ("content-type", Mcp_protocol.Http_negotiation.mcp_sse_content_type);
       ("content-length", string_of_int (String.length body));
       ("cache-control", "no-cache");
     ] @ Mcp_cors.headers reqd ~include_methods:true ~include_headers:true
@@ -196,15 +196,11 @@ module Request = struct
   let method_ (request : Httpun.Request.t) =
     request.meth
 
-  (** Check if client accepts SSE (MCP Streamable HTTP) *)
+  (** Check if client accepts streamable MCP per shared SDK negotiation.
+      The current MCP HTTP rules require both JSON and SSE in Accept. *)
   let accepts_sse (request : Httpun.Request.t) =
     match Httpun.Headers.get request.Httpun.Request.headers "accept" with
-    | Some accept ->
-        let accept_lower = String.lowercase_ascii accept in
-        (try
-          let _ = Str.search_forward (Str.regexp_string "text/event-stream") accept_lower 0 in
-          true
-        with Not_found -> false)
+    | Some accept -> Mcp_protocol.Http_negotiation.accepts_streamable_mcp accept
     | None -> false
 end
 

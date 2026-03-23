@@ -268,7 +268,8 @@ let test_accepts_sse_true () =
   let request =
     Httpun.Request.create
       ~headers:
-        (Httpun.Headers.of_list [ ("accept", "text/event-stream") ])
+        (Httpun.Headers.of_list
+           [ ("accept", "application/json, text/event-stream") ])
       `GET"/mcp"
   in
   check bool "accepts SSE" true
@@ -300,6 +301,16 @@ let test_accepts_sse_mixed () =
       `GET"/mcp"
   in
   check bool "mixed accept" true
+    (Mcp_http_helpers.Request.accepts_sse request)
+
+let test_accepts_sse_sse_only_false () =
+  let request =
+    Httpun.Request.create
+      ~headers:
+        (Httpun.Headers.of_list [ ("accept", "text/event-stream") ])
+      `GET"/mcp"
+  in
+  check bool "SSE only is insufficient" false
     (Mcp_http_helpers.Request.accepts_sse request)
 
 (* ============== Mcp_protocol_request: classify_message ============== *)
@@ -1013,6 +1024,7 @@ let () =
           test_case "accepts_sse false" `Quick test_accepts_sse_false;
           test_case "accepts_sse no header" `Quick test_accepts_sse_no_header;
           test_case "accepts_sse mixed" `Quick test_accepts_sse_mixed;
+          test_case "accepts_sse sse-only false" `Quick test_accepts_sse_sse_only_false;
         ] );
       ( "Mcp_protocol_request",
         [
