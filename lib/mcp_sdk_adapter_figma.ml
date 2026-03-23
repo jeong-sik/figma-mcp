@@ -69,9 +69,11 @@ let sdk_tool_of_local (tool : Figma_mcp_protocol.tool_def) : MT.tool =
     name = tool.name;
     description = Some tool.description;
     input_schema = tool.input_schema;
+    output_schema = None;
     title = None;
     annotations = None;
     icon = None;
+    execution = None;
   }
 
 let sdk_resource_of_local (resource : Figma_mcp_protocol.mcp_resource) : MT.resource =
