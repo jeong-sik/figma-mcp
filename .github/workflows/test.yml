@@ -20,7 +20,7 @@ jobs:
 
       - name: Pin git dependencies
         run: |
-          SDK_REF=refactor/mcp-correctness-audit
+          SDK_REF=63200cf106ce9eee7b65c59d3110904e3bd58a73e
           opam pin add mcp_protocol https://github.com/jeong-sik/mcp-protocol-sdk.git#${SDK_REF} -n -y
           opam pin add mcp_protocol_eio https://github.com/jeong-sik/mcp-protocol-sdk.git#${SDK_REF} -n -y
           opam pin add mcp_protocol_http https://github.com/jeong-sik/mcp-protocol-sdk.git#${SDK_REF} -n -y
