@@ -1355,12 +1355,6 @@ let handle_category category_name args =
   let tool_param = get_string "tool" args in
   let args_param = member "args" args in
 
-  (* #161: mode validation을 Eio 컨텍스트 진입 전에 즉시 수행 *)
-  match mode_param with
-  | Some m when m <> "list" && m <> "describe" && m <> "call" ->
-      Error (sprintf "Invalid mode: %s (use list|describe|call)" m)
-  | _ ->
-
   let find_tool_def (full_name : string) : tool_def option =
     List.find_opt (fun (t : tool_def) -> t.name = full_name) all_detailed_tools
   in
@@ -1371,7 +1365,7 @@ let handle_category category_name args =
       | Some "list" -> `List
       | Some "describe" -> `Describe
       | Some "call" -> `Call
-      | Some _ -> assert false (* validated above *)
+      | Some m -> raise (Invalid_argument (sprintf "Invalid mode: %s (use list|describe|call)" m))
       | None ->
           match tool_param, args_param with
           | None, _ -> `List
