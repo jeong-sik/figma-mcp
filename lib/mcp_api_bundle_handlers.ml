@@ -446,8 +446,9 @@ let handle_get_node_chunk args : (Yojson.Safe.t, string) result =
                    | `Null -> Error (Printf.sprintf "Document not found for node %s" node_id)
                    | _ ->
                        let root_children_count =
-                         try (node_data |> member "children" |> to_list |> List.length)
-                         with _ -> 0
+                         try node_data |> member "children" |> to_list |> List.length
+                         with
+                         | Yojson.Safe.Util.Type_error _ | Yojson.Json_error _ -> 0
                        in
                        let effective_max_children =
                          match max_children, auto_trim_children with
