@@ -1,13 +1,18 @@
-(** MCP Protocol - JSON-RPC 2.0 핸들러 (2025-11-25 스펙) *)
+(** MCP Protocol - JSON-RPC 2.0 handler (2025-11-25 spec).
+
+    Types are aliases for mcp_protocol SDK types where possible.
+    Only [mcp_prompt] remains local because the SDK [prompt] type
+    does not carry a template [text] field. *)
 
 open Printf
 
-(* The local protocol wrapper lives under a figma-specific module name so the
-   external MCP SDK can be linked without colliding on Mcp_protocol. *)
+(* SDK module aliases *)
 module Sdk_error_codes = Mcp_protocol.Error_codes
 module Sdk_jsonrpc = Mcp_protocol.Jsonrpc
+module Sdk_version = Mcp_protocol.Version
+module MT = Mcp_protocol.Mcp_types
 
-(** ============== JSON-RPC 타입 ============== *)
+(** ============== JSON-RPC types ============== *)
 
 type json_rpc_request = {
   jsonrpc: string;
@@ -20,32 +25,43 @@ type json_rpc_response =
   | RpcSuccess of { id: Yojson.Safe.t; result: Yojson.Safe.t }
   | RpcError of { id: Yojson.Safe.t; code: int; message: string; data: Yojson.Safe.t option }
 
-type tool_def = {
-  name: string;
-  description: string;
-  input_schema: Yojson.Safe.t;
-}
+(** ============== MCP types (SDK aliases) ============== *)
 
-type mcp_resource = {
-  uri: string;
-  name: string;
-  description: string;
-  mime_type: string;
-}
+type tool_def = MT.tool
+(** SDK [tool] with fields: name, description, input_schema,
+    output_schema, title, annotations, icon, execution. *)
 
-type mcp_resource_template = {
-  uri_template: string;
-  name: string;
-  description: string;
-  mime_type: string;
-}
+(** Convenience constructor matching the old 3-field signature. *)
+let make_tool_def ~name ~description ~input_schema : tool_def =
+  MT.make_tool ~name ~description ~input_schema ()
 
-type prompt_arg = {
-  name: string;
-  description: string;
-  required: bool;
-}
+type mcp_resource = MT.resource
+(** SDK [resource] with fields: uri, name, title, description,
+    mime_type, icon. *)
 
+(** Convenience constructor matching the old 4-field signature. *)
+let make_resource ~uri ~name ~description ~mime_type : mcp_resource =
+  MT.make_resource ~uri ~name ~description ~mime_type ()
+
+type mcp_resource_template = MT.resource_template
+(** SDK [resource_template] with fields: uri_template, name, title,
+    description, mime_type, icon. *)
+
+(** Convenience constructor matching the old 4-field signature. *)
+let make_resource_template ~uri_template ~name ~description ~mime_type
+    : mcp_resource_template =
+  { uri_template; name; title = None; description = Some description;
+    mime_type = Some mime_type; icon = None }
+
+type prompt_arg = MT.prompt_argument
+(** SDK [prompt_argument] with fields: name, description, required.
+    [description] and [required] are [option]. *)
+
+(** Convenience constructor matching the old 3-field signature. *)
+let make_prompt_arg ~name ~description ~required : prompt_arg =
+  { MT.name; description = Some description; required = Some required }
+
+(** Local prompt type -- extends SDK [prompt] with a template [text] field. *)
 type mcp_prompt = {
   name: string;
   description: string;
@@ -55,25 +71,22 @@ type mcp_prompt = {
 
 type resource_reader = string -> (string * string, string) result
 
-(** ============== 에러 코드 (JSON-RPC 2.0) ============== *)
+(** ============== Error codes (JSON-RPC 2.0) ============== *)
 let parse_error = Sdk_error_codes.parse_error
 let invalid_request = Sdk_error_codes.invalid_request
 let method_not_found = Sdk_error_codes.method_not_found
 let invalid_params = Sdk_error_codes.invalid_params
 let internal_error = Sdk_error_codes.internal_error
 
-(** ============== 서버 정보 ============== *)
-let supported_protocol_versions = [
-  "2024-11-05";
-  "2025-03-26";
-  "2025-11-25";
-]
+(** ============== Server info ============== *)
 
-let default_protocol_version = "2025-11-25"
+let supported_protocol_versions = Sdk_version.supported_versions
+let default_protocol_version = Sdk_version.latest
 
 let normalize_protocol_version version =
-  if List.mem version supported_protocol_versions then version
-  else default_protocol_version
+  match Sdk_version.negotiate ~requested:version with
+  | Some v -> v
+  | None -> default_protocol_version
 
 let protocol_version_from_params params =
   match params with
@@ -83,11 +96,11 @@ let protocol_version_from_params params =
        | _ -> default_protocol_version)
   | _ -> default_protocol_version
 
-let protocol_version = default_protocol_version  (* for backward compat *)
+let protocol_version = default_protocol_version  (* backward compat *)
 let server_name = "figma-mcp"
 let server_version = Version.version
 
-(** ============== JSON 유틸리티 ============== *)
+(** ============== JSON utilities ============== *)
 
 let member key json =
   match json with
@@ -125,7 +138,7 @@ let is_notification_id = function
 let is_notification req =
   is_notification_id req.id
 
-(** ============== 응답 생성 ============== *)
+(** ============== Response builders ============== *)
 
 let make_success_response id result : Yojson.Safe.t =
   Sdk_jsonrpc.make_response_json ~id:(sdk_id_of_json id) ~result
@@ -133,44 +146,51 @@ let make_success_response id result : Yojson.Safe.t =
 let make_error_response id code message data : Yojson.Safe.t =
   Sdk_jsonrpc.make_error_json ~id:(sdk_id_of_json id) ~code ~message ?data ()
 
-(** ============== Tool 정의 → JSON ============== *)
+(** ============== Tool definition -> JSON ============== *)
 
 let tool_to_json (tool : tool_def) : Yojson.Safe.t =
   (* P1.4: Auto-detect [DEPRECATED] prefix and add deprecated field *)
-  let is_deprecated = String.length tool.description >= 12 &&
-    String.sub tool.description 0 12 = "[DEPRECATED]" in
-  let base_fields = [
-    ("name", `String tool.name);
-    ("description", `String tool.description);
-    ("inputSchema", tool.input_schema);
-  ] in
+  let desc = Option.value tool.description ~default:"" in
+  let is_deprecated = String.length desc >= 12 &&
+    String.sub desc 0 12 = "[DEPRECATED]" in
+  let base = MT.tool_to_yojson tool in
   if is_deprecated then
-    `Assoc (base_fields @ [("deprecated", `Bool true)])
+    match base with
+    | `Assoc fields -> `Assoc (fields @ [("deprecated", `Bool true)])
+    | other -> other
   else
-    `Assoc base_fields
+    base
 
 let resource_to_json (r : mcp_resource) : Yojson.Safe.t =
-  `Assoc [
+  (* Custom serializer: MCP spec uses camelCase "mimeType" *)
+  let fields = [
     ("uri", `String r.uri);
     ("name", `String r.name);
-    ("description", `String r.description);
-    ("mimeType", `String r.mime_type);
-  ]
+  ] in
+  let fields = match r.title with Some t -> ("title", `String t) :: fields | None -> fields in
+  let fields = match r.description with Some d -> ("description", `String d) :: fields | None -> fields in
+  let fields = match r.mime_type with Some m -> ("mimeType", `String m) :: fields | None -> fields in
+  let fields = match r.icon with Some i -> ("icon", `String i) :: fields | None -> fields in
+  `Assoc (List.rev fields)
 
 let resource_template_to_json (t : mcp_resource_template) : Yojson.Safe.t =
-  `Assoc [
+  (* Custom serializer: MCP spec uses camelCase "uriTemplate", "mimeType" *)
+  let fields = [
     ("uriTemplate", `String t.uri_template);
     ("name", `String t.name);
-    ("description", `String t.description);
-    ("mimeType", `String t.mime_type);
-  ]
+  ] in
+  let fields = match t.title with Some v -> ("title", `String v) :: fields | None -> fields in
+  let fields = match t.description with Some d -> ("description", `String d) :: fields | None -> fields in
+  let fields = match t.mime_type with Some m -> ("mimeType", `String m) :: fields | None -> fields in
+  let fields = match t.icon with Some i -> ("icon", `String i) :: fields | None -> fields in
+  `Assoc (List.rev fields)
 
 let prompt_arg_to_json (arg : prompt_arg) : Yojson.Safe.t =
-  `Assoc [
-    ("name", `String arg.name);
-    ("description", `String arg.description);
-    ("required", `Bool arg.required);
-  ]
+  (* Custom serializer to produce non-optional output for backward compat *)
+  let fields = [("name", `String arg.name)] in
+  let fields = match arg.description with Some d -> ("description", `String d) :: fields | None -> fields in
+  let fields = match arg.required with Some r -> ("required", `Bool r) :: fields | None -> fields in
+  `Assoc (List.rev fields)
 
 let prompt_to_json (p : mcp_prompt) : Yojson.Safe.t =
   `Assoc [
@@ -187,9 +207,9 @@ let prompt_to_detail_json (p : mcp_prompt) : Yojson.Safe.t =
     ("text", `String p.text);
   ]
 
-(** ============== 핸들러 타입 ============== *)
+(** ============== Handler types ============== *)
 
-(** 동기 핸들러 타입 - Pure Eio 기반 *)
+(** Sync handler type - Pure Eio based *)
 type tool_handler_sync = Yojson.Safe.t -> (Yojson.Safe.t, string) result
 
 type mcp_server = {
@@ -201,9 +221,9 @@ type mcp_server = {
   read_resource: resource_reader;
 }
 
-(** ============== 기본 핸들러 구현 ============== *)
+(** ============== Default handler implementations ============== *)
 
-(** MCP Instructions: LLM이 읽고 따라야 할 개발 가이드라인 *)
+(** MCP Instructions: guidelines for LLMs *)
 let mcp_instructions = {|
 ## figma-mcp v2
 
@@ -306,9 +326,9 @@ let handle_resources_read server params : (Yojson.Safe.t, int * string) result =
        | None -> Error (invalid_params, "Missing uri"))
   | _ -> Error (invalid_params, "Invalid params format")
 
-(** ============== 동기 요청 처리 (Pure Eio) ============== *)
+(** ============== Sync request processing (Pure Eio) ============== *)
 
-(** tools/call 핸들러 - 동기 실행 *)
+(** tools/call handler - sync execution *)
 let handle_tools_call_sync server params : (Yojson.Safe.t, int * string) result =
   match params with
   | Some (`Assoc lst) ->
@@ -339,7 +359,7 @@ let handle_tools_call_sync server params : (Yojson.Safe.t, int * string) result 
        | None -> Error (invalid_params, "Missing tool name"))
   | _ -> Error (invalid_params, "Invalid params format")
 
-(** 메인 요청 처리 - 동기 버전 (HTTP/Eio 모드용) *)
+(** Main request processing - sync version (HTTP/Eio mode) *)
 let process_request_sync server req : Yojson.Safe.t =
   let id = Option.value req.id ~default:`Null in
 
@@ -380,10 +400,9 @@ let process_request_sync server req : Yojson.Safe.t =
   | _ ->
       make_error_response id method_not_found (sprintf "Unknown method: %s" req.method_) None
 
-(** ============== stdio 서버 루프 ============== **)
+(** ============== stdio server loop ============== **)
 
 let run_stdio_server server =
-  (* stderr로 로깅 *)
   eprintf "[%s] MCP Server %s started (protocol: %s)\n%!" server_name server_version protocol_version;
 
   try
@@ -393,10 +412,8 @@ let run_stdio_server server =
         match parse_request line with
         | Ok req ->
             if is_notification req then
-              (* Notification: no response on stdout per JSON-RPC *)
               ignore (process_request_sync server req)
             else begin
-              (* stdio 모드: 동기 핸들러 직접 실행 *)
               let response = process_request_sync server req in
               let response_str = Yojson.Safe.to_string response in
               print_endline response_str;
@@ -414,7 +431,7 @@ let run_stdio_server server =
   | exn ->
       eprintf "[%s] Error: %s\n%!" server_name (Printexc.to_string exn)
 
-(** ============== 서버 생성 헬퍼 ============== *)
+(** ============== Server creation helper ============== *)
 
 let create_server
   ?(handlers_sync=[])

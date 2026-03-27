@@ -9,12 +9,10 @@ let common_node_ref_props =
   ]
 
 let tool_figma_get_design_context : tool_def =
-  {
-    name = "figma_get_design_context";
-    description =
-      "Return fidelity-first design context for a Figma node. This is the v2 entrypoint for design-to-code workflows.";
-    input_schema =
-      object_schema
+  make_tool_def
+    ~name:"figma_get_design_context"
+    ~description:"Return fidelity-first design context for a Figma node. This is the v2 entrypoint for design-to-code workflows."
+    ~input_schema:(object_schema
         (common_node_ref_props
         @ [
             ("client_frameworks", string_prop "Optional client framework label, such as React or SwiftUI.");
@@ -25,47 +23,38 @@ let tool_figma_get_design_context : tool_def =
             ("plugin_channel_id", string_prop "Optional plugin channel id for desktop enrichment.");
             ("version", string_prop "Optional Figma file version.");
           ])
-        [];
-  }
+        [])
 
 let tool_figma_get_metadata : tool_def =
-  {
-    name = "figma_get_metadata";
-    description =
-      "Return sparse XML metadata for a Figma node or file. Use this to inspect large selections before fetching full context.";
-    input_schema =
-      object_schema
+  make_tool_def
+    ~name:"figma_get_metadata"
+    ~description:"Return sparse XML metadata for a Figma node or file. Use this to inspect large selections before fetching full context."
+    ~input_schema:(object_schema
         (common_node_ref_props
         @ [
             ("depth", number_prop "Max tree depth to include. Default: 2.");
             ("max_children", number_prop "Max children per node before truncation. Default: 100.");
             ("version", string_prop "Optional Figma file version.");
           ])
-        [];
-  }
+        [])
 
 let tool_figma_get_variable_defs : tool_def =
-  {
-    name = "figma_get_variable_defs";
-    description =
-      "Return variable and style definitions used by a Figma file, optimized for design-token consumption.";
-    input_schema =
-      object_schema
+  make_tool_def
+    ~name:"figma_get_variable_defs"
+    ~description:"Return variable and style definitions used by a Figma file, optimized for design-token consumption."
+    ~input_schema:(object_schema
         [
           ("url", string_prop "Optional Figma URL used only to derive file_key.");
           ("file_key", string_prop "Figma file key.");
           ("format", enum_prop [ "summary"; "raw"; "resolved" ] "Output mode. Default: resolved.");
         ]
-        [];
-  }
+        [])
 
 let tool_figma_get_screenshot : tool_def =
-  {
-    name = "figma_get_screenshot";
-    description =
-      "Return export URLs or downloaded screenshot paths for a Figma node.";
-    input_schema =
-      object_schema
+  make_tool_def
+    ~name:"figma_get_screenshot"
+    ~description:"Return export URLs or downloaded screenshot paths for a Figma node."
+    ~input_schema:(object_schema
         (common_node_ref_props
         @ [
             ("format", enum_prop [ "png"; "jpg"; "svg"; "pdf" ] "Export format. Default: png.");
@@ -75,16 +64,13 @@ let tool_figma_get_screenshot : tool_def =
             ("use_absolute_bounds", bool_prop "Use absolute bounds when exporting.");
             ("version", string_prop "Optional Figma file version.");
           ])
-        [];
-  }
+        [])
 
 let tool_figma_get_code_connect_map : tool_def =
-  {
-    name = "figma_get_code_connect_map";
-    description =
-      "Resolve Code Connect mappings from the local template/index configuration.";
-    input_schema =
-      object_schema
+  make_tool_def
+    ~name:"figma_get_code_connect_map"
+    ~description:"Resolve Code Connect mappings from the local template/index configuration."
+    ~input_schema:(object_schema
         [
           ("mode", enum_prop [ "index"; "match"; "validate"; "list" ] "Optional explicit mode. Default: match when a selector exists, otherwise index.");
           ("path", string_prop "Optional mapping file path. Defaults to ./figma-code-connect.json or ./.figma/code-connect.json.");
@@ -95,23 +81,19 @@ let tool_figma_get_code_connect_map : tool_def =
           ("name", string_prop "Match selector: Figma component name.");
           ("limit", number_prop "Max matches to return. Default: 5.");
         ]
-        [];
-  }
+        [])
 
 let tool_figma_whoami : tool_def =
-  {
-    name = "figma_whoami";
-    description = "Return the authenticated Figma user.";
-    input_schema = object_schema [] [];
-  }
+  make_tool_def
+    ~name:"figma_whoami"
+    ~description:"Return the authenticated Figma user."
+    ~input_schema:(object_schema [] [])
 
 let tool_figma_verify_semantic : tool_def =
-  {
-    name = "figma_verify_semantic";
-    description =
-      "Verify HTML against Figma semantics using layout, typography, and style metrics.";
-    input_schema =
-      object_schema
+  make_tool_def
+    ~name:"figma_verify_semantic"
+    ~description:"Verify HTML against Figma semantics using layout, typography, and style metrics."
+    ~input_schema:(object_schema
         (common_node_ref_props
         @ [
             ("html", string_prop "Rendered HTML to verify.");
@@ -120,16 +102,13 @@ let tool_figma_verify_semantic : tool_def =
             ("score_threshold", number_prop "Passing score threshold.");
             ("version", string_prop "Optional Figma file version.");
           ])
-        [ "html" ];
-  }
+        [ "html" ])
 
 let tool_figma_verify_visual : tool_def =
-  {
-    name = "figma_verify_visual";
-    description =
-      "Verify rendered HTML against a Figma screenshot using SSIM and text validation.";
-    input_schema =
-      object_schema
+  make_tool_def
+    ~name:"figma_verify_visual"
+    ~description:"Verify rendered HTML against a Figma screenshot using SSIM and text validation."
+    ~input_schema:(object_schema
         (common_node_ref_props
         @ [
             ("html", string_prop "Rendered HTML to verify.");
@@ -140,8 +119,7 @@ let tool_figma_verify_visual : tool_def =
             ("height", number_prop "Viewport height. Default: 812.");
             ("version", string_prop "Optional Figma file version.");
           ])
-        [ "html" ];
-  }
+        [ "html" ])
 
 let public_tools : tool_def list =
   [
