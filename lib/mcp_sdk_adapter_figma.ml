@@ -196,6 +196,7 @@ let make_prompt_binding (prompt : Figma_mcp_protocol.mcp_prompt) : registered_pr
               content = MT.PromptText { type_ = "text"; text };
             };
           ];
+        _meta = None;
       }
   in
   { prompt = sdk_prompt; handler }
