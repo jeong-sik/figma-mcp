@@ -1382,7 +1382,7 @@ let handle_category category_name args =
                  let full_name = "figma_" ^ tool_name in
                  let desc =
                    match find_tool_def full_name with
-                   | Some t -> `String t.description
+                   | Some t -> (match t.description with Some d -> `String d | None -> `Null)
                    | None -> `Null
                  in
                  `Assoc [
@@ -1422,7 +1422,7 @@ let handle_category category_name args =
                         ("category", `String category_name);
                         ("name", `String tool_name);
                         ("full_name", `String full_name);
-                        ("description", `String t.description);
+                        ("description", match t.description with Some d -> `String d | None -> `Null);
                         ("input_schema", t.input_schema);
                         ("usage", `String (sprintf "figma_%s mode=call tool=%s args={...}" category_name tool_name));
                       ]

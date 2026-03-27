@@ -10,6 +10,7 @@ type context = {
     token:MP.Mcp_result.progress_token ->
     progress:float ->
     total:float option ->
+    message:string option ->
     (unit, string) result;
   request_sampling :
     MP.Sampling.create_message_params ->
@@ -57,54 +58,21 @@ let noop_context =
   {
     send_notification = (fun ~method_:_ ~params:_ -> Ok ());
     send_log = (fun _ _ -> Ok ());
-    send_progress = (fun ~token:_ ~progress:_ ~total:_ -> Ok ());
+    send_progress = (fun ~token:_ ~progress:_ ~total:_ ~message:_ -> Ok ());
     request_sampling = (fun _ -> Error "sampling not available in adapter context");
     request_roots_list = (fun () -> Ok []);
     request_elicitation =
       (fun _ -> Error "elicitation not available in adapter context");
   }
 
-let sdk_tool_of_local (tool : Figma_mcp_protocol.tool_def) : MT.tool =
-  {
-    name = tool.name;
-    description = Some tool.description;
-    input_schema = tool.input_schema;
-    output_schema = None;
-    title = None;
-    annotations = None;
-    icon = None;
-    execution = None;
-  }
-
-let sdk_resource_of_local (resource : Figma_mcp_protocol.mcp_resource) : MT.resource =
-  {
-    uri = resource.uri;
-    name = resource.name;
-    description = Some resource.description;
-    mime_type = Some resource.mime_type;
-    icon = None;
-  }
-
-let sdk_resource_template_of_local
-    (template : Figma_mcp_protocol.mcp_resource_template) : MT.resource_template =
-  {
-    uri_template = template.uri_template;
-    name = template.name;
-    description = Some template.description;
-    mime_type = Some template.mime_type;
-    icon = None;
-  }
-
+(** Convert local prompt (with text field) to SDK prompt type. *)
 let sdk_prompt_of_local (prompt : Figma_mcp_protocol.mcp_prompt) : MT.prompt =
   let sdk_arg_of_local (arg : Figma_mcp_protocol.prompt_arg) : MT.prompt_argument =
-    {
-      name = arg.name;
-      description = Some arg.description;
-      required = Some arg.required;
-    }
+    arg  (* prompt_arg = MT.prompt_argument, identity *)
   in
   {
     name = prompt.name;
+    title = None;
     description = Some prompt.description;
     arguments = Some (List.map sdk_arg_of_local prompt.arguments);
     icon = None;
@@ -185,7 +153,7 @@ let find_direct_handler name =
   | _ -> None
 
 let make_tool_binding (tool : Figma_mcp_protocol.tool_def) : registered_tool =
-  let sdk_tool = sdk_tool_of_local tool in
+  (* tool_def = MT.tool, no conversion needed *)
   let handler _ctx _name arguments =
     let args_json = Option.value arguments ~default:`Null in
     match find_direct_handler tool.name with
@@ -201,18 +169,18 @@ let make_tool_binding (tool : Figma_mcp_protocol.tool_def) : registered_tool =
             | Ok result -> Ok (normalize_local_tool_result result)
             | Error msg -> Error msg))
   in
-  { tool = sdk_tool; handler }
+  { tool; handler }
 
 let make_resource_binding
     (resource : Figma_mcp_protocol.mcp_resource) : registered_resource =
-  let sdk_resource = sdk_resource_of_local resource in
+  (* mcp_resource = MT.resource, no conversion needed *)
   let handler _ctx uri =
     match Mcp_tool_registry.read_resource uri with
     | Ok (mime_type, text) ->
         Ok [{ MT.uri; mime_type = Some mime_type; text = Some text; blob = None }]
     | Error msg -> Error msg
   in
-  { resource = sdk_resource; handler }
+  { resource; handler }
 
 let make_prompt_binding (prompt : Figma_mcp_protocol.mcp_prompt) : registered_prompt =
   let sdk_prompt = sdk_prompt_of_local prompt in
@@ -239,7 +207,6 @@ let make_snapshot () =
     instructions = Some Figma_mcp_protocol.mcp_instructions;
     tools = List.map make_tool_binding Mcp_tool_defs.public_tools;
     resources = List.map make_resource_binding Mcp_tool_registry.resources;
-    resource_templates =
-      List.map sdk_resource_template_of_local Mcp_tool_registry.resource_templates;
+    resource_templates = Mcp_tool_registry.resource_templates;
     prompts = List.map make_prompt_binding Mcp_tool_registry.prompts;
   }

@@ -19,18 +19,16 @@ let () =
 
 let resources : mcp_resource list =
   [
-    {
-      uri = "figma://docs/v2-surface";
-      name = "V2 Surface";
-      description = "v2 MCP surface and behavioral boundaries.";
-      mime_type = "text/markdown";
-    };
-    {
-      uri = "figma://docs/verification";
-      name = "Verification";
-      description = "Semantic and visual verification workflow.";
-      mime_type = "text/markdown";
-    };
+    make_resource
+      ~uri:"figma://docs/v2-surface"
+      ~name:"V2 Surface"
+      ~description:"v2 MCP surface and behavioral boundaries."
+      ~mime_type:"text/markdown";
+    make_resource
+      ~uri:"figma://docs/verification"
+      ~name:"Verification"
+      ~description:"Semantic and visual verification workflow."
+      ~mime_type:"text/markdown";
   ]
 
 let resource_templates : mcp_resource_template list = []
