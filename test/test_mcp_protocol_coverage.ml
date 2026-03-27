@@ -588,94 +588,94 @@ module Eio_tests = struct
 
   let test_classify_request () =
     let msg = {|{"jsonrpc":"2.0","id":1,"method":"test"}|} in
-    let kind = Mcp_protocol_eio.classify_message msg in
+    let kind = Figma_protocol_eio.classify_message msg in
     check bool "is request" true (kind = `Request)
 
   let test_classify_notification_no_id () =
     let msg = {|{"jsonrpc":"2.0","method":"notify"}|} in
-    let kind = Mcp_protocol_eio.classify_message msg in
+    let kind = Figma_protocol_eio.classify_message msg in
     check bool "is notification (no id)" true (kind = `Notification)
 
   let test_classify_notification_null_id () =
     let msg = {|{"jsonrpc":"2.0","id":null,"method":"notify"}|} in
-    let kind = Mcp_protocol_eio.classify_message msg in
+    let kind = Figma_protocol_eio.classify_message msg in
     check bool "is notification (null id)" true (kind = `Notification)
 
   let test_classify_response_result () =
     let msg = {|{"jsonrpc":"2.0","id":1,"result":{}}|} in
-    let kind = Mcp_protocol_eio.classify_message msg in
+    let kind = Figma_protocol_eio.classify_message msg in
     check bool "is response (result)" true (kind = `Response)
 
   let test_classify_response_error () =
     let msg = {|{"jsonrpc":"2.0","id":1,"error":{"code":-32600,"message":"test"}}|} in
-    let kind = Mcp_protocol_eio.classify_message msg in
+    let kind = Figma_protocol_eio.classify_message msg in
     check bool "is response (error)" true (kind = `Response)
 
   let test_classify_unknown_no_method () =
     let msg = {|{"jsonrpc":"2.0"}|} in
-    let kind = Mcp_protocol_eio.classify_message msg in
+    let kind = Figma_protocol_eio.classify_message msg in
     check bool "is unknown" true (kind = `Unknown)
 
   let test_classify_invalid_json () =
     let msg = "{invalid" in
-    let kind = Mcp_protocol_eio.classify_message msg in
+    let kind = Figma_protocol_eio.classify_message msg in
     check bool "invalid json is unknown" true (kind = `Unknown)
 
   let test_classify_non_object () =
     let msg = {|[1, 2, 3]|} in
-    let kind = Mcp_protocol_eio.classify_message msg in
+    let kind = Figma_protocol_eio.classify_message msg in
     check bool "non-object is unknown" true (kind = `Unknown)
 
   (** --- SSE Formatting --- *)
 
   let test_format_sse_data_single_line () =
-    let result = Mcp_protocol_eio.format_sse_data "hello world" in
+    let result = Figma_protocol_eio.format_sse_data "hello world" in
     check string "single line format" "data: hello world" result
 
   let test_format_sse_data_multiline () =
-    let result = Mcp_protocol_eio.format_sse_data "line1\nline2\nline3" in
+    let result = Figma_protocol_eio.format_sse_data "line1\nline2\nline3" in
     check string "multiline format" "data: line1\ndata: line2\ndata: line3" result
 
   let test_format_sse_data_empty () =
-    let result = Mcp_protocol_eio.format_sse_data "" in
+    let result = Figma_protocol_eio.format_sse_data "" in
     check string "empty data" "data: " result
 
   let test_format_sse_data_json_compact () =
     (* Pretty-printed JSON should be compacted to single line *)
     let pretty_json = "{\n  \"result\": {\n    \"content\": []\n  }\n}" in
-    let result = Mcp_protocol_eio.format_sse_data pretty_json in
+    let result = Figma_protocol_eio.format_sse_data pretty_json in
     check string "json compact" "data: {\"result\":{\"content\":[]}}" result
 
   let test_compact_json_string_valid () =
-    let result = Mcp_protocol_eio.compact_json_string "{\n  \"a\": 1\n}" in
+    let result = Figma_protocol_eio.compact_json_string "{\n  \"a\": 1\n}" in
     check string "valid json" "{\"a\":1}" result
 
   let test_compact_json_string_invalid () =
-    let result = Mcp_protocol_eio.compact_json_string "not json" in
+    let result = Figma_protocol_eio.compact_json_string "not json" in
     check string "invalid json" "not json" result
 
   let test_compact_json_string_already_compact () =
-    let result = Mcp_protocol_eio.compact_json_string "{\"b\":2}" in
+    let result = Figma_protocol_eio.compact_json_string "{\"b\":2}" in
     check string "already compact" "{\"b\":2}" result
 
   (** --- Config --- *)
 
   let test_default_config () =
-    let config = Mcp_protocol_eio.default_config in
+    let config = Figma_protocol_eio.default_config in
     check int "default port" 8933 config.port;
     check string "default host" "localhost" config.host;
     check int "default max_connections" 64 config.max_connections
 
   let test_clamp_max_commands_min () =
-    check int "clamp_max_commands(0)=1" 1 (Mcp_protocol_eio.clamp_max_commands 0)
+    check int "clamp_max_commands(0)=1" 1 (Figma_protocol_eio.clamp_max_commands 0)
 
   let test_clamp_max_commands_passthrough () =
-    check int "clamp_max_commands(10)=10" 10 (Mcp_protocol_eio.clamp_max_commands 10)
+    check int "clamp_max_commands(10)=10" 10 (Figma_protocol_eio.clamp_max_commands 10)
 
   let test_clamp_max_commands_max () =
     let maxc = Figma_config.Plugin.max_commands in
     check int "clamp_max_commands(max+1)=max"
-      maxc (Mcp_protocol_eio.clamp_max_commands (maxc + 1))
+      maxc (Figma_protocol_eio.clamp_max_commands (maxc + 1))
 
   (** --- MCP Request Processing --- *)
 
@@ -694,7 +694,7 @@ module Eio_tests = struct
   let test_process_mcp_request_valid () =
     let server = make_test_server () in
     let body = {|{"jsonrpc":"2.0","id":1,"method":"tools/list"}|} in
-    let response = Mcp_protocol_eio.process_mcp_request_sync server body in
+    let response = Figma_protocol_eio.process_mcp_request_sync server body in
     let parsed = Yojson.Safe.from_string response in
     match parsed with
     | `Assoc fields ->
@@ -704,7 +704,7 @@ module Eio_tests = struct
   let test_process_mcp_request_invalid () =
     let server = make_test_server () in
     let body = "{invalid json" in
-    let response = Mcp_protocol_eio.process_mcp_request_sync server body in
+    let response = Figma_protocol_eio.process_mcp_request_sync server body in
     let parsed = Yojson.Safe.from_string response in
     match parsed with
     | `Assoc fields ->
@@ -803,15 +803,15 @@ end
 (** ============== Clamp Max Commands Tests ============== *)
 
 let test_clamp_max_commands_min () =
-  check int "clamp_max_commands(0)=1" 1 (Mcp_protocol_eio.clamp_max_commands 0)
+  check int "clamp_max_commands(0)=1" 1 (Figma_protocol_eio.clamp_max_commands 0)
 
 let test_clamp_max_commands_passthrough () =
-  check int "clamp_max_commands(10)=10" 10 (Mcp_protocol_eio.clamp_max_commands 10)
+  check int "clamp_max_commands(10)=10" 10 (Figma_protocol_eio.clamp_max_commands 10)
 
 let test_clamp_max_commands_max () =
   let maxc = Figma_config.Plugin.max_commands in
   check int "clamp_max_commands(max+1)=max"
-    maxc (Mcp_protocol_eio.clamp_max_commands (maxc + 1))
+    maxc (Figma_protocol_eio.clamp_max_commands (maxc + 1))
 
 (** ============== Test Registration ============== *)
 

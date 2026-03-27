@@ -2,7 +2,7 @@
     Pure JSON→string transformations in mcp_protocol_eio.ml (lines 1282-1559).
     No I/O, no Eio — all pure functions. *)
 
-open Mcp_protocol_eio
+open Figma_protocol_eio
 
 (** Helper: check if [haystack] contains [needle] *)
 let str_contains haystack needle =

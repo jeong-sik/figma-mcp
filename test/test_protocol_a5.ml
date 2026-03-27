@@ -3,7 +3,7 @@
              is_public_path, normalize_env, api_key_env_name, default_config. *)
 
 open Alcotest
-open Mcp_protocol_eio
+open Figma_protocol_eio
 
 (* ============== classify_message ============== *)
 

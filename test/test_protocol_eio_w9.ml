@@ -3,7 +3,7 @@
     Avoids duplicating: test_protocol_cors_w5, test_protocol_agent_w5,
                         test_protocol_codegen_w5, test_protocol_api_w7 *)
 
-open Mcp_protocol_eio
+open Figma_protocol_eio
 
 let check_s = Alcotest.(check string)
 let check_b = Alcotest.(check bool)

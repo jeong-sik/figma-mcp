@@ -222,22 +222,11 @@ let run_stdio ~sw ~env ~net ~clock server =
     match Eio.Buf_read.line buf_read with
     | line ->
         if String.trim line <> "" then begin
-          match Figma_mcp_protocol.parse_request line with
-          | Ok req ->
-              if Figma_mcp_protocol.is_notification req then
-                (* Notification: no response on stdout per JSON-RPC *)
-                ignore (Figma_mcp_protocol.process_request_sync server req)
-              else begin
-                (* Process request using sync handler (runs in Eio context) *)
-                let response = Figma_mcp_protocol.process_request_sync server req in
-                let response_str = Yojson.Safe.to_string response in
-                print_endline response_str;
-                flush stdout
-              end
-          | Error msg ->
-              let err_response = Figma_mcp_protocol.make_error_response `Null Figma_mcp_protocol.parse_error msg None in
-              print_endline (Yojson.Safe.to_string err_response);
-              flush stdout
+          let response_str = Mcp_protocol_request.process_mcp_request_sync server line in
+          if String.trim response_str <> "" then begin
+            print_endline response_str;
+            flush stdout
+          end
         end;
         read_loop ()
     | exception End_of_file ->

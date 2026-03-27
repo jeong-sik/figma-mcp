@@ -4,7 +4,7 @@
     Every queue test runs inside [Eio_main.run] since the queue uses [Eio.Mutex]. *)
 
 open Alcotest
-open Mcp_protocol_eio
+open Figma_protocol_eio
 
 (* ---------- helpers ---------- *)
 

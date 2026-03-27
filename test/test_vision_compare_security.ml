@@ -13,7 +13,7 @@ let test_reference_path_allowed_under_root () =
   let dir = mk_temp_dir "figma-mcp-vision-root-" in
   let path = Filename.concat dir "ref.png" in
   write_file path "x";
-  match Mcp_protocol_eio.validate_reference_image_path ~roots:[dir] ~max_bytes:1024 path with
+  match Figma_protocol_eio.validate_reference_image_path ~roots:[dir] ~max_bytes:1024 path with
   | Ok _ -> ()
   | Error e -> fail e
 
@@ -22,7 +22,7 @@ let test_reference_path_reject_outside_root () =
   let dir2 = mk_temp_dir "figma-mcp-vision-root-b-" in
   let path = Filename.concat dir2 "ref.png" in
   write_file path "x";
-  match Mcp_protocol_eio.validate_reference_image_path ~roots:[dir1] ~max_bytes:1024 path with
+  match Figma_protocol_eio.validate_reference_image_path ~roots:[dir1] ~max_bytes:1024 path with
   | Ok _ -> fail "expected rejection for path outside allowed roots"
   | Error _ -> ()
 
@@ -30,7 +30,7 @@ let test_reference_path_reject_non_png () =
   let dir = mk_temp_dir "figma-mcp-vision-root-" in
   let path = Filename.concat dir "ref.txt" in
   write_file path "x";
-  match Mcp_protocol_eio.validate_reference_image_path ~roots:[] ~max_bytes:1024 path with
+  match Figma_protocol_eio.validate_reference_image_path ~roots:[] ~max_bytes:1024 path with
   | Ok _ -> fail "expected rejection for non-png reference"
   | Error _ -> ()
 
@@ -38,7 +38,7 @@ let test_reference_path_reject_too_large () =
   let dir = mk_temp_dir "figma-mcp-vision-root-" in
   let path = Filename.concat dir "ref.png" in
   write_file path "xx";
-  match Mcp_protocol_eio.validate_reference_image_path ~roots:[] ~max_bytes:1 path with
+  match Figma_protocol_eio.validate_reference_image_path ~roots:[] ~max_bytes:1 path with
   | Ok _ -> fail "expected rejection for oversize reference"
   | Error _ -> ()
 
@@ -46,7 +46,7 @@ let test_reference_path_reject_non_regular_file () =
   let dir = mk_temp_dir "figma-mcp-vision-root-" in
   let dpng = Filename.concat dir "not-a-file.png" in
   Unix.mkdir dpng 0o700;
-  match Mcp_protocol_eio.validate_reference_image_path ~roots:[] ~max_bytes:1024 dpng with
+  match Figma_protocol_eio.validate_reference_image_path ~roots:[] ~max_bytes:1024 dpng with
   | Ok _ -> fail "expected rejection for non-regular file"
   | Error _ -> ()
 

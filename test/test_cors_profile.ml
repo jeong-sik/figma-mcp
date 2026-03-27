@@ -34,9 +34,9 @@ let test_strict_denies_null_by_default () =
       ("FIGMA_MCP_CORS_ALLOWED_ORIGINS", None);
       ("FIGMA_MCP_CORS_MODE", None) ]
     (fun () ->
-      check bool "origin_allowed null" false (Mcp_protocol_eio.Cors.origin_allowed "null");
+      check bool "origin_allowed null" false (Figma_protocol_eio.Cors.origin_allowed "null");
       let headers =
-        Mcp_protocol_eio.Cors.headers_for_origin_opt (Some "null")
+        Figma_protocol_eio.Cors.headers_for_origin_opt (Some "null")
           ~include_methods:false ~include_headers:false
       in
       check bool "no allow-origin header" false
@@ -50,9 +50,9 @@ let test_strict_disables_private_network_by_default () =
       ("FIGMA_MCP_CORS_MODE", None) ]
     (fun () ->
       check bool "origin_allowed figma" true
-        (Mcp_protocol_eio.Cors.origin_allowed "https://www.figma.com");
+        (Figma_protocol_eio.Cors.origin_allowed "https://www.figma.com");
       let headers =
-        Mcp_protocol_eio.Cors.headers_for_origin_opt (Some "https://www.figma.com")
+        Figma_protocol_eio.Cors.headers_for_origin_opt (Some "https://www.figma.com")
           ~include_methods:false ~include_headers:false
       in
       check bool "no private network header" false
@@ -65,9 +65,9 @@ let test_compat_allows_null_without_private_network_by_default () =
       ("FIGMA_MCP_CORS_ALLOW_PRIVATE_NETWORK", None);
       ("FIGMA_MCP_CORS_MODE", None) ]
     (fun () ->
-      check bool "origin_allowed null" true (Mcp_protocol_eio.Cors.origin_allowed "null");
+      check bool "origin_allowed null" true (Figma_protocol_eio.Cors.origin_allowed "null");
       let headers =
-        Mcp_protocol_eio.Cors.headers_for_origin_opt (Some "null")
+        Figma_protocol_eio.Cors.headers_for_origin_opt (Some "null")
           ~include_methods:false ~include_headers:false
       in
       (match find_header "access-control-allow-origin" headers with
@@ -83,9 +83,9 @@ let test_strict_override_allowed_origins_and_private_network () =
       ("FIGMA_MCP_CORS_ALLOW_PRIVATE_NETWORK", Some "true");
       ("FIGMA_MCP_CORS_MODE", None) ]
     (fun () ->
-      check bool "origin_allowed null" true (Mcp_protocol_eio.Cors.origin_allowed "null");
+      check bool "origin_allowed null" true (Figma_protocol_eio.Cors.origin_allowed "null");
       let headers =
-        Mcp_protocol_eio.Cors.headers_for_origin_opt (Some "null")
+        Figma_protocol_eio.Cors.headers_for_origin_opt (Some "null")
           ~include_methods:false ~include_headers:false
       in
       check bool "private network header present" true

@@ -1,7 +1,7 @@
 module MP = Mcp_protocol
 module MT = MP.Mcp_types
 
-type context = {
+type context = Mcp_protocol_eio.Handler.context = {
   send_notification :
     method_:string -> params:Yojson.Safe.t option -> (unit, string) result;
   send_log :
@@ -19,14 +19,11 @@ type context = {
     MT.elicitation_params -> (MT.elicitation_result, string) result;
 }
 
-type tool_handler =
-  context -> string -> Yojson.Safe.t option -> (MT.tool_result, string) result
+type tool_handler = Mcp_protocol_eio.Handler.tool_handler
 
-type resource_handler =
-  context -> string -> (MT.resource_contents list, string) result
+type resource_handler = Mcp_protocol_eio.Handler.resource_handler
 
-type prompt_handler =
-  context -> string -> (string * string) list -> (MT.prompt_result, string) result
+type prompt_handler = Mcp_protocol_eio.Handler.prompt_handler
 
 type registered_tool = {
   tool : MT.tool;
@@ -243,3 +240,121 @@ let make_snapshot () =
       List.map sdk_resource_template_of_local Mcp_tool_registry.resource_templates;
     prompts = List.map make_prompt_binding Mcp_tool_registry.prompts;
   }
+
+let make_context () : Mcp_protocol_eio.Handler.context =
+  {
+    send_notification = (fun ~method_:_ ~params:_ -> Ok ());
+    send_log = (fun _ _ -> Ok ());
+    send_progress = (fun ~token:_ ~progress:_ ~total:_ -> Ok ());
+    request_sampling =
+      (fun _ -> Error "sampling/createMessage not available in figma adapter");
+    request_roots_list = (fun () -> Ok []);
+    request_elicitation =
+      (fun _ -> Error "elicitation/create not available in figma adapter");
+  }
+
+let strip_logging_capability = function
+  | `Assoc fields as json -> (
+      match List.assoc_opt "result" fields with
+      | Some (`Assoc result_fields) -> (
+          match List.assoc_opt "capabilities" result_fields with
+          | Some (`Assoc caps) ->
+              let caps = List.remove_assoc "logging" caps in
+              let result_fields =
+                ("capabilities", `Assoc caps)
+                :: List.remove_assoc "capabilities" result_fields
+              in
+              `Assoc
+                (("result", `Assoc result_fields) :: List.remove_assoc "result" fields)
+          | _ -> json)
+      | _ -> json)
+  | json -> json
+
+let create_handler ?(snapshot = make_snapshot ()) () =
+  let handler =
+    Mcp_protocol_eio.Handler.create
+      ~name:snapshot.server_name
+      ~version:snapshot.server_version
+      ?instructions:snapshot.instructions
+      ()
+  in
+  let handler =
+    List.fold_left
+      (fun acc (registered : registered_tool) ->
+        Mcp_protocol_eio.Handler.add_tool registered.tool registered.handler acc)
+      handler snapshot.tools
+  in
+  let handler =
+    List.fold_left
+      (fun acc (registered : registered_resource) ->
+        Mcp_protocol_eio.Handler.add_resource registered.resource
+          registered.handler acc)
+      handler snapshot.resources
+  in
+  let handler =
+    List.fold_left
+      (fun acc template ->
+        Mcp_protocol_eio.Handler.add_resource_template template
+          (fun _ctx uri ->
+            match Mcp_tool_registry.read_resource uri with
+            | Ok (mime_type, text) ->
+                Ok
+                  [
+                    {
+                      MT.uri;
+                      mime_type = Some mime_type;
+                      text = Some text;
+                      blob = None;
+                    };
+                  ]
+            | Error msg -> Error msg)
+          acc)
+      handler snapshot.resource_templates
+  in
+  List.fold_left
+    (fun acc (registered : registered_prompt) ->
+      Mcp_protocol_eio.Handler.add_prompt registered.prompt registered.handler acc)
+    handler snapshot.prompts
+
+let process_jsonrpc ?snapshot body_str =
+  let json =
+    try Ok (Yojson.Safe.from_string body_str)
+    with Yojson.Json_error msg -> Error msg
+  in
+  match json with
+  | Error msg ->
+      Some
+        (Yojson.Safe.to_string
+           (Mcp_protocol.Jsonrpc.message_to_yojson
+              (Mcp_protocol.Jsonrpc.make_error
+                 ~id:(Mcp_protocol.Jsonrpc.Int 0)
+                 ~code:Mcp_protocol.Error_codes.parse_error
+                 ~message:("JSON parse error: " ^ msg)
+                 ())))
+  | Ok json -> (
+      match Mcp_protocol.Jsonrpc.message_of_yojson json with
+      | Error msg ->
+          Some
+            (Yojson.Safe.to_string
+               (Mcp_protocol.Jsonrpc.message_to_yojson
+                  (Mcp_protocol.Jsonrpc.make_error
+                     ~id:(Mcp_protocol.Jsonrpc.Int 0)
+                     ~code:Mcp_protocol.Error_codes.parse_error
+                     ~message:("JSON-RPC parse error: " ^ msg)
+                     ())))
+      | Ok message ->
+          let handler = create_handler ?snapshot () in
+          let ctx = make_context () in
+          let log_level_ref = ref Mcp_protocol.Logging.Warning in
+          Mcp_protocol_eio.Handler.dispatch handler ctx log_level_ref message
+          |> Option.map (fun response ->
+                 let json = Mcp_protocol.Jsonrpc.message_to_yojson response in
+                 let json =
+                   match message with
+                   | Mcp_protocol.Jsonrpc.Request req
+                     when String.equal req.method_ Mcp_protocol.Notifications.initialize ->
+                       strip_logging_capability json
+                   | _ -> json
+                 in
+                 json
+                 |> Yojson.Safe.to_string))

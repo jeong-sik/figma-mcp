@@ -10,17 +10,11 @@ module Request = Mcp_http_helpers.Request
 (** ============== MCP Request Processing ============== *)
 
 (** Process MCP request synchronously (Eio-native, no Lwt).
-    Uses process_request_sync which calls handlers_sync directly. *)
-let process_mcp_request_sync (server : Figma_mcp_protocol.mcp_server) body_str =
-  match Figma_mcp_protocol.parse_request body_str with
-  | Ok req ->
-      (* process_request_sync: Lwt 없이 직접 실행 *)
-      let response_json = Figma_mcp_protocol.process_request_sync server req in
-      Yojson.Safe.to_string response_json
-  | Error msg ->
-      let err_response = Figma_mcp_protocol.make_error_response
-        `Null Figma_mcp_protocol.parse_error msg None in
-      Yojson.Safe.to_string err_response
+    Canonical MCP method semantics are delegated to the shared SDK adapter. *)
+let process_mcp_request_sync (_server : Figma_mcp_protocol.mcp_server) body_str =
+  match Mcp_sdk_adapter_figma.process_jsonrpc body_str with
+  | Some response -> response
+  | None -> ""
 
 type mcp_message_kind =
   [ `Request | `Notification | `Response | `Unknown ]

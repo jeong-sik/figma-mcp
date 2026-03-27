@@ -1,7 +1,7 @@
 (** Coverage Wave 5: mcp_protocol_eio.ml — CORS module + pure helpers.
     All functions under test are pure (no I/O, no Eio runtime needed). *)
 
-open Mcp_protocol_eio
+open Figma_protocol_eio
 
 (* ── Alcotest testables ───────────────────────────────────── *)
 

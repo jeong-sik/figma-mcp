@@ -4,7 +4,7 @@
     format_sse_data, compact_json_string, webhook_passcode, api_key_env,
     validate_reference_image_path, Request.parse_positive_int, env helpers *)
 
-open Mcp_protocol_eio
+open Figma_protocol_eio
 
 let check_s msg expected actual = Alcotest.(check string) msg expected actual
 let check_i msg expected actual = Alcotest.(check int) msg expected actual
