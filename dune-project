@@ -18,7 +18,7 @@
  (depends
   (ocaml (>= 5.1))
   (dune (>= 3.13))
-  (mcp_protocol (>= 1.0.0))
+  (mcp_protocol (>= 1.2.0))
   ; Standard dependencies
   (yojson (>= 2.0))
   (uri (>= 4.2))
