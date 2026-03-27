@@ -1,6 +1,6 @@
 (lang dune 3.15)
 (name figma_mcp)
-(version 0.10.1)
+(version 0.11.0)
 
 (generate_opam_files true)
 
@@ -18,7 +18,7 @@
  (depends
   (ocaml (>= 5.1))
   (dune (>= 3.13))
-  (mcp_protocol (>= 0.16.0))
+  (mcp_protocol (>= 1.0.0))
   ; Standard dependencies
   (yojson (>= 2.0))
   (uri (>= 4.2))
