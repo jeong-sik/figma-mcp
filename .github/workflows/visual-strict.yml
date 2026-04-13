@@ -31,11 +31,12 @@ jobs:
       - name: Setup OCaml
         uses: ocaml/setup-ocaml@v3
         with:
-          ocaml-compiler: 5.4.x
+          ocaml-compiler: 5.4.1
           dune-cache: true
 
       - name: Pin external dependencies
         run: |
+          opam pin add bisect_ppx git+https://github.com/patricoferris/bisect_ppx.git#5.2 -n -y
           opam pin add mcp_protocol https://github.com/jeong-sik/mcp-protocol-sdk.git#main -n -y
           opam pin add grpc-direct-core https://github.com/jeong-sik/grpc-direct.git#main -n -y
           opam pin add grpc-direct https://github.com/jeong-sik/grpc-direct.git#main -n -y

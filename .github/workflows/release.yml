@@ -26,7 +26,7 @@ jobs:
       - name: Setup OCaml
         uses: ocaml/setup-ocaml@v3
         with:
-          ocaml-compiler: 5.2.x
+          ocaml-compiler: 5.4.1
 
       - name: Pin git dependencies
         run: |
