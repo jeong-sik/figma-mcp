@@ -8,6 +8,7 @@
     "ssim.js": "^3.5.0"
   },
   "scripts": {
-    "test:plugin": "node --test test/plugin/*.test.cjs"
+    "test:plugin": "node --test test/plugin/*.test.cjs",
+    "test:studio": "node --test test/studio/*.test.cjs"
   }
 }
