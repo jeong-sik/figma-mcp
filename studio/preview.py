@@ -42,6 +42,13 @@ def main() -> None:
     )
     parser.add_argument("--kitty", action="store_true", help="Display using timg -pk")
     parser.add_argument(
+        "--size",
+        type=int,
+        nargs=2,
+        metavar=("COLUMNS", "ROWS"),
+        help="Explicit terminal geometry for redirected output",
+    )
+    parser.add_argument(
         "--output", type=Path, help="Also save PNG; existing files are not replaced"
     )
     args = parser.parse_args()
@@ -49,6 +56,8 @@ def main() -> None:
         data = png_from_result(json.loads(args.snapshot.read_text()))
         if not args.kitty and args.output is None:
             raise ValueError("Choose --kitty or --output")
+        if args.size and any(value <= 0 for value in args.size):
+            raise ValueError("Terminal dimensions must be positive")
         if args.output is not None:
             with args.output.open("xb") as output:
                 output.write(data)
@@ -59,7 +68,8 @@ def main() -> None:
             with tempfile.TemporaryDirectory(prefix="figma-studio-") as directory:
                 image = Path(directory) / "preview.png"
                 image.write_bytes(data)
-                subprocess.run([executable, "-pk", str(image)], check=True)
+                geometry = [f"-g{args.size[0]}x{args.size[1]}"] if args.size else []
+                subprocess.run([executable, "-pk", *geometry, str(image)], check=True)
     except (ValueError, KeyError, OSError, subprocess.CalledProcessError) as error:
         print(f"Studio preview: {error}", file=sys.stderr)
         raise SystemExit(1) from error
