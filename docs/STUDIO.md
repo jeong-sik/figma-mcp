@@ -1,25 +1,28 @@
-# Figma Studio: creation and implementation
+# Figma Studio: deferred design idea
 
-Status: first implementation unit. The current public MCP surface still exposes
-the eight read/verification tools in the README. This is not a connected MASC
-Addon or a new public editing tool.
+Status: deferred by operator decision on 2026-10-13. The experimental `studio/`
+relay, `plugin/studio/` Plugin and their test suite have been withdrawn. They
+required MASC tools, credentials and worker protocols in this repository.
+The existing eight public MCP tools and the general `plugin/` bridge remain.
 
-The product has two workflows: generate/revise native Figma designs and implement
-selected designs in an existing repository. Both use the same retained design
-snapshot. A snapshot carries native structure, text runs, layout, variables,
-components, assets, preview and explicit coverage. Code implementations pin the
-snapshot rather than following a mutable selection.
+A future Figma service must be independently installable and usable from a
+non-MASC client. It owns Plugin sessions, Figma authentication, native document
+operations and retained snapshots through a versioned API. It does not import
+MASC code, receive MASC credentials or call MASC tools. A MASC Lane Addon, if
+built later, consumes that API from the MASC repository.
 
-The Keeper owns design decisions and code generation. The Plugin owns open-file
-reads and edits. This server owns transport and Figma context. An optional MASC
-Lane Addon owns workflow state, observations, package tools and Skills. Visual
-comparison is optional; actual design readback and actual application execution
-are separate completion evidence.
+The intended product still includes native design creation/revision and
+implementation of a pinned design in an application. Before implementation,
+review capability coverage against the existing MCP tools, full snapshot and
+asset fidelity, session close/cancellation, uncertain effects and recovery.
+Both real Figma editing and a running implementation need evidence; current
+fixtures do not establish either journey or visual fidelity.
 
-The integration design is tracked in
-[MASC's Figma Studio contract](https://github.com/jeong-sik/masc/pull/42736).
-It specifies an outbound host relay because current MASC workers run without
-network access. The Plugin must never receive the relay's MASC credential.
+The unshipped independent-service experiment is retained for reference in
+[#194](https://github.com/jeong-sik/figma-mcp/pull/194). It has unresolved Plugin
+session lifecycle findings and is not ready for installation. The broader idea
+is tracked in [MASC #42735](https://github.com/jeong-sik/masc/issues/42735).
+There is no promised Studio release version.
 
 ## Native dispatcher repair
 
@@ -62,8 +65,8 @@ does not establish that its document edits failed or permit automatic replay.
 
 The existing UI `execute_dsl` route remains supported. This change does not expose
 write tools on the public eight-tool surface. Explicit session targeting,
-idempotent operation storage, safe reconnect, full snapshot capture, the optional
-editing MCP surface and the Lane Addon/relay remain subsequent work.
+idempotent operation storage, safe reconnect, full snapshot capture and an
+optional editing surface remain deferred design topics.
 
 ## Verification
 
@@ -72,4 +75,4 @@ The fixture loads the actual `plugin/code.js` entrypoint, sends commands through
 its nonce-protected UI boundary and reads resulting node state. It covers native
 creation/text/auto layout, readback, invalid/unknown operations, partial effects,
 queue continuity and the existing UI DSL. Its Figma document is a fake; this does
-not prove behavior inside the real Figma app or installed MASC runtime.
+not prove behavior inside the real Figma app.
