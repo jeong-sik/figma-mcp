@@ -142,6 +142,16 @@ class ServiceTests(unittest.TestCase):
         self.assertEqual(self.post("/v1/operation", {"operation_id": "pending"})["state"], "prepared")
         self.assertEqual(len(self.post("/v1/status", {})["sessions"]), 1)
 
+    def test_new_session_cannot_make_status_unreadable(self):
+        self.app.max_bytes = 1200
+        self.context["document"]["name"] = "a" * 500
+        self.pair()
+        with self.assertRaises(urllib.error.HTTPError):
+            self.post("/v1/plugin/session", {"protocol": PROTOCOL, "session_id": "another",
+                      "document": {**self.context["document"], "name": "b" * 500}}, "plugin")
+        self.assertEqual(len(self.post("/v1/status", {})["sessions"]), 1)
+        self.submit("readable")
+
     def test_state_is_private_even_with_permissive_umask(self):
         with tempfile.TemporaryDirectory() as root:
             previous = os.umask(0)

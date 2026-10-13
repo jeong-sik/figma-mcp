@@ -47,6 +47,20 @@ class Service:
 
     def check_snapshot(self, identity, metadata, image):
         self.check(snapshot_response(identity, metadata, image))
+        status = self.status()
+        status["latest_snapshot"] = identity
+        self.check(status)
+
+    def status(self, *, session=None):
+        value = self.store.status(session=session)
+        value["service_id"] = value.pop("worker_boot_id")
+        return value
+
+    def check_session(self, identity, document):
+        value = self.status(session=(identity, document))
+        # A later capture must still fit its SHA256 reference in status.
+        value["latest_snapshot"] = hashlib.sha256(b"").hexdigest()
+        self.check(value)
 
     def handle(self, path, data, *, plugin=False):
         if path == "/v1/rest-capture" and not plugin:
@@ -83,7 +97,7 @@ class Service:
             result = self.store.relay(
                 {"kind": action, **args}, check_poll=self.check,
                 check_snapshot=self.check_snapshot,
-                check_session=lambda identity, document: self.check(document),
+                check_session=self.check_session,
             )
             if action == "session":
                 return {"protocol": PROTOCOL, "service_id": self.store.boot_id,
@@ -93,9 +107,7 @@ class Service:
             return result
         if path == "/v1/status":
             fields(data, set())
-            value = self.store.status()
-            value["service_id"] = value.pop("worker_boot_id")
-            return value
+            return self.status()
         if path == "/v1/operations":
             args = dict(data)
             fields(args, {"service_id", "operation_id", "session_id", "kind", "root_id"},
