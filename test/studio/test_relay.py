@@ -12,10 +12,11 @@ import threading
 import unittest
 import urllib.error
 import urllib.request
+import uuid
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "studio"))
-from client import FigmaRest, McpClient, TransportError, encode
-from relay import Bridge, Server, read_config
+from client import FigmaRest, McpClient, TransportError, encode, request_message
+from relay import Bridge, Server, compact_plugin_result, read_config
 
 
 @contextlib.contextmanager
@@ -31,7 +32,7 @@ def running(server):
 
 
 @contextlib.contextmanager
-def scripted_mcp(dispatch):
+def scripted_mcp(dispatch, *, requests=None):
     """Keep real MCP serialization and HTTP errors around the queue fixture."""
 
     class Handler(BaseHTTPRequestHandler):
@@ -40,6 +41,8 @@ def scripted_mcp(dispatch):
 
         def do_POST(self):
             request = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+            if requests is not None:
+                requests.append(request)
             if "id" not in request:
                 self.send_response(202)
                 self.end_headers()
@@ -48,6 +51,10 @@ def scripted_mcp(dispatch):
                 status, result = 200, {"protocolVersion": "2025-06-18"}
             else:
                 status, value = dispatch(request["params"]["arguments"])
+                if status == 0:
+                    # Retain the request but lose the response connection.
+                    self.close_connection = True
+                    return
                 result = {"content": [{"type": "text", "text": json.dumps(value)}]}
             data = json.dumps(
                 {"jsonrpc": "2.0", "id": request["id"], "result": result}
@@ -151,6 +158,95 @@ class RestOpener:
 
 
 class RelayTests(unittest.TestCase):
+    def test_lost_plugin_ack_retries_the_identical_compacted_receipt(self):
+        received, requests = [], []
+        acknowledgement = {"operation_id": "repeat-result", "state": "outcome_unknown"}
+
+        def dispatch(arguments):
+            if arguments["kind"] == "status":
+                return 200, {
+                    "worker_boot_id": "boot",
+                    "max_request_bytes": client.max_bytes,
+                }
+            if arguments["kind"] == "result":
+                received.append(arguments)
+                if len(received) == 1:
+                    return 0, {}
+                return (200, acknowledgement) if received[0] == arguments else (409, {})
+            if arguments["kind"] == "poll":
+                return 200, {"command": {"id": "next-read", "kind": "capture"}}
+            return 200, {"status": "recorded"}
+
+        with scripted_mcp(dispatch, requests=requests) as client:
+            # Regression: decimal ids 9 and 11 made the same receipt sizes
+            # 697 and 698 bytes and therefore retained different node lists.
+            client.max_bytes = 697
+            with running(Server(0, Bridge(client, 1000), "pair-token")) as server:
+
+                def post(path, value):
+                    request = urllib.request.Request(
+                        f"http://127.0.0.1:{server.server_port}" + path,
+                        data=encode(value),
+                        headers={
+                            "Authorization": "Bearer pair-token",
+                            "Origin": "null",
+                            "Content-Type": "application/json",
+                        },
+                    )
+                    with urllib.request.urlopen(request) as response:
+                        return json.load(response)
+
+                post("/session", {"session_id": "plugin", "document": {}})
+                for _ in range(3):
+                    client.call("masc_figma_relay", {"kind": "status"})
+                value = {
+                    "session_id": "plugin",
+                    "operation_id": "repeat-result",
+                    "ok": True,
+                    "payload": {
+                        "completed": [
+                            {"index": n, "op": "rename", "node_id": f"{n}:1"}
+                            for n in range(3)
+                        ],
+                        "padding": "",
+                    },
+                }
+                arguments = {"kind": "result", "worker_boot_id": "boot", **value}
+                reference = compact_plugin_result(arguments, lambda _: True)
+                reference_size = len(
+                    encode(
+                        request_message(
+                            "tools/call",
+                            {"name": "masc_figma_relay", "arguments": reference},
+                            9,
+                        )
+                    )
+                )
+                value["payload"]["completed"][-1]["node_id"] += "x" * (
+                    client.max_bytes - reference_size
+                )
+                value["payload"]["padding"] = "x" * (634 - len(encode(value)))
+                self.assertEqual(len(encode(value)), 634)
+                with self.assertRaises(urllib.error.HTTPError) as lost:
+                    post("/result", value)
+                self.assertEqual(lost.exception.code, 502)
+                lost.exception.close()
+                self.assertEqual(post("/result", value), acknowledgement)
+                self.assertEqual(
+                    post("/poll", {"session_id": "plugin"})["command"]["id"],
+                    "next-read",
+                )
+        self.assertEqual(len(received), 2)
+        self.assertEqual(received[0], received[1])
+        identities = [request["id"] for request in requests if "id" in request]
+        self.assertEqual(len(identities), len(set(identities)))
+        self.assertTrue(
+            all(
+                isinstance(identity, str) and uuid.UUID(identity).hex == identity
+                for identity in identities
+            )
+        )
+
     def test_snapshot_download_uses_relay_credential_without_owner_section(self):
         png = b"\x89PNG\r\n\x1a\nfixture"
         snapshot = {

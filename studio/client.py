@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import base64
+import http.client
 import json
 import threading
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import uuid
 from collections.abc import Callable
 from typing import Any
 
@@ -32,7 +34,7 @@ def encode(value: Any) -> bytes:
     ).encode()
 
 
-def request_message(method: str, params: dict, identity: int | None) -> dict:
+def request_message(method: str, params: dict, identity: str | int | None) -> dict:
     value = {"jsonrpc": "2.0", "method": method, "params": params}
     if identity is not None:
         value["id"] = identity
@@ -61,15 +63,23 @@ class McpClient:
         self.url, self.token, self.max_bytes = url, token, max_bytes
         self.session = None
         self.version = "2025-06-18"
-        self.sequence = 0
         self.lock = threading.Lock()
         self.opener = urllib.request.build_opener(NoRedirect())
 
     def _request(
-        self, method: str, params: dict, *, notification: bool = False
+        self,
+        method: str,
+        params: dict,
+        *,
+        notification: bool = False,
+        identity: str | None = None,
     ) -> dict:
-        self.sequence += 1
-        body = request_message(method, params, None if notification else self.sequence)
+        request_id = (
+            None
+            if notification
+            else (uuid.uuid4().hex if identity is None else identity)
+        )
+        body = request_message(method, params, request_id)
         headers = {
             "Authorization": "Bearer " + self.token,
             "Content-Type": "application/json",
@@ -126,7 +136,7 @@ class McpClient:
             raise TransportError(
                 f"MCP returned HTTP {error.code}; request was not replayed"
             ) from error
-        except urllib.error.URLError as error:
+        except (OSError, http.client.HTTPException) as error:
             raise TransportError(
                 "MCP connection failed; request was not replayed"
             ) from error
@@ -167,6 +177,7 @@ class McpClient:
             except RequestTooLarge:
                 if compact is None:
                     raise
+                identity = uuid.uuid4().hex
 
                 def fits(value: dict) -> bool:
                     return (
@@ -175,17 +186,19 @@ class McpClient:
                                 request_message(
                                     "tools/call",
                                     {"name": name, "arguments": value},
-                                    self.sequence + 1,
+                                    identity,
                                 )
                             )
                         )
                         <= self.max_bytes
                     )
 
-                # Keep sizing and dispatch under the same lock, including the
-                # exact next JSON-RPC id. Only a locally unsent request may shrink.
+                # Fixed-width UUIDs keep receipt compaction identical on a
+                # retry. Use this exact id for sizing and dispatch.
                 response = self._request(
-                    "tools/call", {"name": name, "arguments": compact(fits)}
+                    "tools/call",
+                    {"name": name, "arguments": compact(fits)},
+                    identity=identity,
                 )
         if response.get("isError"):
             texts = [
