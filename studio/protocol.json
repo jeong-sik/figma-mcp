@@ -1,7 +1,7 @@
 {
   "protocol": "figma-studio/1",
   "transport": "authenticated JSON over loopback HTTP",
-  "capabilities": ["native.capture", "native.apply", "snapshot.read", "snapshot.validate", "rest.capture"],
-  "client_endpoints": ["/v1/info", "/v1/status", "/v1/operations", "/v1/operation", "/v1/snapshot", "/v1/validate", "/v1/rest-capture"],
+  "capabilities": ["native.capture", "native.apply", "snapshot.read", "snapshot.validate", "rest.capture", "operation.readback"],
+  "client_endpoints": ["/v1/info", "/v1/status", "/v1/operations", "/v1/operation", "/v1/readback", "/v1/snapshot", "/v1/validate", "/v1/rest-capture"],
   "plugin_endpoints": ["/v1/info", "/v1/plugin/session", "/v1/plugin/poll", "/v1/plugin/result"]
 }

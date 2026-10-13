@@ -15,6 +15,8 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
+from private_state import PrivateState
+
 Json = dict[str, Any]
 
 
@@ -195,8 +197,23 @@ def png_bytes(preview: Json | None) -> bytes | None:
 
 class Store:
     def __init__(self, directory: Path):
-        directory.mkdir(parents=True, exist_ok=True)
-        self.db = sqlite3.connect(directory / "studio.sqlite3", check_same_thread=False)
+        self.lease = PrivateState(directory)
+        try:
+            self.db = sqlite3.connect(self.lease.database("studio.sqlite3"), check_same_thread=False)
+            self._initialize()
+        except BaseException:
+            if hasattr(self, "db"):
+                self.db.close()
+            self.lease.close()
+            raise
+
+    def close(self):
+        try:
+            self.db.close()
+        finally:
+            self.lease.close()
+
+    def _initialize(self):
         self.db.row_factory = sqlite3.Row
         self.db.execute("PRAGMA journal_mode=WAL")
         self.db.execute("PRAGMA synchronous=FULL")

@@ -1,6 +1,6 @@
 # Figma Studio
 
-A standalone local service and Figma Plugin. Any authenticated HTTP client can capture and edit a native document or inspect a retained snapshot. The service knows no agent harness, model provider or client repository. Python 3.11+ is its only service dependency. The existing repository MCP server is separate and is not required by Studio.
+A standalone local service and Figma Plugin. Any authenticated HTTP client can capture and edit a native document or inspect a retained snapshot. The service knows no agent harness, model provider or client repository. Python 3.11+ on macOS or Linux is its only service dependency. The existing repository MCP server is separate and is not required by Studio.
 
 ## Install and run
 
@@ -12,6 +12,8 @@ python3 studio/service.py serve --config /path/to/private/studio.toml
 ```
 
 `init` creates private, distinct client and Plugin credentials. The state directory resolves relative to that configuration. The optional `figma.token` is a PAT used only for REST capture; it stays in the service.
+
+State is private to the current OS user. A lifetime writer lease rejects a second service using the same directory before opening or recovering the database, including when the second process uses another port. Use separate state directories for separate services.
 
 Create a development Plugin in Figma, then preserve its assigned identity:
 
@@ -32,11 +34,14 @@ POST JSON with `Authorization: Bearer <client_token>`. Plugin credentials cannot
 | `/v1/status` | `{}` → reported Plugin sessions and latest snapshot |
 | `/v1/operations` | `service_id`, `operation_id`, `session_id`, `kind`, `root_id`; apply also needs `expected_tree_json` and `ops` |
 | `/v1/operation` | `operation_id` → retained state and result without replay |
+| `/v1/readback` | `operation_id`, byte `offset`, optional byte `limit` → exact JSON result bytes in bounded base64 chunks |
 | `/v1/snapshot` | `snapshot_id` → native JSON and PNG with digest |
 | `/v1/validate` | `snapshot_id`, `assertions` → structural verdict; no visual verdict |
 | `/v1/rest-capture` | `file_key`, `root_id`, optional `version` → pinned server snapshot |
 
 `operation_id` identifies exact input. Different input reusing an ID is refused. Capture uses `kind: "capture"`. Apply uses `kind: "apply"` and an exact native export as its baseline; the Plugin checks it before editing. Submission is a receipt, not completion.
+
+Operation polling returns compact result metadata, including `snapshot_id` and `readback_available`. Readback chunks carry `encoding: "json-utf8"`, `offset`, `next_offset`, `total_bytes`, and `sha256`. Read until `next_offset` is null and verify the assembled digest. This preserves even an oversized or malformed Plugin result without making completion status unreadable. Chunking does not retry a document operation.
 
 The Plugin uses its separate token at `/v1/plugin/session`, `/v1/plugin/poll` and `/v1/plugin/result`. Pairing explicitly identifies the protocol version. Dispatch is durable before a command is returned. Dispatched writes are never automatically replayed. Restart rejects undispatched work and marks dispatched work uncertain. Stale service identities cannot submit or acknowledge another incarnation's work.
 

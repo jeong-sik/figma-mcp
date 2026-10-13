@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import hashlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
@@ -20,7 +21,13 @@ from state import Refused, Store, encode, fields, parse_wire_float, text
 from verify import validate
 
 PROTOCOL = "figma-studio/1"
-CAPABILITIES = ["native.capture", "native.apply", "snapshot.read", "snapshot.validate", "rest.capture"]
+CAPABILITIES = ["native.capture", "native.apply", "snapshot.read", "snapshot.validate", "rest.capture", "operation.readback"]
+
+
+def snapshot_response(identity, metadata, image):
+    return {"snapshot_id": identity, **metadata, "preview": {
+        **metadata["preview"], "data_base64": base64.b64encode(image).decode()
+    } if image is not None else None}
 
 
 class Service:
@@ -36,11 +43,22 @@ class Service:
 
     def snapshot(self, identity):
         metadata, image = self.store.snapshot(identity)
-        return {"snapshot_id": identity, **metadata, "preview": {
-            **metadata["preview"], "data_base64": base64.b64encode(image).decode()
-        } if image is not None else None}
+        return snapshot_response(identity, metadata, image)
+
+    def check_snapshot(self, identity, metadata, image):
+        self.check(snapshot_response(identity, metadata, image))
 
     def handle(self, path, data, *, plugin=False):
+        if path == "/v1/rest-capture" and not plugin:
+            fields(data, {"file_key", "root_id"}, {"version"})
+            if self.rest is None:
+                raise Refused("Figma REST credential is not configured")
+            # External I/O must not block Plugin polling or result retention.
+            capture = self.rest.capture(data["file_key"], data["root_id"], data.get("version"))
+            with self.lock, self.store.db:
+                identity = self.store.save_snapshot(capture, None, data["root_id"],
+                    check=self.check_snapshot)
+                return self.snapshot(identity)
         with self.lock:
             return self._handle(path, data, plugin=plugin)
 
@@ -64,9 +82,7 @@ class Service:
                 args["worker_boot_id"] = args.pop("service_id", None)
             result = self.store.relay(
                 {"kind": action, **args}, check_poll=self.check,
-                check_snapshot=lambda identity, metadata, image: self.check(
-                    {"snapshot_id": identity, **metadata,
-                     "preview": base64.b64encode(image).decode() if image else None}),
+                check_snapshot=self.check_snapshot,
                 check_session=lambda identity, document: self.check(document),
             )
             if action == "session":
@@ -90,6 +106,36 @@ class Service:
         if path == "/v1/operation":
             fields(data, {"operation_id"})
             return self.operation(self.store.operation(data["operation_id"]))
+        if path == "/v1/readback":
+            fields(data, {"operation_id", "offset"}, {"limit"})
+            operation = self.store.operation(data["operation_id"])
+            result = operation.get("result") or {}
+            if "relay_result" not in result:
+                raise Refused("Operation has no Plugin readback")
+            raw = encode(result["relay_result"]).encode()
+            offset, limit = data["offset"], data.get("limit", len(raw))
+            if type(offset) is not int or not 0 <= offset <= len(raw) or type(limit) is not int or limit <= 0:
+                raise Refused("Invalid readback byte range")
+            digest = hashlib.sha256(raw).hexdigest()
+
+            def chunk(count):
+                end = offset + count
+                return {"encoding": "json-utf8", "offset": offset,
+                        "next_offset": end if end < len(raw) else None,
+                        "total_bytes": len(raw), "sha256": digest,
+                        "data_base64": base64.b64encode(raw[offset:end]).decode()}
+
+            low, high = 0, min(limit, len(raw) - offset)
+            self.check(chunk(0))
+            while low < high:
+                mid = (low + high + 1) // 2
+                if len(encode(chunk(mid)).encode()) <= self.max_bytes:
+                    low = mid
+                else:
+                    high = mid - 1
+            if low == 0 and offset < len(raw):
+                raise Refused("HTTP envelope cannot hold a readback byte")
+            return chunk(low)
         if path == "/v1/snapshot":
             fields(data, {"snapshot_id"})
             return self.snapshot(data["snapshot_id"])
@@ -97,20 +143,17 @@ class Service:
             fields(data, {"snapshot_id", "assertions"})
             snapshot, _ = self.store.snapshot(data["snapshot_id"])
             return validate(data["snapshot_id"], snapshot, data["assertions"])
-        if path == "/v1/rest-capture":
-            fields(data, {"file_key", "root_id"}, {"version"})
-            if self.rest is None:
-                raise Refused("Figma REST credential is not configured")
-            capture = self.rest.capture(data["file_key"], data["root_id"], data.get("version"))
-            with self.store.db:
-                identity = self.store.save_snapshot(capture, None, data["root_id"],
-                    check=lambda identity, metadata, image: self.check(capture))
-            return self.snapshot(identity)
         raise Refused("Unknown API operation")
 
     @staticmethod
     def operation(value):
-        return {key: item for key, item in value.items() if key != "request"}
+        result = value["result"]
+        if result is not None:
+            result = {key: item for key, item in result.items() if key != "relay_result"}
+            result["readback_available"] = "relay_result" in value["result"]
+        return {"service_id": value["worker_boot_id"],
+                **{key: item for key, item in value.items() if key not in ("request", "worker_boot_id", "result")},
+                "result": result}
 
 
 class Server(ThreadingHTTPServer):
@@ -215,9 +258,12 @@ def main():
         rest = FigmaRest(figma["token"], maximum,
             request_timeout_seconds=request_timeout(figma.get("request_timeout_seconds", 30))) if figma.get("token") else None
         app = Service(state, max_bytes=maximum, rest=rest)
-        with Server(port, app, client_token=service["client_token"], plugin_token=service["plugin_token"]) as server:
-            print(f"Figma Studio {PROTOCOL} listening on http://127.0.0.1:{server.server_port}", flush=True)
-            server.serve_forever()
+        try:
+            with Server(port, app, client_token=service["client_token"], plugin_token=service["plugin_token"]) as server:
+                print(f"Figma Studio {PROTOCOL} listening on http://127.0.0.1:{server.server_port}", flush=True)
+                server.serve_forever()
+        finally:
+            app.store.close()
     except (ValueError, KeyError, OSError) as error:
         print(f"Figma Studio: {error}", file=__import__("sys").stderr)
         raise SystemExit(1) from error

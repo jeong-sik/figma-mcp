@@ -1,5 +1,8 @@
 import json
+import base64
+import os
 from pathlib import Path
+import stat
 import subprocess
 import sys
 import tempfile
@@ -9,7 +12,8 @@ import urllib.error
 import urllib.request
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "studio"))
-from service import PROTOCOL, Server, Service
+from service import PROTOCOL, Server, Service, snapshot_response
+from state import Refused, encode
 
 
 class ServiceTests(unittest.TestCase):
@@ -32,13 +36,13 @@ class ServiceTests(unittest.TestCase):
         self.server.shutdown()
         self.server.server_close()
         self.thread.join()
-        self.app.store.db.close()
+        self.app.store.close()
         self.directory.cleanup()
 
     def post(self, path, body, token="client"):
         request = urllib.request.Request(
             f"http://127.0.0.1:{self.server.server_port}" + path,
-            data=json.dumps(body).encode(), headers={
+            data=json.dumps(body, ensure_ascii=False, separators=(",", ":")).encode(), headers={
                 "Content-Type": "application/json", "Authorization": "Bearer " + token,
             },
         )
@@ -116,7 +120,7 @@ class ServiceTests(unittest.TestCase):
         self.submit("in-flight")
         self.post("/v1/plugin/poll", {"service_id": self.service_id,
                   "session_id": self.context["session_id"]}, "plugin")
-        self.app.store.db.close()
+        self.app.store.close()
         self.app.store = Service(Path(self.directory.name)).store
         states = {self.post("/v1/operation", {"operation_id": key})["state"] for key in ["pending", "in-flight"]}
         self.assertEqual(states, {"rejected", "outcome_unknown"})
@@ -129,6 +133,106 @@ class ServiceTests(unittest.TestCase):
         self.submit("same")
         with self.assertRaises(urllib.error.HTTPError):
             self.submit("same", root_id="other")
+
+    def test_duplicate_writer_preserves_live_sessions_and_prepared_work(self):
+        self.pair()
+        self.submit("pending")
+        with self.assertRaisesRegex(ValueError, "already has a writer"):
+            Service(Path(self.directory.name))
+        self.assertEqual(self.post("/v1/operation", {"operation_id": "pending"})["state"], "prepared")
+        self.assertEqual(len(self.post("/v1/status", {})["sessions"]), 1)
+
+    def test_state_is_private_even_with_permissive_umask(self):
+        with tempfile.TemporaryDirectory() as root:
+            previous = os.umask(0)
+            try:
+                path = Path(root) / "state"
+                app = Service(path)
+            finally:
+                os.umask(previous)
+            try:
+                self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o700)
+                for file in path.iterdir():
+                    self.assertEqual(stat.S_IMODE(file.stat().st_mode), 0o600)
+            finally:
+                app.store.close()
+
+    def rest_capture(self):
+        return {"schema_version": 1, "source": "rest_version", "file_key": "file",
+                "version": "v1", "root_id": "1:2", "tree_json": '{"document":{"id":"1:2"}}',
+                "preview": {"mime_type": "image/png", "data_base64": base64.b64encode(b"\x89PNG\r\n\x1a\nfixture").decode()},
+                "coverage": {"stable": True, "missing": []}, "observed_at": "now"}
+
+    def test_actual_snapshot_envelope_is_checked_before_publication(self):
+        capture = self.rest_capture()
+        self.app.rest = type("Rest", (), {"capture": lambda _, *args: capture})()
+        self.app.max_bytes = len(encode(capture).encode())
+        with self.assertRaisesRegex(Refused, "envelope"):
+            self.app.handle("/v1/rest-capture", {"file_key": "file", "root_id": "1:2"})
+        self.assertIsNone(self.app.store.meta("latest_snapshot"))
+        self.assertEqual(self.app.store.db.execute("SELECT COUNT(*) FROM snapshots").fetchone()[0], 0)
+        # Native and REST captures share the exact response projection.
+        self.app.max_bytes = 100000
+        result = self.app.handle("/v1/rest-capture", {"file_key": "file", "root_id": "1:2"})
+        metadata, image = self.app.store.snapshot(result["snapshot_id"])
+        self.assertEqual(result, snapshot_response(result["snapshot_id"], metadata, image))
+
+    def test_native_oversize_keeps_previous_snapshot_and_allows_next_capture(self):
+        self.pair()
+        before = self.execute("before")["result"]["snapshot_id"]
+        self.submit("too-large")
+        command = self.post("/v1/plugin/poll", {
+            "service_id": self.service_id, "session_id": self.context["session_id"],
+        }, "plugin")["command"]
+        self.plugin.stdin.write(json.dumps(command) + "\n")
+        self.plugin.stdin.flush()
+        result = json.loads(self.plugin.stdout.readline())
+        result["payload"]["coverage"]["missing"].append("fixture:" + "x" * 3000)
+        wire = {"service_id": self.service_id, "session_id": self.context["session_id"],
+                "operation_id": "too-large", "ok": result["ok"], "payload": result["payload"]}
+        projected = []
+
+        def inspect(identity, metadata, image):
+            projected.append(snapshot_response(identity, metadata, image))
+            raise Refused("probe stops before publication")
+
+        with self.assertRaises(Refused):
+            self.app.store.save_snapshot(result["payload"], self.context["session_id"], self.context["root_id"], check=inspect)
+        maximum = len(encode(projected[0]).encode()) - 1
+        self.app.max_bytes = maximum
+        # Exercise native snapshot admission directly; the HTTP ingress limit
+        # may independently reject this oversized receipt even earlier.
+        self.app.handle("/v1/plugin/result", wire, plugin=True)
+        operation = self.post("/v1/operation", {"operation_id": "too-large"})
+        self.assertEqual(operation["state"], "outcome_unknown")
+        self.assertTrue(operation["result"]["readback_available"])
+        self.assertEqual(self.app.store.meta("latest_snapshot"), before)
+        self.app.max_bytes = 16777216
+        self.assertEqual(self.execute("after")["state"], "captured")
+
+    def test_slow_rest_does_not_block_plugin_or_status(self):
+        started, release = threading.Event(), threading.Event()
+        capture = self.rest_capture()
+
+        def delayed(*args):
+            started.set()
+            if not release.wait(5):
+                raise RuntimeError("Test did not release REST capture")
+            return capture
+
+        self.app.rest = type("Rest", (), {"capture": delayed})()
+        results = []
+        thread = threading.Thread(target=lambda: results.append(self.post(
+            "/v1/rest-capture", {"file_key": "file", "root_id": "1:2"})))
+        thread.start()
+        try:
+            self.assertTrue(started.wait(2))
+            self.pair()
+            self.assertEqual(len(self.post("/v1/status", {})["sessions"]), 1)
+        finally:
+            release.set()
+            thread.join(5)
+        self.assertEqual(len(results), 1)
 
 
 if __name__ == "__main__":
