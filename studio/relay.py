@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+from collections.abc import Callable
 import hashlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
@@ -18,6 +19,61 @@ import tomllib
 from typing import Any, cast
 
 from client import FigmaRest, McpClient, RequestTooLarge, TransportError, encode
+
+
+def compact_plugin_result(result: dict, fits: Callable[[dict], bool]) -> dict:
+    payload = result["payload"]
+    completed = payload.get("completed", []) if isinstance(payload, dict) else []
+    if not isinstance(completed, list):
+        completed = []
+    total = payload.get("completed_count") if isinstance(payload, dict) else None
+    if type(total) is not int or total < len(completed):
+        omitted = (
+            payload.get("completed_omitted", 0) if isinstance(payload, dict) else 0
+        )
+        total = len(completed) + (
+            omitted if type(omitted) is int and omitted >= 0 else 0
+        )
+    identities = [
+        {
+            "index": entry["index"]
+            if type(entry.get("index")) is int and entry["index"] >= 0
+            else index,
+            **{
+                key: entry[key]
+                for key in ("op", "node_id")
+                if isinstance(entry.get(key), str)
+            },
+        }
+        if isinstance(entry, dict)
+        else {"index": index}
+        for index, entry in enumerate(completed)
+    ]
+
+    def receipt(count: int) -> dict:
+        return {
+            **result,
+            "ok": False,
+            "payload": {
+                "status": "outcome_unknown",
+                "error": "Readback exceeds the MCP request envelope; inspect the document",
+                "completed_count": total,
+                "completed": identities[:count],
+                "completed_omitted": total - count,
+                "details_omitted": True,
+            },
+        }
+
+    if not fits(receipt(0)):
+        raise RequestTooLarge("MCP envelope cannot hold the operation receipt")
+    low, high = 0, len(identities)
+    while low < high:
+        count = (low + high + 1) // 2
+        if fits(receipt(count)):
+            low = count
+        else:
+            high = count - 1
+    return receipt(low)
 
 
 class Bridge:
@@ -110,7 +166,11 @@ class Bridge:
             if set(data) != {"session_id", "operation_id", "ok", "payload"}:
                 raise ValueError("Result fields do not match the Studio contract")
             return self.client.call(
-                "masc_figma_relay", {"kind": "result", "worker_boot_id": boot, **data}
+                "masc_figma_relay",
+                {"kind": "result", "worker_boot_id": boot, **data},
+                compact=lambda fits: compact_plugin_result(
+                    {"kind": "result", "worker_boot_id": boot, **data}, fits
+                ),
             )
         raise ValueError("Unknown Studio endpoint")
 
@@ -222,7 +282,7 @@ def main() -> None:
                 output.write(
                     '[masc]\nurl = ""\ntoken = ""\n\n[relay]\nport = 8941\npoll_interval_ms = 1000\npairing_token = '
                     + json.dumps(secrets.token_urlsafe(32))
-                    + '\n\n[figma]\ntoken = ""\n\n# Optional: snapshot downloads use an operator/owner credential, not the relay agent.\n[owner]\nurl = ""\ntoken = ""\n'
+                    + '\n\n[figma]\ntoken = ""\n'
                 )
             print(
                 f"Created private configuration: {args.config}. Set the MASC endpoint and relay credential locally."
@@ -235,8 +295,7 @@ def main() -> None:
         if args.command == "snapshot":
             if not args.snapshot_id or args.output is None:
                 raise ValueError("snapshot needs --snapshot-id and --output")
-            # Use the Keeper/operator credential separately from the relay identity.
-            client = McpClient(config["owner"]["url"], config["owner"]["token"])
+            client = McpClient(config["masc"]["url"], config["masc"]["token"])
             client.initialize()
             result = client.call_result(
                 "masc_figma_snapshot", {"snapshot_id": args.snapshot_id}

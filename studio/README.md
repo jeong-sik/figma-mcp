@@ -88,8 +88,8 @@ python3 studio/preview.py snapshot-result.json --output preview.png
 python3 studio/preview.py snapshot-result.json --kitty --size 100 36
 ```
 
-To download it directly, configure the optional private `[owner]` section with
-an operator endpoint and credential, then run:
+To download it directly, use the existing private `[masc]` relay endpoint and
+credential:
 
 ```sh
 python3 studio/relay.py snapshot --config /path/to/private/figma-studio.toml \
@@ -97,8 +97,11 @@ python3 studio/relay.py snapshot --config /path/to/private/figma-studio.toml \
 python3 studio/preview.py snapshot-result.json --kitty
 ```
 
-The relay agent is restricted to the relay port; it cannot read arbitrary owner
-tools. The download command uses the separate owner credential only on the host.
+The Addon grants its configured relay agent read-only access to retained
+`masc_figma_snapshot` results, including the design JSON and PNG it transports.
+Binding a Plugin session, submitting edits and recording validation still
+require the configured Keeper or an operator. No separate owner credential is
+needed for downloads, and the relay credential stays on the host.
 
 The helper verifies the retained PNG hash before invoking `timg -pk`. It does
 not overwrite an existing output file. Install `timg` separately if needed.

@@ -1,9 +1,12 @@
 import contextlib
+import base64
+import hashlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import io
 import json
 from pathlib import Path
 import sys
+import subprocess
 import tempfile
 import threading
 import unittest
@@ -11,7 +14,7 @@ import urllib.error
 import urllib.request
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "studio"))
-from client import FigmaRest, McpClient, TransportError
+from client import FigmaRest, McpClient, TransportError, encode
 from relay import Bridge, Server, read_config
 
 
@@ -148,6 +151,208 @@ class RestOpener:
 
 
 class RelayTests(unittest.TestCase):
+    def test_snapshot_download_uses_relay_credential_without_owner_section(self):
+        png = b"\x89PNG\r\n\x1a\nfixture"
+        snapshot = {
+            "content": [
+                {
+                    "type": "text",
+                    "text": json.dumps(
+                        {
+                            "snapshot_id": "retained-1",
+                            "preview": {"sha256": hashlib.sha256(png).hexdigest()},
+                        }
+                    ),
+                },
+                {
+                    "type": "image",
+                    "mimeType": "image/png",
+                    "data": base64.b64encode(png).decode(),
+                },
+            ],
+        }
+        requests = []
+
+        class Handler(BaseHTTPRequestHandler):
+            def log_message(self, *_):
+                pass
+
+            def do_POST(self):
+                request = json.loads(
+                    self.rfile.read(int(self.headers["Content-Length"]))
+                )
+                requests.append((request, self.headers.get("Authorization")))
+                if "id" not in request:
+                    self.send_response(202)
+                    self.end_headers()
+                    return
+                result = (
+                    {"protocolVersion": "2025-06-18"}
+                    if request["method"] == "initialize"
+                    else snapshot
+                )
+                data = encode({"jsonrpc": "2.0", "id": request["id"], "result": result})
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(data)))
+                self.end_headers()
+                self.wfile.write(data)
+
+        with tempfile.TemporaryDirectory() as directory:
+            config, output = (
+                Path(directory) / "relay.toml",
+                Path(directory) / "snapshot.json",
+            )
+            with running(ThreadingHTTPServer(("127.0.0.1", 0), Handler)) as server:
+                config.write_text(
+                    f'[masc]\nurl="http://127.0.0.1:{server.server_port}/mcp"\ntoken="relay-only"\n'
+                    '[relay]\npairing_token="pair-token"\n'
+                )
+                config.chmod(0o600)
+                process = subprocess.run(
+                    [
+                        sys.executable,
+                        str(Path(__file__).resolve().parents[2] / "studio/relay.py"),
+                        "snapshot",
+                        "--config",
+                        str(config),
+                        "--snapshot-id",
+                        "retained-1",
+                        "--output",
+                        str(output),
+                    ],
+                    capture_output=True,
+                    text=True,
+                )
+                self.assertEqual(process.returncode, 0, process.stderr)
+                self.assertEqual(json.loads(output.read_text()), snapshot)
+        self.assertTrue(
+            all(authorization == "Bearer relay-only" for _, authorization in requests)
+        )
+        self.assertEqual(
+            requests[-1][0]["params"],
+            {"name": "masc_figma_snapshot", "arguments": {"snapshot_id": "retained-1"}},
+        )
+
+    def test_plugin_http_result_fits_only_after_full_mcp_receipt_compaction(self):
+        received = []
+
+        def dispatch(arguments):
+            received.append(arguments)
+            if arguments["kind"] == "status":
+                return 200, {
+                    "worker_boot_id": "boot",
+                    "max_request_bytes": client.max_bytes,
+                }
+            if arguments["kind"] == "poll":
+                return 200, {"command": {"id": "next-read", "kind": "capture"}}
+            if arguments["kind"] == "result":
+                return 200, {"state": "outcome_unknown"}
+            return 200, {"status": "recorded"}
+
+        with scripted_mcp(dispatch) as client:
+            with running(Server(0, Bridge(client, 1000), "pair-token")) as server:
+
+                def post(path, value):
+                    request = urllib.request.Request(
+                        f"http://127.0.0.1:{server.server_port}" + path,
+                        data=encode(value),
+                        headers={
+                            "Authorization": "Bearer pair-token",
+                            "Origin": "null",
+                            "Content-Type": "application/json",
+                        },
+                    )
+                    with urllib.request.urlopen(request) as response:
+                        return json.load(response)
+
+                post("/session", {"session_id": "plugin", "document": {}})
+                completed = [{"index": 7, "op": "rename", "node_id": "1:2"}]
+                value = {
+                    "session_id": "plugin",
+                    "operation_id": "large-result",
+                    "ok": False,
+                    "payload": {
+                        "status": "outcome_unknown",
+                        "completed": completed,
+                        "completed_count": 4,
+                        "completed_omitted": 3,
+                        "padding": "",
+                    },
+                }
+                value["payload"]["padding"] = "x" * (
+                    client.max_bytes - len(encode(value))
+                )
+                # This is exactly the advertised Plugin HTTP-body limit.
+                self.assertEqual(len(encode(value)), client.max_bytes)
+                self.assertEqual(post("/result", value), {"state": "outcome_unknown"})
+                self.assertEqual(
+                    post("/poll", {"session_id": "plugin"})["command"]["id"],
+                    "next-read",
+                )
+        results = [value for value in received if value["kind"] == "result"]
+        self.assertEqual(len(results), 1)
+        self.assertFalse(results[0]["ok"])
+        self.assertEqual(results[0]["payload"]["status"], "outcome_unknown")
+        self.assertEqual(results[0]["payload"]["completed"], completed)
+        self.assertEqual(results[0]["payload"]["completed_count"], 4)
+        self.assertEqual(results[0]["payload"]["completed_omitted"], 3)
+        self.assertNotIn("padding", results[0]["payload"])
+
+    def test_plugin_compaction_counts_further_omitted_completed_ids(self):
+        received = []
+
+        def dispatch(arguments):
+            received.append(arguments)
+            if arguments["kind"] == "status":
+                return 200, {
+                    "worker_boot_id": "boot",
+                    "max_request_bytes": client.max_bytes,
+                }
+            return 200, {"status": "recorded"}
+
+        with scripted_mcp(dispatch) as client:
+            # Exercise the same configurable byte contract with a smaller
+            # resource envelope, so a completed-ID list reaches its boundary.
+            client.max_bytes = 4096
+            bridge = Bridge(client, 1000)
+            bridge.handle("/session", {"session_id": "plugin", "document": {}})
+            completed = []
+            value = {
+                "session_id": "plugin",
+                "operation_id": "many-completions",
+                "ok": False,
+                "payload": {
+                    "status": "outcome_unknown",
+                    "completed": completed,
+                    "completed_count": 7,
+                    "completed_omitted": 7,
+                    "details_omitted": True,
+                },
+            }
+            while True:
+                entry = {
+                    "index": len(completed) + 7,
+                    "op": "rename",
+                    "node_id": f"{len(completed)}:1",
+                }
+                completed.append(entry)
+                value["payload"]["completed_count"] = len(completed) + 7
+                if len(encode(value)) > client.max_bytes:
+                    completed.pop()
+                    value["payload"]["completed_count"] -= 1
+                    break
+            completed[-1]["node_id"] += "x" * (client.max_bytes - len(encode(value)))
+            self.assertEqual(len(encode(value)), client.max_bytes)
+            bridge.handle("/result", value)
+        result = received[-1]["payload"]
+        self.assertLess(len(result["completed"]), len(completed))
+        self.assertEqual(result["completed"], completed[: len(result["completed"])])
+        self.assertEqual(result["completed_count"], len(completed) + 7)
+        self.assertEqual(
+            result["completed_omitted"], len(completed) + 7 - len(result["completed"])
+        )
+
     def test_large_rest_result_reports_small_failure_then_processes_next_read(self):
         commands = [
             {"id": identity, "file_key": identity, "root_id": "1:2"}

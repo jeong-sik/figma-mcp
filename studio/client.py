@@ -9,6 +9,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from collections.abc import Callable
 from typing import Any
 
 
@@ -29,6 +30,13 @@ def encode(value: Any) -> bytes:
     return json.dumps(
         value, ensure_ascii=False, allow_nan=False, separators=(",", ":")
     ).encode()
+
+
+def request_message(method: str, params: dict, identity: int | None) -> dict:
+    value = {"jsonrpc": "2.0", "method": method, "params": params}
+    if identity is not None:
+        value["id"] = identity
+    return value
 
 
 def read_limited(response, limit: int) -> bytes:
@@ -61,9 +69,7 @@ class McpClient:
         self, method: str, params: dict, *, notification: bool = False
     ) -> dict:
         self.sequence += 1
-        body: dict = {"jsonrpc": "2.0", "method": method, "params": params}
-        if not notification:
-            body["id"] = self.sequence
+        body = request_message(method, params, None if notification else self.sequence)
         headers = {
             "Authorization": "Bearer " + self.token,
             "Content-Type": "application/json",
@@ -146,11 +152,41 @@ class McpClient:
             self.version = response["protocolVersion"]
             self._request("notifications/initialized", {}, notification=True)
 
-    def call_result(self, name: str, arguments: dict) -> dict:
+    def call_result(
+        self,
+        name: str,
+        arguments: dict,
+        *,
+        compact: Callable[[Callable[[dict], bool]], dict] | None = None,
+    ) -> dict:
         with self.lock:
-            response = self._request(
-                "tools/call", {"name": name, "arguments": arguments}
-            )
+            try:
+                response = self._request(
+                    "tools/call", {"name": name, "arguments": arguments}
+                )
+            except RequestTooLarge:
+                if compact is None:
+                    raise
+
+                def fits(value: dict) -> bool:
+                    return (
+                        len(
+                            encode(
+                                request_message(
+                                    "tools/call",
+                                    {"name": name, "arguments": value},
+                                    self.sequence + 1,
+                                )
+                            )
+                        )
+                        <= self.max_bytes
+                    )
+
+                # Keep sizing and dispatch under the same lock, including the
+                # exact next JSON-RPC id. Only a locally unsent request may shrink.
+                response = self._request(
+                    "tools/call", {"name": name, "arguments": compact(fits)}
+                )
         if response.get("isError"):
             texts = [
                 x.get("text", "")
@@ -160,8 +196,14 @@ class McpClient:
             raise TransportError("MASC tool refused: " + "\n".join(texts))
         return response
 
-    def call(self, name: str, arguments: dict) -> dict:
-        response = self.call_result(name, arguments)
+    def call(
+        self,
+        name: str,
+        arguments: dict,
+        *,
+        compact: Callable[[Callable[[dict], bool]], dict] | None = None,
+    ) -> dict:
+        response = self.call_result(name, arguments, compact=compact)
         value = response.get("structuredContent")
         if not isinstance(value, dict):
             texts = [

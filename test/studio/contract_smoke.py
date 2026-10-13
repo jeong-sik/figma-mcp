@@ -111,7 +111,7 @@ def main():
                     self.rfile.read(int(self.headers["Content-Length"]))
                 )
                 token = self.headers.get("Authorization")
-                assert token in ("Bearer fixture-owner", "Bearer fixture-relay")
+                assert token in ("Bearer fixture-keeper", "Bearer fixture-relay")
                 if "id" not in request:
                     self.send_response(202)
                     self.end_headers()
@@ -123,8 +123,10 @@ def main():
                         "arguments": {
                             "tool": params["name"],
                             "arguments": params["arguments"],
-                            "caller": {"kind": "operator"}
-                            if token == "Bearer fixture-owner"
+                            # Mirrors MASC Full-profile registered Worker
+                            # credentials; an HTTP Admin is not an operator.
+                            "caller": {"kind": "keeper", "name": "leader"}
+                            if token == "Bearer fixture-keeper"
                             else {"kind": "agent", "name": "studio-relay"},
                         },
                     }
@@ -140,12 +142,12 @@ def main():
 
         host = running(stack, ThreadingHTTPServer(("127.0.0.1", 0), HostFixture))
         url = f"http://127.0.0.1:{host.server_port}/mcp"
-        relay_client, owner = (
+        relay_client, keeper = (
             McpClient(url, "fixture-relay"),
-            McpClient(url, "fixture-owner"),
+            McpClient(url, "fixture-keeper"),
         )
         relay_client.initialize()
-        owner.initialize()
+        keeper.initialize()
         bridge = running(stack, Server(0, Bridge(relay_client, 1000), "fixture-pair"))
         plugin = subprocess.Popen(
             ["node", str(Path(__file__).with_name("plugin-driver.cjs"))],
@@ -178,10 +180,10 @@ def main():
                 return json.load(response)
 
         post("/session", {"document": context["document"]})
-        owner.call("masc_figma_bind", {"session_id": session})
+        keeper.call("masc_figma_bind", {"session_id": session})
 
         def execute(identity, kind, **values):
-            owner.call(
+            keeper.call(
                 "masc_figma_submit",
                 {
                     "operation_id": identity,
@@ -254,13 +256,16 @@ def main():
         )
         assert edited["state"] == "applied"
         snapshot = edited["result"]["snapshot_id"]
-        result = owner.call_result("masc_figma_snapshot", {"snapshot_id": snapshot})
+        # The host CLI downloads using the relay agent, never a forged owner.
+        result = relay_client.call_result(
+            "masc_figma_snapshot", {"snapshot_id": snapshot}
+        )
         png = png_from_result(result)
         metadata = json.loads(result["content"][0]["text"])
         title = json.loads(metadata["tree_json"])["document"]["children"][0][
             "children"
         ][0]["id"]
-        report = owner.call(
+        report = keeper.call(
             "masc_figma_validate",
             {
                 "snapshot_id": snapshot,
