@@ -556,4 +556,3 @@ class Store:
             )
             self.set_meta("latest_validation", identity)
         return {"report_id": identity, **report}
-
