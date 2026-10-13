@@ -17,7 +17,7 @@ comparison is optional; actual design readback and actual application execution
 are separate completion evidence.
 
 The integration design is tracked in
-[MASC's Figma Studio contract](https://github.com/jeong-sik/masc/blob/feat/figma-studio-contract/docs/design/figma-studio-lane-addon.md).
+[MASC's Figma Studio contract](https://github.com/jeong-sik/masc/pull/42736).
 It specifies an outbound host relay because current MASC workers run without
 network access. The Plugin must never receive the relay's MASC credential.
 
