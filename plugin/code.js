@@ -29,8 +29,8 @@ const sessionNonce = Math.random().toString(16).slice(2) + Date.now().toString(1
 figma.ui.postMessage({ type: "init", nonce: sessionNonce, version: PLUGIN_BRIDGE_VERSION });
 
 const MIXED = figma.mixed;
-const MAX_PAYLOAD_CHARS = 2000000;
-const MAX_EXPORT_B64_CHARS = Math.floor(MAX_PAYLOAD_CHARS * 0.4); // leave margin for wrapper fields
+const MAX_PAYLOAD_BYTES = 2000000;
+const MAX_EXPORT_B64_CHARS = Math.floor(MAX_PAYLOAD_BYTES * 0.4); // leave margin for wrapper fields
 
 // ============== Utilities ==============
 
@@ -217,11 +217,17 @@ function serializeNode(node, depth = 1, maxDepth = 6) {
 
 // ============== Handler Wrappers ==============
 
+function nativeResult(payload) {
+  const failed = payload && typeof payload === "object" &&
+    Object.prototype.hasOwnProperty.call(payload, "error");
+  return { ok: !failed, payload };
+}
+
 const H = {
   // Simple handler (no node required)
   simple: (fn) => async (p) => {
     const result = await fn(p);
-    return { ok: true, payload: result };
+    return nativeResult(result);
   },
 
   // Requires a node (from node_id or selection)
@@ -235,7 +241,7 @@ const H = {
       return { ok: false, payload: { error: opts.checkMsg || "Invalid node" } };
     }
     const result = await fn(node, p);
-    return { ok: true, payload: result };
+    return nativeResult(result);
   },
 
   // Requires specific node_id
@@ -245,7 +251,7 @@ const H = {
     const node = await getNodeById(nodeId);
     if (!node) return { ok: false, payload: { error: "Node not found" } };
     const result = await fn(node, p);
-    return { ok: true, payload: result };
+    return nativeResult(result);
   },
 
   // Multiple nodes
@@ -253,7 +259,7 @@ const H = {
     const nodes = await getNodes(p);
     if (nodes.length === 0) return { ok: false, payload: { error: "No valid nodes" } };
     const result = await fn(nodes, p);
-    return { ok: true, payload: result };
+    return nativeResult(result);
   },
 };
 
@@ -775,6 +781,47 @@ const handlers = {
       }
     };
   }),
+
+  // Native operations sent by handle_plugin_apply_ops. This validates the
+  // entire envelope before dispatch; each operation still has its own effects.
+  apply_ops: async (p) => {
+    const ops = p.ops;
+    if (!Array.isArray(ops) || ops.length === 0) {
+      return { ok: false, payload: { status: "rejected", completed: [],
+        error: "ops must be a non-empty array of {op, params}" } };
+    }
+    for (let i = 0; i < ops.length; i++) {
+      const entry = ops[i];
+      if (!entry || typeof entry !== "object" || Array.isArray(entry) ||
+          Object.keys(entry).length !== 2 || typeof entry.op !== "string" ||
+          !entry.params || typeof entry.params !== "object" || Array.isArray(entry.params) ||
+          entry.op === "apply_ops" || entry.op === "execute_dsl" ||
+          !Object.prototype.hasOwnProperty.call(handlers, entry.op) ||
+          typeof handlers[entry.op] !== "function") {
+        return { ok: false, payload: { status: "rejected", completed: [],
+          failed_index: i, error: "Each operation requires a known op and object params; nested apply_ops/execute_dsl is not supported" } };
+      }
+    }
+    const completed = [];
+    for (let i = 0; i < ops.length; i++) {
+      const entry = ops[i];
+      let result;
+      try {
+        result = await handlers[entry.op](entry.params);
+      } catch (error) {
+        result = { ok: false, payload: { error: String(error) } };
+      }
+      if (!result || result.ok !== true) {
+        // A native handler may mutate before throwing (e.g. a font load after
+        // creating text). Never describe this as an atomic rollback or retry.
+        return { ok: false, payload: { status: "outcome_unknown", completed,
+          failed_index: i, failed_op: entry.op,
+          failure: result ? result.payload : { error: "Handler returned no result" } } };
+      }
+      completed.push({ index: i, op: entry.op, payload: result.payload });
+    }
+    return { ok: true, payload: { status: "applied", completed } };
+  },
 
   // === DSL Execution (Code → Figma) ===
   execute_dsl: H.simple(async (p) => {
@@ -1692,19 +1739,60 @@ const handlers = {
 
 // ============== Command Dispatcher ==============
 
-async function handleCommand(command) {
-  const handler = handlers[command.name];
+// A batch must not interleave with another bridge command while a native
+// operation awaits fonts or node lookup. Failure must not poison the queue.
+let commandTail = Promise.resolve();
 
-  if (!handler) {
-    return { ok: false, payload: { error: "Unknown command: " + command.name } };
+// JSON.stringify escapes lone surrogates. Count UTF-8 bytes without requiring
+// browser TextEncoder, which is not part of the Plugin sandbox API.
+function utf8ByteLength(text) {
+  let bytes = 0;
+  for (let i = 0; i < text.length; i++) {
+    const code = text.charCodeAt(i);
+    if (code <= 0x7f) bytes++;
+    else if (code <= 0x7ff) bytes += 2;
+    else if (code >= 0xd800 && code <= 0xdbff) { bytes += 4; i++; }
+    else bytes += 3;
   }
+  return bytes;
+}
 
-  try {
-    const result = await handler(command.payload || {});
-    return result;
-  } catch (err) {
-    return { ok: false, payload: { error: String(err) } };
+function compactCommandFailure(payload, error, size) {
+  const completed = payload && Array.isArray(payload.completed) ? payload.completed : [];
+  const summary = { error, status: "outcome_unknown", size,
+    completed_count: completed.length, completed: [], completed_omitted: completed.length };
+  // Reserve the actual wire envelope, then retain as many small identities as
+  // fit. Never imply that omitted details or identities were verified/retained.
+  let remaining = MAX_PAYLOAD_BYTES - utf8ByteLength(safeStringify(summary));
+  for (const entry of completed) {
+    const detail = entry.payload || {};
+    const identity = { index: entry.index, op: entry.op, node_id: detail.node_id || detail.id };
+    const cost = utf8ByteLength(safeStringify(identity)) + (summary.completed.length ? 1 : 0);
+    if (cost > remaining) break;
+    summary.completed.push(identity);
+    summary.completed_omitted--;
+    remaining -= cost;
   }
+  return safeStringify(summary);
+}
+
+function handleCommand(command) {
+  const execute = async () => {
+    if (!command || typeof command.name !== "string" ||
+        !Object.prototype.hasOwnProperty.call(handlers, command.name)) {
+      return { ok: false, payload: { error: "Unknown command" } };
+    }
+    try {
+      return await handlers[command.name](command.payload || {});
+    } catch (err) {
+      return { ok: false, payload: { error: String(err) } };
+    }
+  };
+  // This request only performs network I/O and cannot edit the document.
+  if (command && command.name === "llm_proxy") return execute();
+  const result = commandTail.then(execute);
+  commandTail = result.then(() => undefined, () => undefined);
+  return result;
 }
 
 // ============== Message Handler ==============
@@ -1990,23 +2078,29 @@ figma.ui.onmessage = async (msg) => {
     const command = msg.command;
     const result = await handleCommand(command);
 
+    let ok = result.ok;
+    let payloadJson;
+    try {
+      payloadJson = safeStringify(result.payload);
+      if (payloadJson === undefined) throw new Error("Missing command result");
+      const size = utf8ByteLength(payloadJson);
+      if (size > MAX_PAYLOAD_BYTES) {
+        ok = false;
+        payloadJson = compactCommandFailure(result.payload, "Payload too large", size);
+      }
+    } catch (error) {
+      ok = false;
+      payloadJson = safeStringify({ error: "Serialize error: " + String(error),
+        status: "outcome_unknown" });
+    }
+
     figma.ui.postMessage({
       type: "command_result",
       nonce: sessionNonce,
       command_id: command.id,
       action: command.name,
-      ok: result.ok,
-      payload_json: (() => {
-        try {
-          const json = safeStringify(result.payload);
-          if (json && json.length > MAX_PAYLOAD_CHARS) {
-            return safeStringify({ error: "Payload too large", size: json.length });
-          }
-          return json;
-        } catch (e) {
-          return safeStringify({ error: "Serialize error: " + String(e) });
-        }
-      })()
+      ok,
+      payload_json: payloadJson
     });
   }
 };
