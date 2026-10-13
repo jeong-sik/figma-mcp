@@ -25,7 +25,16 @@ def png_from_result(value: dict[str, Any]) -> bytes:
     if len(images) != 1:
         raise ValueError("Expected exactly one retained PNG image in the tool result")
     data = base64.b64decode(images[0]["data"], validate=True)
-    metadata = result["structuredContent"]
+    metadata = result.get("structuredContent")
+    if metadata is None:
+        texts = [
+            entry["text"]
+            for entry in result.get("content", [])
+            if entry.get("type") == "text"
+        ]
+        if len(texts) != 1:
+            raise ValueError("Expected one snapshot metadata text block")
+        metadata = json.loads(texts[0])
     digest = metadata["preview"]["sha256"]
     if (
         not data.startswith(b"\x89PNG\r\n\x1a\n")

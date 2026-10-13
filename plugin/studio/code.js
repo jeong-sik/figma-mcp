@@ -56,10 +56,15 @@ function inside(node, root) {
   for (let current = node; current; current = current.parent) if (current.id === root.id) return true;
   return false;
 }
+function owningPage(node) {
+  for (let current = node; current; current = current.parent) if (current.type === 'PAGE') return current;
+  throw new Error('Export root has no owning page');
+}
 async function nativeJson(root) {
   return canonical(await root.exportAsync({ format: 'JSON_REST_V1' }));
 }
 async function capture(root) {
+  const beforePage = owningPage(root).id;
   const before = await nativeJson(root);
   let preview = null;
   const missing = ['font_files', 'variable_values', 'component_code_mapping'];
@@ -69,9 +74,10 @@ async function capture(root) {
     missing.push(`preview: ${String(error.message || error)}`);
   }
   const after = await nativeJson(root);
+  const afterPage = owningPage(root).id;
   return { schema_version: 1, source: 'plugin_live', session_id: sessionId,
-    root_id: root.id, page_id: figma.currentPage.id, tree_json: after, preview,
-    coverage: { stable: before === after, missing }, observed_at: Date.now() / 1000 };
+    root_id: root.id, page_id: afterPage, tree_json: after, preview,
+    coverage: { stable: before === after && beforePage === afterPage, missing }, observed_at: Date.now() / 1000 };
 }
 function context() {
   return { session_id: sessionId, name: figma.root.name, page_id: figma.currentPage.id,

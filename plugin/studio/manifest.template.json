@@ -1,6 +1,5 @@
 {
   "name": "Figma Studio for MASC",
-  "id": "figma-studio-masc-local",
   "api": "1.0.0",
   "main": "code.js",
   "ui": "ui.html",

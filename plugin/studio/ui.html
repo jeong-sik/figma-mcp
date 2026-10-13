@@ -17,7 +17,7 @@
 <p id="document"></p><p id="status">Waiting for Figma…</p>
 <script>
   'use strict';
-  let context, connection, pending, active = false;
+  let context, connection, pending, active = false, connecting = false;
   const status = value => { document.getElementById('status').textContent = value; };
   const sleep = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds));
   async function request(path, body) {
@@ -35,16 +35,33 @@
       parent.postMessage({ pluginMessage: { type: 'command', session_id: context.session_id, command } }, '*');
     });
   }
+  function resultWire(sessionId, operationId, result, maxBytes) {
+    if (!Number.isSafeInteger(maxBytes) || maxBytes <= 0) throw new Error('Invalid relay envelope limit');
+    const wire = { session_id: sessionId, operation_id: operationId, ...result };
+    const fits = value => new TextEncoder().encode(JSON.stringify(value)).length <= maxBytes;
+    if (fits(wire)) return wire;
+    const completed = result.payload && Array.isArray(result.payload.completed) ? result.payload.completed : [];
+    const identities = completed.map((entry, index) => ({ index,
+      ...(entry && typeof entry.op === 'string' ? { op: entry.op } : {}),
+      ...(entry && typeof entry.node_id === 'string' ? { node_id: entry.node_id } : {}) }));
+    const summary = count => ({ session_id: sessionId, operation_id: operationId, ok: false,
+      payload: { status: 'outcome_unknown', error: 'Readback exceeds relay envelope; inspect the document',
+        completed_count: completed.length, completed: identities.slice(0, count),
+        completed_omitted: completed.length - count, details_omitted: true } });
+    if (!fits(summary(0))) throw new Error('Relay envelope cannot hold the operation receipt');
+    let low = 0, high = identities.length;
+    while (low < high) {
+      const count = Math.ceil((low + high) / 2);
+      if (fits(summary(count))) low = count;
+      else high = count - 1;
+    }
+    return summary(low);
+  }
   async function run() {
     while (active) {
       try {
         if (pending && pending.result) {
-          const wire = { session_id: context.session_id, operation_id: pending.command.id, ...pending.result };
-          if (new TextEncoder().encode(JSON.stringify(wire)).length > connection.maxBytes) {
-            wire.ok = false;
-            wire.payload = { status: 'outcome_unknown', error: 'Readback exceeds relay envelope; inspect the document',
-              completed: pending.result.payload.completed || [] };
-          }
+          const wire = resultWire(context.session_id, pending.command.id, pending.result, connection.maxBytes);
           await request('/result', wire);
           pending = undefined;
           status('Result retained by MASC. Ready.');
@@ -76,6 +93,9 @@
     }
   };
   document.getElementById('connect').onclick = async () => {
+    if (connecting || active) return;
+    connecting = true;
+    document.getElementById('connect').disabled = true;
     try {
       if (!context) throw new Error('Figma context is not ready');
       const url = new URL(document.getElementById('url').value);
@@ -91,6 +111,10 @@
       status('Connected. Choose this session in MASC.');
       await run();
     } catch (error) { status(error.message); }
+    finally {
+      connecting = false;
+      document.getElementById('connect').disabled = active;
+    }
   };
   document.getElementById('disconnect').onclick = () => { active = false; status('Disconnecting after the current operation…'); };
 </script>
