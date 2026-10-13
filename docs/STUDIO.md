@@ -1,0 +1,75 @@
+# Figma Studio: creation and implementation
+
+Status: first implementation unit. The current public MCP surface still exposes
+the eight read/verification tools in the README. This is not a connected MASC
+Addon or a new public editing tool.
+
+The product has two workflows: generate/revise native Figma designs and implement
+selected designs in an existing repository. Both use the same retained design
+snapshot. A snapshot carries native structure, text runs, layout, variables,
+components, assets, preview and explicit coverage. Code implementations pin the
+snapshot rather than following a mutable selection.
+
+The Keeper owns design decisions and code generation. The Plugin owns open-file
+reads and edits. This server owns transport and Figma context. An optional MASC
+Lane Addon owns workflow state, observations, package tools and Skills. Visual
+comparison is optional; actual design readback and actual application execution
+are separate completion evidence.
+
+The integration design is tracked in
+[MASC's Figma Studio contract](https://github.com/jeong-sik/masc/blob/feat/figma-studio-contract/docs/design/figma-studio-lane-addon.md).
+It specifies an outbound host relay because current MASC workers run without
+network access. The Plugin must never receive the relay's MASC credential.
+
+## Native dispatcher repair
+
+The existing `handle_plugin_apply_ops` sends a command named `apply_ops` with an
+`ops` array. The shipped Plugin previously handled only the UI's `execute_dsl`
+creation format. An always-successful server test responder did not execute the
+Plugin and therefore did not detect that mismatch.
+
+The Plugin now accepts this explicit envelope:
+
+```json
+{
+  "ops": [
+    {"op": "create_frame", "params": {"name": "Sign in", "width": 360, "height": 640}}
+  ]
+}
+```
+
+Each entry contains exactly `op` and object-valued `params`. The dispatcher
+validates all operation names and envelopes before running any handler. Nested
+`apply_ops` and `execute_dsl` are rejected. Parameters still follow the existing native handler
+contracts; this is not the later typed design-plan validator. Bridge commands
+execute serially, including when a native handler awaits fonts or node lookup.
+The network-only `llm_proxy` route remains independent of that document queue.
+
+Success returns `status: applied` and ordered `completed` handler results. This
+means those native handlers reported success, not that an independent verifier
+approved the design. A malformed envelope returns `rejected` without executing
+its operations. A failure after dispatch returns `outcome_unknown`, the completed
+results, failing index/action and failure payload; later operations are not run.
+A failing native handler may already have edited the file. There is no automatic
+rollback or duplicate-delivery guarantee in this first unit.
+
+Native `payload.error` results are failures even when produced by a simple
+handler. A result too large for the existing UI envelope, or one that cannot be
+serialized, is returned with `ok: false` and `outcome_unknown`. The existing size
+bound is measured in UTF-8 bytes. Oversized batch results retain compact completed
+operation identities and explicit counts for omitted details/identities. A missing receipt
+does not establish that its document edits failed or permit automatic replay.
+
+The existing UI `execute_dsl` route remains supported. This change does not expose
+write tools on the public eight-tool surface. Explicit session targeting,
+idempotent operation storage, safe reconnect, full snapshot capture, the optional
+editing MCP surface and the Lane Addon/relay remain subsequent work.
+
+## Verification
+
+Run `npm run test:plugin` (Node.js test runner, no npm dependencies needed).
+The fixture loads the actual `plugin/code.js` entrypoint, sends commands through
+its nonce-protected UI boundary and reads resulting node state. It covers native
+creation/text/auto layout, readback, invalid/unknown operations, partial effects,
+queue continuity and the existing UI DSL. Its Figma document is a fake; this does
+not prove behavior inside the real Figma app or installed MASC runtime.

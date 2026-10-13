@@ -50,6 +50,8 @@ The server exposes exactly 8 tools:
 
 If agent orchestration is needed, it should live outside this server and consume these MCP tools or the underlying OCaml libraries.
 
+The optional [Figma Studio design](docs/STUDIO.md) covers native design creation and design-to-code through a Plugin and Lane Addon. Its first dispatcher repair does not add public write tools or imply that the full integration is installed.
+
 ## Quickstart
 
 ```bash
