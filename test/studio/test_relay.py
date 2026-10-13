@@ -9,6 +9,7 @@ import sys
 import subprocess
 import tempfile
 import threading
+import time
 import unittest
 import urllib.error
 import urllib.request
@@ -29,6 +30,20 @@ def running(server):
         server.shutdown()
         server.server_close()
         worker.join()
+
+
+def post_json(server, path, value):
+    request = urllib.request.Request(
+        f"http://127.0.0.1:{server.server_port}" + path,
+        data=encode(value),
+        headers={
+            "Authorization": "Bearer pair-token",
+            "Origin": "null",
+            "Content-Type": "application/json",
+        },
+    )
+    with urllib.request.urlopen(request, timeout=5) as response:
+        return json.load(response)
 
 
 @contextlib.contextmanager
@@ -55,7 +70,11 @@ def scripted_mcp(dispatch, *, requests=None):
                     # Retain the request but lose the response connection.
                     self.close_connection = True
                     return
-                result = {"content": [{"type": "text", "text": json.dumps(value)}]}
+                result = (
+                    value
+                    if "isError" in value
+                    else {"content": [{"type": "text", "text": json.dumps(value)}]}
+                )
             data = json.dumps(
                 {"jsonrpc": "2.0", "id": request["id"], "result": result}
             ).encode()
@@ -113,6 +132,7 @@ class McpHandler(BaseHTTPRequestHandler):
 
 class FakeClient:
     max_bytes = 100000
+    request_timeout_seconds = 30.0
 
     def __init__(self):
         self.calls = []
@@ -137,10 +157,12 @@ class Response(io.BytesIO):
 class RestOpener:
     def __init__(self, version="v7", image=True):
         self.requests = []
+        self.timeouts = []
         self.version, self.image = version, image
 
-    def open(self, request):
+    def open(self, request, *, timeout):
         self.requests.append(request)
+        self.timeouts.append(timeout)
         if "/nodes?" in request.full_url:
             value = {
                 "version": self.version,
@@ -158,6 +180,196 @@ class RestOpener:
 
 
 class RelayTests(unittest.TestCase):
+    def test_restart_refusal_retains_original_boot_and_does_not_block_new_poll(self):
+        boot = "original-boot"
+        failure = {"class": "workflow_rejection", "effect": "proven_pre_effect"}
+        received = []
+
+        def dispatch(arguments):
+            received.append(arguments)
+            if arguments["kind"] == "status":
+                return 200, {"worker_boot_id": boot, "max_request_bytes": 10000}
+            if arguments["kind"] == "result":
+                return 200, {
+                    "isError": True,
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": "Result belongs to another session/worker",
+                        }
+                    ],
+                    "_meta": {"io.github.jeong-sik/masc.lane.failure": failure},
+                }
+            if arguments["kind"] == "poll":
+                return 200, {"command": {"id": "new-read", "kind": "capture"}}
+            return 200, {"status": "reported"}
+
+        with scripted_mcp(dispatch) as client:
+            bridge = Bridge(client, 1000)
+            with running(Server(0, bridge, "pair-token")) as server:
+                document = {"session_id": "plugin", "document": {}}
+                original = post_json(server, "/session", document)
+                pending = {
+                    "session_id": "plugin",
+                    "worker_boot_id": original["worker_boot_id"],
+                    "operation_id": "old-operation",
+                    "ok": True,
+                    "payload": {},
+                }
+                # A restarted worker accepts this same Plugin session with a
+                # new boot, but cannot accept a receipt for the old operation.
+                boot = "restarted-boot"
+                current = post_json(server, "/session", document)
+                self.assertEqual(current["worker_boot_id"], boot)
+                self.assertEqual(bridge.max_bytes, 10000)
+                self.assertEqual(client.max_bytes, 10000)
+                self.assertEqual(current["request_timeout_seconds"], 30.0)
+                with self.assertRaises(urllib.error.HTTPError) as refused:
+                    post_json(server, "/result", pending)
+                with refused.exception as response:
+                    self.assertEqual(response.code, 409)
+                    value = json.load(response)
+                self.assertEqual(value["kind"], "application_refused")
+                self.assertFalse(value["retryable"])
+                self.assertEqual(received[-1]["worker_boot_id"], "original-boot")
+                self.assertEqual(
+                    post_json(server, "/poll", {"session_id": "plugin"})["command"][
+                        "id"
+                    ],
+                    "new-read",
+                )
+                self.assertEqual(received[-1]["worker_boot_id"], boot)
+
+                # The same error text does not establish a safe terminal
+                # refusal without the exact worker effect metadata.
+                for failure in (
+                    {"class": "runtime_failure", "effect": "effect_outcome_unknown"},
+                    {"class": "workflow_rejection", "effect": "effect_outcome_unknown"},
+                    {},
+                ):
+                    with self.subTest(failure=failure):
+                        with self.assertRaises(urllib.error.HTTPError) as uncertain:
+                            post_json(server, "/result", pending)
+                        with uncertain.exception as response:
+                            self.assertEqual(response.code, 502)
+                            value = json.load(response)
+                        self.assertEqual(value["kind"], "transport_error")
+                        self.assertTrue(value["retryable"])
+
+                # A locally unrepresentable receipt is also terminal for its
+                # delivery, but is not a worker acknowledgement of the edit.
+                result_count = sum(item["kind"] == "result" for item in received)
+                client.max_bytes = len(encode(pending))
+                with self.assertRaises(urllib.error.HTTPError) as too_large:
+                    post_json(server, "/result", pending)
+                with too_large.exception as response:
+                    self.assertEqual(response.code, 413)
+                    value = json.load(response)
+                self.assertEqual(value["kind"], "request_too_large")
+                self.assertFalse(value["retryable"])
+                self.assertEqual(
+                    sum(item["kind"] == "result" for item in received), result_count
+                )
+
+    def test_silent_mcp_header_json_and_sse_reads_timeout_then_release_client(self):
+        for stalled_at in ("headers", "json", "sse"):
+            with self.subTest(stalled_at=stalled_at):
+                release = threading.Event()
+                received = []
+
+                class Handler(BaseHTTPRequestHandler):
+                    def log_message(self, *_):
+                        pass
+
+                    def do_POST(self):
+                        request = json.loads(
+                            self.rfile.read(int(self.headers["Content-Length"]))
+                        )
+                        args = request["params"]["arguments"]
+                        received.append(args)
+                        if args["kind"] == "result":
+                            if stalled_at != "headers":
+                                self.send_response(200)
+                                self.send_header(
+                                    "Content-Type",
+                                    "text/event-stream"
+                                    if stalled_at == "sse"
+                                    else "application/json",
+                                )
+                                self.end_headers()
+                                self.wfile.flush()
+                            release.wait()
+                            return
+                        value = (
+                            {"worker_boot_id": "boot", "max_request_bytes": 10000}
+                            if args["kind"] == "status"
+                            else {"command": None}
+                            if args["kind"] == "poll"
+                            else {"status": "reported"}
+                        )
+                        body = encode(
+                            {
+                                "jsonrpc": "2.0",
+                                "id": request["id"],
+                                "result": {"structuredContent": value},
+                            }
+                        )
+                        self.send_response(200)
+                        self.send_header("Content-Type", "application/json")
+                        self.send_header("Content-Length", str(len(body)))
+                        self.end_headers()
+                        self.wfile.write(body)
+
+                try:
+                    with running(
+                        ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+                    ) as upstream:
+                        client = McpClient(
+                            f"http://127.0.0.1:{upstream.server_port}/mcp",
+                            "fixture-token",
+                            request_timeout_seconds=0.1,
+                        )
+                        with running(
+                            Server(0, Bridge(client, 1000), "pair-token")
+                        ) as server:
+                            post_json(
+                                server,
+                                "/session",
+                                {"session_id": "plugin", "document": {}},
+                            )
+                            start = time.monotonic()
+                            with self.assertRaises(urllib.error.HTTPError) as timeout:
+                                post_json(
+                                    server,
+                                    "/result",
+                                    {
+                                        "session_id": "plugin",
+                                        "worker_boot_id": "boot",
+                                        "operation_id": "uncertain",
+                                        "ok": True,
+                                        "payload": {},
+                                    },
+                                )
+                            with timeout.exception as response:
+                                self.assertEqual(response.code, 502)
+                                value = json.load(response)
+                            self.assertEqual(value["kind"], "transport_error")
+                            self.assertTrue(value["retryable"])
+                            self.assertIn("outcome may be unknown", value["error"])
+                            self.assertLess(time.monotonic() - start, 2)
+                            # The first server request is still silent. The
+                            # client lock must already allow an independent poll.
+                            self.assertIsNone(
+                                post_json(server, "/poll", {"session_id": "plugin"})[
+                                    "command"
+                                ]
+                            )
+                            self.assertEqual(
+                                sum(item["kind"] == "result" for item in received), 1
+                            )
+                finally:
+                    release.set()
+
     def test_lost_plugin_ack_retries_the_identical_compacted_receipt(self):
         received, requests = [], []
         acknowledgement = {"operation_id": "repeat-result", "state": "outcome_unknown"}
@@ -201,6 +413,7 @@ class RelayTests(unittest.TestCase):
                     client.call("masc_figma_relay", {"kind": "status"})
                 value = {
                     "session_id": "plugin",
+                    "worker_boot_id": "boot",
                     "operation_id": "repeat-result",
                     "ok": True,
                     "payload": {
@@ -366,6 +579,7 @@ class RelayTests(unittest.TestCase):
                 completed = [{"index": 7, "op": "rename", "node_id": "1:2"}]
                 value = {
                     "session_id": "plugin",
+                    "worker_boot_id": "boot",
                     "operation_id": "large-result",
                     "ok": False,
                     "payload": {
@@ -416,6 +630,7 @@ class RelayTests(unittest.TestCase):
             completed = []
             value = {
                 "session_id": "plugin",
+                "worker_boot_id": "boot",
                 "operation_id": "many-completions",
                 "ok": False,
                 "payload": {
@@ -508,7 +723,10 @@ class RelayTests(unittest.TestCase):
                 def dispatch(arguments):
                     received.append(arguments)
                     if arguments["kind"] == "status":
-                        return 200, {"worker_boot_id": "new-boot"}
+                        return 200, {
+                            "worker_boot_id": "new-boot",
+                            "max_request_bytes": client.max_bytes,
+                        }
                     if arguments["kind"] == "rest_poll":
                         if not commands:
                             bridge.stopping.set()
@@ -607,7 +825,7 @@ class RelayTests(unittest.TestCase):
             self.assertEqual(client.calls[-1][1]["worker_boot_id"], "boot")
 
     def test_rest_capture_pins_render_version_and_never_sends_pat_to_asset(self):
-        rest = FigmaRest("private-pat", 100000)
+        rest = FigmaRest("private-pat", 100000, request_timeout_seconds=0.25)
         opener = RestOpener()
         rest.opener = opener
         capture = rest.capture("file-key", "1:2")
@@ -617,6 +835,7 @@ class RelayTests(unittest.TestCase):
         self.assertEqual(opener.requests[0].get_header("X-figma-token"), "private-pat")
         self.assertIsNone(opener.requests[2].get_header("X-figma-token"))
         self.assertIsNone(opener.requests[2].get_header("Authorization"))
+        self.assertEqual(opener.timeouts, [0.25, 0.25, 0.25])
         rest.opener = RestOpener(version="wrong")
         with self.assertRaises(TransportError):
             rest.capture("file-key", "1:2", "v7")
@@ -633,6 +852,12 @@ class RelayTests(unittest.TestCase):
                 read_config(path)
             path.chmod(0o600)
             self.assertEqual(read_config(path)["relay"]["pairing_token"], "fixture")
+            for value in ("0", "-1", "true", "nan", "inf", '"30"'):
+                path.write_text(
+                    '[relay]\npairing_token="fixture"\nrequest_timeout_seconds=' + value
+                )
+                with self.subTest(timeout=value), self.assertRaises(ValueError):
+                    read_config(path)
 
 
 if __name__ == "__main__":

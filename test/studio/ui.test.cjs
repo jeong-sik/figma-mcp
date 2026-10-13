@@ -6,10 +6,14 @@ const vm = require('node:vm');
 
 const tick = () => new Promise(resolve => setImmediate(resolve));
 const response = value => ({ ok: true, json: async () => value });
+const refusal = (status, value) => ({ ok: false, status, json: async () => value });
+const sessionResponse = (maxBytes = 1000000, boot = 'boot:1') => response({
+  worker_boot_id: boot, max_request_bytes: maxBytes, poll_interval_ms: 0,
+});
 
 function studioUI(onFetch) {
   const elements = Object.fromEntries(
-    ['status', 'document', 'connect', 'disconnect', 'url', 'token']
+    ['status', 'uncertain', 'document', 'connect', 'disconnect', 'url', 'token']
       .map(id => [id, { value: '', disabled: false }])
   );
   elements.url.value = 'http://127.0.0.1:8941';
@@ -19,7 +23,7 @@ function studioUI(onFetch) {
   const fixture = { elements, sent };
   const scope = vm.createContext({
     document: { getElementById: id => elements[id] },
-    parent, URL, TextEncoder, setTimeout, onmessage: null,
+    parent, URL, TextEncoder, AbortController, setTimeout, onmessage: null,
     fetch: (url, init) => onFetch(url, init, fixture),
   });
   const html = fs.readFileSync(path.join(__dirname, '../../plugin/studio/ui.html'), 'utf8');
@@ -57,7 +61,7 @@ test('overlapping Connect clicks start one poller and retain every command resul
   const second = elements.connect.onclick();
   await tick();
   assert.equal(handshakes.length, 1, 'a second click cannot start another session handshake');
-  handshakes[0](response({ max_request_bytes: 1000000, poll_interval_ms: 0 }));
+  handshakes[0](sessionResponse());
   await tick();
   assert.deepEqual(sent.map(command => command.id), ['op:1']);
 
@@ -75,7 +79,7 @@ test('oversized native replies retain a bounded UTF-8 changed-node summary with 
   const maxBytes = 1024, retained = [];
   let pollCount = 0;
   const { elements, sent, deliver } = studioUI(async (url, init, fixture) => {
-    if (url.endsWith('/session')) return response({ max_request_bytes: maxBytes, poll_interval_ms: 0 });
+    if (url.endsWith('/session')) return sessionResponse(maxBytes);
     if (url.endsWith('/result')) {
       retained.push({ bytes: Buffer.byteLength(init.body, 'utf8'), body: JSON.parse(init.body) });
       return response({});
@@ -111,20 +115,195 @@ test('oversized native replies retain a bounded UTF-8 changed-node summary with 
     .map(({ op, node_id }, index) => ({ index, op, node_id })));
   assert.equal(body.payload.details_omitted, true);
   assert.equal(body.session_id, 'session');
+  assert.equal(body.worker_boot_id, 'boot:1');
   assert.equal(body.operation_id, 'edit:1');
 });
 
-test('a receipt that cannot fit is retained for reconnect without posting or replaying the edit', async () => {
-  let maxBytes = 32, pollCount = 0;
+test('an unrepresentable receipt remains visible and does not block a new command', async () => {
+  const maxBytes = 240;
+  let pollCount = 0;
   const retained = [];
   const { elements, sent, deliver } = studioUI(async (url, init, fixture) => {
-    if (url.endsWith('/session')) return response({ max_request_bytes: maxBytes, poll_interval_ms: 0 });
+    if (url.endsWith('/session')) return sessionResponse(maxBytes);
     if (url.endsWith('/result')) {
       retained.push({ bytes: Buffer.byteLength(init.body, 'utf8'), body: JSON.parse(init.body) });
       return response({});
     }
     assert.ok(url.endsWith('/poll'));
-    if (++pollCount > 1) {
+    if (++pollCount > 2) {
+      fixture.elements.disconnect.onclick();
+      return response({});
+    }
+    return response({ command: {
+      id: pollCount === 1 ? 'edit:1' : 'read:2', session_id: 'session',
+      kind: pollCount === 1 ? 'apply' : 'capture', root_id: 'root',
+    } });
+  });
+  const first = elements.connect.onclick();
+  await tick();
+  deliver({ type: 'result', id: 'edit:1', session_id: 'session', ok: true, payload: {
+    status: 'applied', tree_json: 'large'.repeat(1000), completed: [{ op: 'create_frame', node_id: 'created:1' }],
+  } });
+  await tick();
+  assert.equal(retained.length, 0, 'an oversized minimal receipt is never sent');
+  assert.deepEqual(sent.map(command => command.id), ['edit:1', 'read:2']);
+  assert.match(elements.uncertain.textContent, /Result not collected; document effects are unknown/);
+  assert.match(elements.uncertain.textContent, /Operation: edit:1/);
+  assert.match(elements.uncertain.textContent, /created:1/);
+  deliver({ type: 'result', id: 'read:2', session_id: 'session', ok: true, payload: { tree_json: '{}' } });
+  await first;
+  assert.equal(retained.length, 1);
+  assert.ok(retained[0].bytes <= maxBytes);
+  assert.equal(retained[0].body.operation_id, 'read:2');
+  assert.match(elements.uncertain.textContent, /Operation: edit:1/, 'later success does not erase the warning');
+});
+
+test('worker restart refusal retains uncertain details, then re-pairs and polls without replaying', { timeout: 2000 }, async () => {
+  const receipts = [];
+  let sessions = 0, polls = 0;
+  const { elements, sent, deliver } = studioUI(async (url, init, fixture) => {
+    if (url.endsWith('/session')) return sessionResponse(1000000, ++sessions === 1 ? 'boot:old' : 'boot:new');
+    if (url.endsWith('/result')) {
+      receipts.push(init.body);
+      const body = JSON.parse(init.body);
+      if (receipts.length === 1)
+        return refusal(502, { kind: 'transport_error', retryable: true, error: 'Worker connection lost' });
+      if (body.operation_id === 'edit:1')
+        return refusal(409, { kind: 'application_refused', retryable: false, error: 'Result belongs to another session/worker' });
+      return response({});
+    }
+    assert.ok(url.endsWith('/poll'));
+    if (++polls > 2) {
+      fixture.elements.disconnect.onclick();
+      return response({});
+    }
+    return response({ command: {
+      id: polls === 1 ? 'edit:1' : 'read:2', session_id: 'session',
+      kind: polls === 1 ? 'apply' : 'capture', root_id: 'root',
+    } });
+  });
+  const first = elements.connect.onclick();
+  await tick();
+  deliver({ type: 'result', id: 'edit:1', session_id: 'session', ok: true, payload: {
+    status: 'applied', completed: [{ op: 'create_frame', node_id: 'created:1' }],
+  } });
+  await first;
+  assert.equal(polls, 1, 'transport errors preserve the pending delivery');
+  assert.equal(JSON.parse(receipts[0]).worker_boot_id, 'boot:old');
+
+  const second = elements.connect.onclick();
+  await tick();
+  assert.equal(sessions, 3, 'definitive refusal triggers a fresh registration before polling');
+  assert.equal(receipts[1], receipts[0], 'the retry keeps the original worker and exact receipt');
+  assert.deepEqual(sent.map(command => command.id), ['edit:1', 'read:2']);
+  assert.match(elements.uncertain.textContent, /Result not collected; document effects are unknown/);
+  assert.match(elements.uncertain.textContent, /Operation: edit:1/);
+  assert.match(elements.uncertain.textContent, /Result belongs to another session\/worker/);
+  assert.match(elements.uncertain.textContent, /created:1/);
+  deliver({ type: 'result', id: 'read:2', session_id: 'session', ok: true, payload: { tree_json: '{}' } });
+  await second;
+  assert.equal(JSON.parse(receipts[2]).worker_boot_id, 'boot:new');
+  assert.match(elements.uncertain.textContent, /Operation: edit:1/);
+});
+
+test('only explicitly permanent delivery failures release a pending result', { timeout: 2000 }, async () => {
+  for (const firstReply of [
+    refusal(409, { error: 'Unclassified conflict' }),
+    refusal(413, { kind: 'request_too_large', retryable: true, error: 'Unclassified size failure' }),
+  ]) {
+    const receipts = [];
+    let polls = 0;
+    const { elements, deliver } = studioUI(async (url, init, fixture) => {
+      if (url.endsWith('/session')) return sessionResponse();
+      if (url.endsWith('/result')) {
+        receipts.push(init.body);
+        return receipts.length === 1 ? firstReply : response({});
+      }
+      if (++polls > 1) {
+        fixture.elements.disconnect.onclick();
+        return response({});
+      }
+      return response({ command: { id: 'edit:1', session_id: 'session', kind: 'apply', root_id: 'root' } });
+    });
+    const first = elements.connect.onclick();
+    await tick();
+    deliver({ type: 'result', id: 'edit:1', session_id: 'session', ok: true, payload: { completed: [] } });
+    await first;
+    assert.equal(polls, 1);
+    assert.equal(elements.uncertain.textContent, undefined);
+    await elements.connect.onclick();
+    assert.equal(receipts[1], receipts[0]);
+  }
+});
+
+test('typed remote receipt-size refusal does not block later polling', { timeout: 2000 }, async () => {
+  let polls = 0;
+  const { elements, sent, deliver } = studioUI(async (url, init, fixture) => {
+    if (url.endsWith('/session')) return sessionResponse();
+    if (url.endsWith('/result')) return refusal(413, {
+      kind: 'request_too_large', retryable: false, error: 'MCP envelope cannot hold the receipt',
+    });
+    if (++polls > 1) {
+      fixture.elements.disconnect.onclick();
+      return response({});
+    }
+    return response({ command: { id: 'edit:1', session_id: 'session', kind: 'apply', root_id: 'root' } });
+  });
+  const connection = elements.connect.onclick();
+  await tick();
+  deliver({ type: 'result', id: 'edit:1', session_id: 'session', ok: true, payload: {
+    completed: [{ op: 'rename', node_id: 'changed:1' }],
+  } });
+  await connection;
+  assert.equal(polls, 2);
+  assert.deepEqual(sent.map(command => command.id), ['edit:1']);
+  assert.match(elements.uncertain.textContent, /Receipt too large: MCP envelope cannot hold the receipt/);
+  assert.match(elements.uncertain.textContent, /changed:1/);
+});
+
+test('Disconnect aborts a waiting poll and permits reconnect without a late command', { timeout: 2000 }, async () => {
+  let polls = 0, blockedSignal;
+  const { elements, sent, deliver } = studioUI(async (url, init, fixture) => {
+    if (url.endsWith('/session')) return sessionResponse();
+    if (url.endsWith('/result')) return response({});
+    if (++polls === 1) {
+      blockedSignal = init.signal;
+      return new Promise((resolve, reject) => init.signal.addEventListener('abort', () => reject(init.signal.reason), { once: true }));
+    }
+    if (polls > 2) {
+      fixture.elements.disconnect.onclick();
+      return response({});
+    }
+    return response({ command: { id: 'read:2', session_id: 'session', kind: 'capture', root_id: 'root' } });
+  });
+  const first = elements.connect.onclick();
+  await tick();
+  elements.disconnect.onclick();
+  await first;
+  assert.equal(blockedSignal.aborted, true);
+  assert.equal(polls, 1);
+  assert.deepEqual(sent, []);
+  const second = elements.connect.onclick();
+  await tick();
+  deliver({ type: 'result', id: 'read:2', session_id: 'session', ok: true, payload: { tree_json: '{}' } });
+  await second;
+  assert.deepEqual(sent.map(command => command.id), ['read:2']);
+});
+
+test('Disconnect aborts result body consumption and reconnect retries the same receipt', { timeout: 2000 }, async () => {
+  const receipts = [];
+  let polls = 0, bodySignal;
+  const { elements, sent, deliver } = studioUI(async (url, init, fixture) => {
+    if (url.endsWith('/session')) return sessionResponse();
+    if (url.endsWith('/result')) {
+      receipts.push(init.body);
+      if (receipts.length > 1) return response({});
+      bodySignal = init.signal;
+      return { ok: true, json: () => new Promise((resolve, reject) => {
+        init.signal.addEventListener('abort', () => reject(init.signal.reason), { once: true });
+      }) };
+    }
+    if (++polls > 1) {
       fixture.elements.disconnect.onclick();
       return response({});
     }
@@ -133,17 +312,14 @@ test('a receipt that cannot fit is retained for reconnect without posting or rep
   const first = elements.connect.onclick();
   await tick();
   deliver({ type: 'result', id: 'edit:1', session_id: 'session', ok: true, payload: {
-    status: 'applied', tree_json: 'large'.repeat(1000), completed: [{ op: 'create_frame', node_id: 'created:1' }],
+    completed: [{ op: 'rename', node_id: 'changed:1' }],
   } });
+  await tick();
+  elements.disconnect.onclick();
   await first;
-  assert.equal(retained.length, 0, 'an oversized minimal receipt is never sent');
-  assert.match(elements.status.textContent, /Relay envelope cannot hold the operation receipt/);
-  maxBytes = 1024;
+  assert.equal(bodySignal.aborted, true, 'abort remains attached while response.json is pending');
+  assert.equal(polls, 1);
   await elements.connect.onclick();
-  assert.deepEqual(sent.map(command => command.id), ['edit:1'], 'reconnect does not re-execute the edit');
-  assert.equal(retained.length, 1);
-  assert.ok(retained[0].bytes <= maxBytes);
-  assert.equal(retained[0].body.ok, false);
-  assert.equal(retained[0].body.payload.status, 'outcome_unknown');
-  assert.equal(retained[0].body.payload.completed[0].node_id, 'created:1');
+  assert.equal(receipts[1], receipts[0]);
+  assert.deepEqual(sent.map(command => command.id), ['edit:1']);
 });

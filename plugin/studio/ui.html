@@ -6,7 +6,7 @@
   label { display: block; margin-top: 18px; }
   input { box-sizing: border-box; width: 100%; padding: 9px; margin-top: 5px; }
   button { margin: 16px 6px 8px 0; padding: 9px 14px; }
-  #status { white-space: pre-wrap; line-height: 1.5; }
+  #status, #uncertain { white-space: pre-wrap; line-height: 1.5; }
   .hint { color: #60646c; line-height: 1.5; }
 </style>
 <h1>Figma Studio</h1>
@@ -15,40 +15,61 @@
 <label>Pairing token <input id="token" type="password" autocomplete="off"></label>
 <button id="connect">Connect</button><button id="disconnect" disabled>Disconnect</button>
 <p id="document"></p><p id="status">Waiting for Figma…</p>
+<p id="uncertain" role="status"></p>
 <script>
   'use strict';
   let context, connection, pending, active = false, connecting = false;
   const status = value => { document.getElementById('status').textContent = value; };
   const sleep = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds));
+  class RelayRefusal extends Error {}
+  class ReceiptTooLarge extends Error {}
   async function request(path, body) {
+    const signal = connection.controller.signal;
     const response = await fetch(connection.url + path, {
       method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${connection.token}` },
-      body: JSON.stringify(body)
+      body: JSON.stringify(body), signal
     });
     const result = await response.json();
-    if (!response.ok) throw new Error(result.error || `Relay returned ${response.status}`);
+    if (signal.aborted) throw signal.reason || new Error('Request cancelled');
+    if (!response.ok) {
+      const message = typeof result?.error === 'string' ? result.error : `Relay returned ${response.status}`;
+      if (response.status === 409 && result?.kind === 'application_refused' && result.retryable === false)
+        throw new RelayRefusal(message);
+      if (response.status === 413 && result?.kind === 'request_too_large' && result.retryable === false)
+        throw new ReceiptTooLarge(message);
+      throw new Error(message);
+    }
     return result;
+  }
+  async function pair() {
+    const { type, session_id, ...documentContext } = context;
+    const reply = await request('/session', { session_id, document: documentContext });
+    if (typeof reply.worker_boot_id !== 'string' || !reply.worker_boot_id)
+      throw new Error('Relay did not identify the worker session');
+    connection.workerBootId = reply.worker_boot_id;
+    connection.maxBytes = reply.max_request_bytes;
+    connection.pollInterval = reply.poll_interval_ms;
   }
   function send(command) {
     return new Promise(resolve => {
-      pending = { command, resolve };
+      pending = { command, resolve, sessionId: context.session_id, workerBootId: connection.workerBootId };
       parent.postMessage({ pluginMessage: { type: 'command', session_id: context.session_id, command } }, '*');
     });
   }
-  function resultWire(sessionId, operationId, result, maxBytes) {
+  function resultWire(sessionId, workerBootId, operationId, result, maxBytes) {
     if (!Number.isSafeInteger(maxBytes) || maxBytes <= 0) throw new Error('Invalid relay envelope limit');
-    const wire = { session_id: sessionId, operation_id: operationId, ...result };
+    const wire = { session_id: sessionId, worker_boot_id: workerBootId, operation_id: operationId, ...result };
     const fits = value => new TextEncoder().encode(JSON.stringify(value)).length <= maxBytes;
     if (fits(wire)) return wire;
     const completed = result.payload && Array.isArray(result.payload.completed) ? result.payload.completed : [];
     const identities = completed.map((entry, index) => ({ index,
       ...(entry && typeof entry.op === 'string' ? { op: entry.op } : {}),
       ...(entry && typeof entry.node_id === 'string' ? { node_id: entry.node_id } : {}) }));
-    const summary = count => ({ session_id: sessionId, operation_id: operationId, ok: false,
+    const summary = count => ({ session_id: sessionId, worker_boot_id: workerBootId, operation_id: operationId, ok: false,
       payload: { status: 'outcome_unknown', error: 'Readback exceeds relay envelope; inspect the document',
         completed_count: completed.length, completed: identities.slice(0, count),
         completed_omitted: completed.length - count, details_omitted: true } });
-    if (!fits(summary(0))) throw new Error('Relay envelope cannot hold the operation receipt');
+    if (!fits(summary(0))) throw new ReceiptTooLarge('Relay envelope cannot hold the operation receipt');
     let low = 0, high = identities.length;
     while (low < high) {
       const count = Math.ceil((low + high) / 2);
@@ -57,16 +78,39 @@
     }
     return summary(low);
   }
+  function retainRefusal(wire, error) {
+    const completed = Array.isArray(wire.payload?.completed) ? wire.payload.completed : [];
+    const details = [
+      'Result not collected; document effects are unknown. Inspect Figma before preparing another edit.',
+      `Operation: ${wire.operation_id}`,
+      `${error instanceof ReceiptTooLarge ? 'Receipt too large' : 'Relay refusal'}: ${error.message}`,
+      ...completed.map(entry => `Plugin reported: ${entry?.op || 'operation'} → ${entry?.node_id || 'unknown node'}`)
+    ];
+    if (wire.payload?.completed_omitted > 0)
+      details.push(`${wire.payload.completed_omitted} additional changed-node identities were omitted.`);
+    const element = document.getElementById('uncertain');
+    element.textContent = [element.textContent, details.join('\n')].filter(Boolean).join('\n\n');
+  }
   async function run() {
     while (active) {
       try {
         if (pending && pending.result) {
-          const wire = resultWire(context.session_id, pending.command.id, pending.result, connection.maxBytes);
-          await request('/result', wire);
-          pending = undefined;
-          status('Result retained by MASC. Ready.');
+          try {
+            if (!pending.wire)
+              pending.wire = resultWire(pending.sessionId, pending.workerBootId, pending.command.id, pending.result, connection.maxBytes);
+            await request('/result', pending.wire);
+            pending = undefined;
+            status('Result retained by MASC. Ready.');
+          } catch (error) {
+            if (!(error instanceof RelayRefusal) && !(error instanceof ReceiptTooLarge)) throw error;
+            retainRefusal(pending.wire || { operation_id: pending.command.id, payload: pending.result.payload }, error);
+            pending = undefined;
+            if (error instanceof RelayRefusal) await pair();
+          }
         }
+        if (!active) break;
         const reply = await request('/poll', { session_id: context.session_id });
+        if (!active) break;
         if (reply.command) {
           status(`Running ${reply.command.kind}…`);
           await send(reply.command);
@@ -100,11 +144,9 @@
       if (!context) throw new Error('Figma context is not ready');
       const url = new URL(document.getElementById('url').value);
       if (url.origin !== 'http://127.0.0.1:8941' || url.pathname !== '/') throw new Error('Use the declared local relay origin');
-      connection = { url: url.origin, token: document.getElementById('token').value };
-      const { type, session_id, ...documentContext } = context;
-      const reply = await request('/session', { session_id, document: documentContext });
-      connection.maxBytes = reply.max_request_bytes;
-      connection.pollInterval = reply.poll_interval_ms;
+      connection = { url: url.origin, token: document.getElementById('token').value, controller: new AbortController() };
+      document.getElementById('disconnect').disabled = false;
+      await pair();
       active = true;
       document.getElementById('connect').disabled = true;
       document.getElementById('disconnect').disabled = false;
@@ -114,7 +156,12 @@
     finally {
       connecting = false;
       document.getElementById('connect').disabled = active;
+      document.getElementById('disconnect').disabled = !active;
     }
   };
-  document.getElementById('disconnect').onclick = () => { active = false; status('Disconnecting after the current operation…'); };
+  document.getElementById('disconnect').onclick = () => {
+    active = false;
+    connection?.controller.abort();
+    status('Disconnecting. An uncertain edit will not be replayed.');
+  };
 </script>

@@ -41,6 +41,13 @@ MCP endpoint and `masc.token` to the credential for the Addon's configured
 these values in the private file; never paste them into model prompts or the
 Plugin. Only the separate generated pairing token belongs in the Plugin UI.
 
+`relay.request_timeout_seconds` defaults to 30 and must be a positive finite
+number. It bounds blocking socket inactivity for MCP, Figma REST and PNG
+downloads, including response headers and JSON/SSE body reads. Thirty seconds
+allows ordinary network latency while releasing a silent connection and the
+shared MCP lock. This is not an end-to-end action deadline: a peer that keeps
+sending data may take longer, and the setting does not limit Plugin editing.
+
 Build and install the MASC package from `addons/figma-studio` in the MASC
 repository. Its installation binding identifies the Keeper (`leader` in the
 example), relay agent and logical installation. A new binding uses a new
@@ -54,8 +61,19 @@ python3 studio/relay.py pairing-token --config /path/to/private/figma-studio.tom
 
 The relay binds to loopback, requires its pairing token, checks browser origins,
 and never follows authenticated redirects. Request loss does not cause an edit
-replay. A worker restart requires pairing again; original receipts remain in the
-Addon. Stop the relay with Ctrl-C. Starting it does not launch or log into Figma.
+replay. Each pending result keeps the worker boot ID from command delivery;
+reconnecting cannot relabel an old result as work from a new worker.
+
+Only the worker's structured `workflow_rejection`/`proven_pre_effect` metadata
+produces HTTP 409 (`application_refused`, `retryable: false`). Local envelope
+rejection produces HTTP 413 (`request_too_large`, `retryable: false`). Neither
+response means an already executed edit did not happen. The Plugin keeps the
+operation ID, known completed nodes and uncertainty notice on screen, releases
+the undeliverable receipt, and continues with a fresh session after a worker
+refusal. Transport loss, socket timeout, runtime failure and unclassified worker
+errors produce HTTP 502 (`transport_error`, `retryable: true`); the Plugin keeps
+the exact pending result for reconnect. Stop the relay with Ctrl-C. Starting it
+does not launch or log into Figma.
 
 ## Capture, edit and verify
 

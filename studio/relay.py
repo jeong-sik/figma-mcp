@@ -18,7 +18,16 @@ import threading
 import tomllib
 from typing import Any, cast
 
-from client import FigmaRest, McpClient, RequestTooLarge, TransportError, encode
+from client import (
+    DEFAULT_REQUEST_TIMEOUT_SECONDS,
+    ApplicationRefused,
+    FigmaRest,
+    McpClient,
+    RequestTooLarge,
+    TransportError,
+    encode,
+    request_timeout,
+)
 
 
 def compact_plugin_result(result: dict, fits: Callable[[dict], bool]) -> dict:
@@ -81,17 +90,25 @@ class Bridge:
         self.client = client
         self.poll_interval_ms = poll_interval_ms
         self.sessions: dict[str, str] = {}
-        self.max_bytes = client.max_bytes
         self.stopping = threading.Event()
+
+    @property
+    def max_bytes(self) -> int:
+        return self.client.max_bytes
+
+    @max_bytes.setter
+    def max_bytes(self, value: int) -> None:
+        self.client.max_bytes = value
 
     def run_rest(self, rest: FigmaRest, worker_boot_id: str) -> None:
         boot: str | None = worker_boot_id
         while not self.stopping.wait(self.poll_interval_ms / 1000):
             try:
                 if boot is None:
-                    boot = self.client.call("masc_figma_relay", {"kind": "status"})[
-                        "worker_boot_id"
-                    ]
+                    info = self.client.call("masc_figma_relay", {"kind": "status"})
+                    boot = info["worker_boot_id"]
+                    self.max_bytes = info["max_request_bytes"]
+                rest.max_bytes = self.max_bytes
                 answer = self.client.call(
                     "masc_figma_relay",
                     {"kind": "rest_poll", "worker_boot_id": boot},
@@ -128,7 +145,7 @@ class Bridge:
                             },
                         },
                     )
-            except (TransportError, ValueError, KeyError) as error:
+            except (ApplicationRefused, TransportError, ValueError, KeyError) as error:
                 # Never resend the uncertain poll/result or repeat its capture.
                 # A fresh status and poll can only deliver a new prepared read.
                 print(f"Studio REST relay reconnecting: {error}", file=sys.stderr)
@@ -152,6 +169,7 @@ class Bridge:
                 "worker_boot_id": boot,
                 "max_request_bytes": self.max_bytes,
                 "poll_interval_ms": self.poll_interval_ms,
+                "request_timeout_seconds": self.client.request_timeout_seconds,
             }
         boot = self.sessions.get(session)
         if boot is None:
@@ -163,14 +181,20 @@ class Bridge:
                 "masc_figma_relay", {"kind": "poll", "worker_boot_id": boot, **data}
             )
         if path == "/result":
-            if set(data) != {"session_id", "operation_id", "ok", "payload"}:
+            if (
+                set(data)
+                != {"session_id", "worker_boot_id", "operation_id", "ok", "payload"}
+                or not isinstance(data["worker_boot_id"], str)
+                or not data["worker_boot_id"]
+            ):
                 raise ValueError("Result fields do not match the Studio contract")
+            # A reconnect updates the live session, not the identity of an
+            # already executed operation. Forward the original delivery boot.
+            result = {"kind": "result", **data}
             return self.client.call(
                 "masc_figma_relay",
-                {"kind": "result", "worker_boot_id": boot, **data},
-                compact=lambda fits: compact_plugin_result(
-                    {"kind": "result", "worker_boot_id": boot, **data}, fits
-                ),
+                result,
+                compact=lambda fits: compact_plugin_result(result, fits),
             )
         raise ValueError("Unknown Studio endpoint")
 
@@ -232,8 +256,7 @@ class Handler(BaseHTTPRequestHandler):
             length = int(self.headers.get("Content-Length", "0"))
             if length <= 0 or length > self.studio_server.bridge.max_bytes:
                 self.close_connection = True
-                self.reply(413, {"error": "Request exceeds the Studio envelope"})
-                return
+                raise RequestTooLarge("Request exceeds the Studio envelope")
             data = json.loads(self.rfile.read(length))
             if not isinstance(data, dict):
                 raise ValueError("Request must be an object")
@@ -241,8 +264,24 @@ class Handler(BaseHTTPRequestHandler):
             self.reply(200, result)
         except (ValueError, KeyError, TypeError) as error:
             self.reply(400, {"error": str(error)})
+        except ApplicationRefused as error:
+            self.reply(
+                409,
+                {
+                    "kind": "application_refused",
+                    "error": str(error),
+                    "retryable": False,
+                },
+            )
+        except RequestTooLarge as error:
+            self.reply(
+                413,
+                {"kind": "request_too_large", "error": str(error), "retryable": False},
+            )
         except TransportError as error:
-            self.reply(502, {"error": str(error)})
+            self.reply(
+                502, {"kind": "transport_error", "error": str(error), "retryable": True}
+            )
 
 
 def read_config(path: Path) -> dict:
@@ -256,6 +295,9 @@ def read_config(path: Path) -> dict:
     config = tomllib.loads(path.read_text())
     if not config.get("relay", {}).get("pairing_token"):
         raise ValueError("Configure a Studio pairing token")
+    config["relay"]["request_timeout_seconds"] = request_timeout(
+        config["relay"].get("request_timeout_seconds", DEFAULT_REQUEST_TIMEOUT_SECONDS)
+    )
     return config
 
 
@@ -280,7 +322,9 @@ def main() -> None:
             )
             with os.fdopen(descriptor, "w") as output:
                 output.write(
-                    '[masc]\nurl = ""\ntoken = ""\n\n[relay]\nport = 8941\npoll_interval_ms = 1000\npairing_token = '
+                    '[masc]\nurl = ""\ntoken = ""\n\n[relay]\nport = 8941\npoll_interval_ms = 1000\nrequest_timeout_seconds = '
+                    + str(DEFAULT_REQUEST_TIMEOUT_SECONDS)
+                    + "\npairing_token = "
                     + json.dumps(secrets.token_urlsafe(32))
                     + '\n\n[figma]\ntoken = ""\n'
                 )
@@ -289,13 +333,18 @@ def main() -> None:
             )
             return
         config = read_config(args.config)
+        timeout = config["relay"]["request_timeout_seconds"]
         if args.command == "pairing-token":
             print(config["relay"]["pairing_token"])
             return
         if args.command == "snapshot":
             if not args.snapshot_id or args.output is None:
                 raise ValueError("snapshot needs --snapshot-id and --output")
-            client = McpClient(config["masc"]["url"], config["masc"]["token"])
+            client = McpClient(
+                config["masc"]["url"],
+                config["masc"]["token"],
+                request_timeout_seconds=timeout,
+            )
             client.initialize()
             result = client.call_result(
                 "masc_figma_snapshot", {"snapshot_id": args.snapshot_id}
@@ -312,9 +361,9 @@ def main() -> None:
                 raise ValueError(
                     "rest-capture needs --file-key, --node-id and --output"
                 )
-            capture = FigmaRest(config["figma"]["token"], 16777216).capture(
-                args.file_key, args.node_id, args.version
-            )
+            capture = FigmaRest(
+                config["figma"]["token"], 16777216, request_timeout_seconds=timeout
+            ).capture(args.file_key, args.node_id, args.version)
             image = capture.pop("preview")
             data = base64.b64decode(image["data_base64"], validate=True)
             capture["preview"] = {
@@ -345,12 +394,20 @@ def main() -> None:
             raise ValueError(
                 "The development Plugin requires port 8941 and a positive integer polling interval"
             )
-        client = McpClient(config["masc"]["url"], config["masc"]["token"])
+        client = McpClient(
+            config["masc"]["url"],
+            config["masc"]["token"],
+            request_timeout_seconds=timeout,
+        )
         client.initialize()
         bridge = Bridge(client, interval)
         info = client.call("masc_figma_relay", {"kind": "status"})
         bridge.max_bytes = info["max_request_bytes"]
-        rest = FigmaRest(config.get("figma", {}).get("token", ""), bridge.max_bytes)
+        rest = FigmaRest(
+            config.get("figma", {}).get("token", ""),
+            bridge.max_bytes,
+            request_timeout_seconds=timeout,
+        )
         rest_thread = threading.Thread(
             target=bridge.run_rest, args=(rest, info["worker_boot_id"]), daemon=True
         )
@@ -364,7 +421,7 @@ def main() -> None:
                 server.serve_forever()
         finally:
             bridge.stopping.set()
-    except (ValueError, KeyError, OSError, TransportError) as error:
+    except (ValueError, KeyError, OSError, ApplicationRefused, TransportError) as error:
         print(f"Studio relay: {error}", file=sys.stderr)
         raise SystemExit(1) from error
 

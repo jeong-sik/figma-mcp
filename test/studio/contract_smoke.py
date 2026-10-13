@@ -15,6 +15,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import urllib.error
 import urllib.request
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -32,13 +33,16 @@ class Worker:
             stdout=subprocess.PIPE,
             text=True,
         )
+        stdin, stdout = self.process.stdin, self.process.stdout
+        assert stdin is not None and stdout is not None
+        self.stdin, self.stdout = stdin, stdout
         self.lock = threading.Lock()
         self.sequence = 0
 
     def request(self, method, params):
         with self.lock:
             self.sequence += 1
-            self.process.stdin.write(
+            self.stdin.write(
                 json.dumps(
                     {
                         "jsonrpc": "2.0",
@@ -49,15 +53,15 @@ class Worker:
                 )
                 + "\n"
             )
-            self.process.stdin.flush()
-            response = json.loads(self.process.stdout.readline())
+            self.stdin.flush()
+            response = json.loads(self.stdout.readline())
             assert response["id"] == self.sequence
             return response["result"]
 
     def close(self):
-        self.process.stdin.close()
+        self.stdin.close()
         self.process.wait()
-        self.process.stdout.close()
+        self.stdout.close()
         assert self.process.returncode == 0
 
 
@@ -83,27 +87,28 @@ def main():
     with ExitStack() as stack:
         state = stack.enter_context(tempfile.TemporaryDirectory())
         worker = Worker(args.worker, state)
-        stack.callback(worker.close)
+        stack.callback(lambda: worker.close())
         worker.request("initialize", {})
+        binding = {
+            "installation": "contract-fixture",
+            "keeper": "leader",
+            "relay_agent": "studio-relay",
+            "sources": [],
+        }
         observed = worker.request(
             "tools/call",
             {
                 "name": "lane_observe",
                 "arguments": {
                     "sources": [],
-                    "binding": {
-                        "installation": "contract-fixture",
-                        "keeper": "leader",
-                        "relay_agent": "studio-relay",
-                        "sources": [],
-                    },
+                    "binding": binding,
                 },
             },
         )
         assert not observed.get("isError")
 
         class HostFixture(BaseHTTPRequestHandler):
-            def log_message(self, *_):
+            def log_message(self, format: str, *args: object) -> None:
                 pass
 
             def do_POST(self):
@@ -155,15 +160,17 @@ def main():
             stdout=subprocess.PIPE,
             text=True,
         )
+        plugin_in, plugin_out = plugin.stdin, plugin.stdout
+        assert plugin_in is not None and plugin_out is not None
 
         def close_plugin():
-            plugin.stdin.close()
+            plugin_in.close()
             plugin.wait()
-            plugin.stdout.close()
+            plugin_out.close()
             assert plugin.returncode == 0
 
         stack.callback(close_plugin)
-        context = json.loads(plugin.stdout.readline())
+        context = json.loads(plugin_out.readline())
         session, root = context["session_id"], context["root_id"]
 
         def post(path, values):
@@ -179,7 +186,8 @@ def main():
             with urllib.request.urlopen(request) as response:
                 return json.load(response)
 
-        post("/session", {"document": context["document"]})
+        paired = post("/session", {"document": context["document"]})
+        worker_boot_id = paired["worker_boot_id"]
         keeper.call("masc_figma_bind", {"session_id": session})
 
         def execute(identity, kind, **values):
@@ -195,12 +203,13 @@ def main():
             )
             command = post("/poll", {})["command"]
             assert command["id"] == identity
-            plugin.stdin.write(json.dumps(command) + "\n")
-            plugin.stdin.flush()
-            reply = json.loads(plugin.stdout.readline())
+            plugin_in.write(json.dumps(command) + "\n")
+            plugin_in.flush()
+            reply = json.loads(plugin_out.readline())
             result = post(
                 "/result",
                 {
+                    "worker_boot_id": worker_boot_id,
                     "operation_id": identity,
                     "ok": reply["ok"],
                     "payload": reply["payload"],
@@ -209,6 +218,7 @@ def main():
             repeated = post(
                 "/result",
                 {
+                    "worker_boot_id": worker_boot_id,
                     "operation_id": identity,
                     "ok": reply["ok"],
                     "payload": reply["payload"],
@@ -282,17 +292,68 @@ def main():
             {
                 "name": "lane_observe",
                 "arguments": {
-                    "binding": {
-                        "installation": "contract-fixture",
-                        "keeper": "leader",
-                        "relay_agent": "studio-relay",
-                        "sources": [],
-                    },
+                    "binding": binding,
                     "sources": [],
                 },
             },
         )
         assert len(retained["structuredContent"]["artifacts"]) == 3
+
+        # A completed Plugin command can outlive the worker that dispatched it.
+        # Re-pairing must not relabel its receipt with the replacement boot.
+        keeper.call(
+            "masc_figma_submit",
+            {
+                "operation_id": "capture-before-restart",
+                "session_id": session,
+                "root_id": root,
+                "kind": "capture",
+            },
+        )
+        old_command = post("/poll", {})["command"]
+        plugin_in.write(json.dumps(old_command) + "\n")
+        plugin_in.flush()
+        old_reply = json.loads(plugin_out.readline())
+        old_boot = worker_boot_id
+        worker.close()
+        worker = Worker(args.worker, state)
+        worker.request("initialize", {})
+        worker.request(
+            "tools/call",
+            {
+                "name": "lane_observe",
+                "arguments": {"binding": binding, "sources": []},
+            },
+        )
+        paired = post("/session", {"document": context["document"]})
+        worker_boot_id = paired["worker_boot_id"]
+        assert worker_boot_id != old_boot
+        try:
+            post(
+                "/result",
+                {
+                    "worker_boot_id": old_boot,
+                    "operation_id": old_command["id"],
+                    "ok": old_reply["ok"],
+                    "payload": old_reply["payload"],
+                },
+            )
+        except urllib.error.HTTPError as error:
+            with error:
+                refusal = json.load(error)
+            assert error.code == 409
+            assert refusal["kind"] == "application_refused"
+            assert refusal["retryable"] is False
+        else:
+            raise AssertionError("Old boot receipt was accepted after restart")
+        uncertain = keeper.call(
+            "masc_figma_operation", {"operation_id": old_command["id"]}
+        )
+        assert uncertain["state"] == "outcome_unknown"
+        keeper.call("masc_figma_bind", {"session_id": session})
+        continued = execute("capture-after-restart", "capture")
+        assert continued["state"] == "captured"
+
         result_path = args.output / "snapshot-result.json"
         result_path.write_bytes(encode(result))
         (args.output / "preview.png").write_bytes(png)
@@ -321,6 +382,7 @@ def main():
             "visual_verdict": report["visual_verdict"],
             "kitty_protocol_emitted": True,
             "duplicate_result_retained": True,
+            "worker_restart_refusal_and_next_capture": True,
         }
         (args.output / "receipt.json").write_bytes(encode(receipt))
         print(json.dumps(receipt, indent=2))

@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import http.client
 import json
+import math
 import threading
 import time
 import urllib.error
@@ -15,8 +16,15 @@ from collections.abc import Callable
 from typing import Any
 
 
+DEFAULT_REQUEST_TIMEOUT_SECONDS = 30.0
+
+
 class TransportError(RuntimeError):
     pass
+
+
+class ApplicationRefused(RuntimeError):
+    """The worker proved that this delivery was rejected before any effect."""
 
 
 class RequestTooLarge(TransportError):
@@ -34,6 +42,12 @@ def encode(value: Any) -> bytes:
     ).encode()
 
 
+def request_timeout(value: Any) -> float:
+    if type(value) not in (int, float) or not math.isfinite(value) or value <= 0:
+        raise ValueError("request_timeout_seconds must be a positive finite number")
+    return float(value)
+
+
 def request_message(method: str, params: dict, identity: str | int | None) -> dict:
     value = {"jsonrpc": "2.0", "method": method, "params": params}
     if identity is not None:
@@ -49,7 +63,14 @@ def read_limited(response, limit: int) -> bytes:
 
 
 class McpClient:
-    def __init__(self, url: str, token: str, max_bytes: int = 16777216):
+    def __init__(
+        self,
+        url: str,
+        token: str,
+        max_bytes: int = 16777216,
+        *,
+        request_timeout_seconds: float = DEFAULT_REQUEST_TIMEOUT_SECONDS,
+    ):
         parsed = urllib.parse.urlsplit(url)
         if parsed.scheme != "https" and not (
             parsed.scheme == "http"
@@ -61,6 +82,7 @@ class McpClient:
                 "Use a configured bearer credential, not URL credentials"
             )
         self.url, self.token, self.max_bytes = url, token, max_bytes
+        self.request_timeout_seconds = request_timeout(request_timeout_seconds)
         self.session = None
         self.version = "2025-06-18"
         self.lock = threading.Lock()
@@ -95,7 +117,9 @@ class McpClient:
             self.url, data=encoded, headers=headers, method="POST"
         )
         try:
-            with self.opener.open(request) as response:
+            with self.opener.open(
+                request, timeout=self.request_timeout_seconds
+            ) as response:
                 session = response.headers.get("Mcp-Session-Id")
                 if session:
                     self.session = session
@@ -138,7 +162,7 @@ class McpClient:
             ) from error
         except (OSError, http.client.HTTPException) as error:
             raise TransportError(
-                "MCP connection failed; request was not replayed"
+                "MCP connection failed or timed out; outcome may be unknown; request was not replayed"
             ) from error
         if message.get("id") != body["id"] or message.get("jsonrpc") != "2.0":
             raise TransportError("MCP response identity mismatch")
@@ -206,7 +230,21 @@ class McpClient:
                 for x in response.get("content", [])
                 if x.get("type") == "text"
             ]
-            raise TransportError("MASC tool refused: " + "\n".join(texts))
+            metadata = response.get("_meta")
+            failure = (
+                metadata.get("io.github.jeong-sik/masc.lane.failure")
+                if isinstance(metadata, dict)
+                else None
+            )
+            if (
+                isinstance(failure, dict)
+                and failure.get("class") == "workflow_rejection"
+                and failure.get("effect") == "proven_pre_effect"
+            ):
+                raise ApplicationRefused("MASC tool refused: " + "\n".join(texts))
+            raise TransportError(
+                "MASC tool failed; outcome may be unknown: " + "\n".join(texts)
+            )
         return response
 
     def call(
@@ -234,9 +272,15 @@ class McpClient:
 
 class FigmaRest:
     def __init__(
-        self, token: str, max_bytes: int, *, api_url: str = "https://api.figma.com"
+        self,
+        token: str,
+        max_bytes: int,
+        *,
+        api_url: str = "https://api.figma.com",
+        request_timeout_seconds: float = DEFAULT_REQUEST_TIMEOUT_SECONDS,
     ):
         self.token, self.max_bytes, self.api_url = token, max_bytes, api_url.rstrip("/")
+        self.request_timeout_seconds = request_timeout(request_timeout_seconds)
         self.opener = urllib.request.build_opener(NoRedirect())
 
     def get(self, path: str, query: dict | None = None) -> dict:
@@ -247,15 +291,17 @@ class FigmaRest:
             url, headers={"X-Figma-Token": self.token, "Accept": "application/json"}
         )
         try:
-            with self.opener.open(request) as response:
+            with self.opener.open(
+                request, timeout=self.request_timeout_seconds
+            ) as response:
                 value = json.loads(read_limited(response, self.max_bytes))
         except urllib.error.HTTPError as error:
             retry = error.headers.get("Retry-After")
             detail = f"; Retry-After: {retry}" if error.code == 429 and retry else ""
             error.close()
             raise TransportError(f"Figma returned HTTP {error.code}{detail}") from error
-        except urllib.error.URLError as error:
-            raise TransportError("Figma connection failed") from error
+        except (OSError, http.client.HTTPException) as error:
+            raise TransportError("Figma connection failed or timed out") from error
         if not isinstance(value, dict):
             raise TransportError("Figma did not return an object")
         return value
@@ -297,10 +343,12 @@ class FigmaRest:
             raise TransportError("Figma asset URL must be HTTPS without credentials")
         # Asset requests never carry the Figma PAT or MASC credential.
         try:
-            with self.opener.open(urllib.request.Request(url)) as response:
+            with self.opener.open(
+                urllib.request.Request(url), timeout=self.request_timeout_seconds
+            ) as response:
                 png = read_limited(response, self.max_bytes)
-        except urllib.error.URLError as error:
-            raise TransportError("Figma asset download failed") from error
+        except (OSError, http.client.HTTPException) as error:
+            raise TransportError("Figma asset download failed or timed out") from error
         if not png.startswith(b"\x89PNG\r\n\x1a\n"):
             raise TransportError("Figma render did not produce PNG bytes")
         return {
