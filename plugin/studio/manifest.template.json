@@ -1,0 +1,13 @@
+{
+  "name": "Figma Studio for MASC",
+  "api": "1.0.0",
+  "main": "code.js",
+  "ui": "ui.html",
+  "editorType": ["figma"],
+  "documentAccess": "dynamic-page",
+  "networkAccess": {
+    "allowedDomains": ["none"],
+    "devAllowedDomains": ["http://127.0.0.1:8941"],
+    "reasoning": "Connect to the operator's local Studio relay; credentials stay on the host."
+  }
+}
