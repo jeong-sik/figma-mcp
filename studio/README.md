@@ -1,158 +1,57 @@
-# Figma Studio companion
+# Figma Studio
 
-The Studio Plugin edits the open Figma document. The host relay sends requests
-between that Plugin and MASC's network-isolated `figma-studio` Lane Addon. The
-same relay can capture server versions through Figma's REST API with a PAT.
-No model or MASC credential runs in the Plugin.
+A standalone local service and Figma Plugin. Any authenticated HTTP client can capture and edit a native document or inspect a retained snapshot. The service knows no agent harness, model provider or client repository. Python 3.11+ on macOS or Linux is its only service dependency. The existing repository MCP server is separate and is not required by Studio.
 
-## Prepare the local Plugin
-
-1. In Figma Desktop, create/open a Design file.
-2. In Plugins → Development, create a new development Plugin once and save its
-   generated manifest. Figma assigns the Plugin identity; this checkout does not
-   invent one. Prepare a separate import directory using that manifest:
-
-   ```sh
-   python3 studio/prepare.py --from-manifest /path/to/generated/manifest.json \
-     --output /path/to/new/figma-studio-plugin
-   ```
-
-3. Import the resulting `figma-studio-plugin/manifest.json` in Development.
-   Keep its adjacent `code.js` and `ui.html` files together.
-4. Run **Figma Studio for MASC**. Select a frame or create a blank frame for
-   the initial design. Leave the Plugin open while MASC works.
-
-The development manifest allows `http://127.0.0.1:8941` for the local relay.
-It uses stable APIs and has no proposed/private Plugin API dependency. Import
-and live rendering still require verification in an actual Figma session.
-See the official [manifest identity contract](https://developers.figma.com/docs/plugins/manifest/).
-
-## Prepare the relay
-
-Use Python 3.11 or newer; the companion uses the standard library.
+## Install and run
 
 ```sh
-python3 studio/relay.py init --config /path/to/private/figma-studio.toml
+python3 studio/build.py --output figma-studio.zip
+# Unpack in an installation directory; no source checkout is needed.
+python3 studio/service.py init --config /path/to/private/studio.toml
+python3 studio/service.py serve --config /path/to/private/studio.toml
 ```
 
-The new file is created with mode 0600. Set `masc.url` to the Full-profile MASC
-MCP endpoint and `masc.token` to the credential for the Addon's configured
-`relay_agent`. Set `figma.token` to the PAT when enabling REST capture. Keep
-these values in the private file; never paste them into model prompts or the
-Plugin. Only the separate generated pairing token belongs in the Plugin UI.
+`init` creates private, distinct client and Plugin credentials. The state directory resolves relative to that configuration. The optional `figma.token` is a PAT used only for REST capture; it stays in the service.
 
-`relay.request_timeout_seconds` defaults to 30 and must be a positive finite
-number. It bounds blocking socket inactivity for MCP, Figma REST and PNG
-downloads, including response headers and JSON/SSE body reads. Thirty seconds
-allows ordinary network latency while releasing a silent connection and the
-shared MCP lock. This is not an end-to-end action deadline: a peer that keeps
-sending data may take longer, and the setting does not limit Plugin editing.
+State is private to the current OS user. A lifetime writer lease rejects a second service using the same directory before opening or recovering the database, including when the second process uses another port. Use separate state directories for separate services.
 
-Build and install the MASC package from `addons/figma-studio` in the MASC
-repository. Its installation binding identifies the Keeper (`leader` in the
-example), relay agent and logical installation. A new binding uses a new
-persistent installation; do not repurpose another Keeper's stored data.
+Create a development Plugin in Figma, then preserve its assigned identity:
 
 ```sh
-python3 studio/relay.py serve --config /path/to/private/figma-studio.toml
-# Run locally to obtain the value for the Plugin's pairing-token input:
-python3 studio/relay.py pairing-token --config /path/to/private/figma-studio.toml
+python3 studio/prepare.py --from-manifest /path/to/figma/manifest.json --output /path/to/new/plugin
+python3 studio/service.py plugin-token --config /path/to/private/studio.toml
 ```
 
-The relay binds to loopback, requires its pairing token, checks browser origins,
-and never follows authenticated redirects. Request loss does not cause an edit
-replay. Each pending result keeps the worker boot ID from command delivery;
-reconnecting cannot relabel an old result as work from a new worker.
+Import the manifest and enter the Plugin token. The development manifest permits `http://127.0.0.1:8941`. A different endpoint needs both the Plugin manifest permission and UI URL changed. [Figma manifest contract](https://developers.figma.com/docs/plugins/manifest/).
 
-Only the worker's structured `workflow_rejection`/`proven_pre_effect` metadata
-produces HTTP 409 (`application_refused`, `retryable: false`). Local envelope
-rejection produces HTTP 413 (`request_too_large`, `retryable: false`). Neither
-response means an already executed edit did not happen. The Plugin keeps the
-operation ID, known completed nodes and uncertainty notice on screen, releases
-the undeliverable receipt, and continues with a fresh session after a worker
-refusal. Transport loss, socket timeout, runtime failure and unclassified worker
-errors produce HTTP 502 (`transport_error`, `retryable: true`); the Plugin keeps
-the exact pending result for reconnect. Stop the relay with Ctrl-C. Starting it
-does not launch or log into Figma.
+## Public API
 
-## Capture, edit and verify
+POST JSON with `Authorization: Bearer <client_token>`. Plugin credentials cannot call client operations; client credentials cannot submit Plugin results. `/v1/info` returns `protocol: "figma-studio/1"`, `service_id`, capabilities and the envelope limit. Validate it before dispatch. An unsupported major version must fail before writes. Additive response fields and capabilities are allowed within v1.
 
-Ask the configured Keeper to list Studio sessions and bind the chosen one.
-`masc_figma_submit` with `kind: capture` stores a native `JSON_REST_V1` export
-and PNG. For edits, provide the original snapshot ID and a typed operation list.
-The Plugin preflights targets, property values and fonts, then checks the
-baseline before mutation. Changed node IDs and readback accompany the result.
+| Endpoint | Body and result |
+| --- | --- |
+| `/v1/info` | `{}` → protocol, service identity, capabilities, envelope |
+| `/v1/status` | `{}` → reported Plugin sessions and latest snapshot |
+| `/v1/operations` | `service_id`, `operation_id`, `session_id`, `kind`, `root_id`; apply also needs `expected_tree_json` and `ops` |
+| `/v1/operation` | `operation_id` → retained state and result without replay |
+| `/v1/readback` | `operation_id`, byte `offset`, optional byte `limit` → exact JSON result bytes in bounded base64 chunks |
+| `/v1/snapshot` | `snapshot_id` → native JSON and PNG with digest |
+| `/v1/validate` | `snapshot_id`, `assertions` → structural verdict; no visual verdict |
+| `/v1/rest-capture` | `file_key`, `root_id`, optional `version` → pinned server snapshot |
 
-`masc_figma_validate` evaluates explicit node/property assertions on a snapshot.
-This proves those assertions only. The returned PNG is also available to the
-Keeper for visual inspection. Code implementation must be checked in its real
-application; native structure and image similarity do not establish interaction
-behavior.
+`operation_id` identifies exact input. Different input reusing an ID is refused. Capture uses `kind: "capture"`. Apply uses `kind: "apply"` and an exact native export as its baseline; the Plugin checks it before editing. Submission is a receipt, not completion.
 
-For REST capture, `masc_figma_rest_capture` accepts `operation_id`, `file_key`,
-`root_id` and optional `version`; `masc_figma_rest_operation` reads its outcome.
-The relay pins the render to the node response's version and retrieves PNG bytes
-without sending the PAT to the asset host. This works without an open Plugin.
-A REST snapshot is not automatically associated with an open editable document.
+Operation polling returns compact result metadata, including `snapshot_id` and `readback_available`. Readback chunks carry `encoding: "json-utf8"`, `offset`, `next_offset`, `total_bytes`, and `sha256`. Read until `next_offset` is null and verify the assembled digest. This preserves even an oversized or malformed Plugin result without making completion status unreadable. Chunking does not retry a document operation.
 
-## Kitty preview
+The Plugin uses its separate token at `/v1/plugin/session`, `/v1/plugin/poll` and `/v1/plugin/result`. Pairing explicitly identifies the protocol version. Dispatch is durable before a command is returned. Dispatched writes are never automatically replayed. Restart rejects undispatched work and marks dispatched work uncertain. Stale service identities cannot submit or acknowledge another incarnation's work.
 
-Save the complete `masc_figma_snapshot` tool result, including its image block:
-
-```sh
-python3 studio/preview.py snapshot-result.json --kitty
-python3 studio/preview.py snapshot-result.json --output preview.png
-# For redirected output or an environment without terminal-size detection:
-python3 studio/preview.py snapshot-result.json --kitty --size 100 36
-```
-
-To download it directly, use the existing private `[masc]` relay endpoint and
-credential:
-
-```sh
-python3 studio/relay.py snapshot --config /path/to/private/figma-studio.toml \
-  --snapshot-id SNAPSHOT_ID --output snapshot-result.json
-python3 studio/preview.py snapshot-result.json --kitty
-```
-
-The Addon grants its configured relay agent read-only access to retained
-`masc_figma_snapshot` results, including the design JSON and PNG it transports.
-Binding a Plugin session, submitting edits and recording validation still
-require the configured Keeper or an operator. No separate owner credential is
-needed for downloads, and the relay credential stays on the host.
-
-The helper verifies the retained PNG hash before invoking `timg -pk`. It does
-not overwrite an existing output file. Install `timg` separately if needed.
-The same bytes are used for image review, download and terminal preview.
-MASC's automatic tool-image-to-chat-preview path is a separate integration;
-this helper does not claim that a PNG returned by a tool automatically appears
-inside the TUI.
-
-Standalone server capture is also available for diagnosis:
-
-```sh
-python3 studio/relay.py rest-capture --config /path/to/private/figma-studio.toml \
-  --file-key FILE --node-id 1:2 --output server-snapshot.json
-python3 studio/preview.py server-snapshot.json --kitty
-```
-
-## Verification and boundaries
+## Validation and distribution
 
 ```sh
 npm run test:studio
-npm run test:plugin
 python3 -m unittest discover -s test/studio -p 'test_*.py' -v
-ruff check studio test/studio/test_relay.py
-pyright studio
-# Cross-repository contract run; creates a new evidence directory:
-python3 test/studio/contract_smoke.py --worker /path/to/masc/addons/figma-studio \
-  --output /path/to/new/evidence-directory
 ```
 
-Fixtures execute the actual Plugin entrypoint and UI script against controlled
-native/document and relay substitutes. HTTP/SSE tests exercise real local
-transport; the Kitty test invokes installed timg. These are separate from live
-Figma, PAT access, installed MASC/Docker and human-visible display evidence.
-The contract run uses the real worker process, relay HTTP transport and Plugin
-entrypoint with a controlled document and a host-routing fixture; it retains
-the exact snapshot result, PNG, structural report and Kitty protocol bytes.
+Tests run the HTTP service and actual Plugin JavaScript against a controlled native document. They require no other repository, agent, model or external credential. Real Figma execution and visual fidelity remain separate evidence.
+
+Consumers install the ZIP and speak the v1 API. They do not import this checkout or share implementation modules. Plugin, API, and service are released as one independently installable Figma capability.

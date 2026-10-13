@@ -47,7 +47,7 @@ def png_from_result(value: dict[str, Any]) -> bytes:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "snapshot", type=Path, help="Saved masc_figma_snapshot tool result JSON"
+        "snapshot", type=Path, help="Saved snapshot image result JSON"
     )
     parser.add_argument("--kitty", action="store_true", help="Display using timg -pk")
     parser.add_argument(

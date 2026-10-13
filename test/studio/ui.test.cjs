@@ -8,7 +8,7 @@ const tick = () => new Promise(resolve => setImmediate(resolve));
 const response = value => ({ ok: true, json: async () => value });
 const refusal = (status, value) => ({ ok: false, status, json: async () => value });
 const sessionResponse = (maxBytes = 1000000, boot = 'boot:1') => response({
-  worker_boot_id: boot, max_request_bytes: maxBytes, poll_interval_ms: 0,
+  protocol: 'figma-studio/1', service_id: boot, max_request_bytes: maxBytes, poll_interval_ms: 0,
 });
 
 function studioUI(onFetch) {
@@ -38,14 +38,14 @@ test('overlapping Connect clicks start one poller and retain every command resul
   const handshakes = [], retained = [];
   let pollCount = 0;
   const { elements, sent, deliver } = studioUI(async (url, init, fixture) => {
-      if (url.endsWith('/session')) {
+      if (url.endsWith('/v1/plugin/session')) {
         return new Promise(resolve => handshakes.push(resolve));
       }
-      if (url.endsWith('/result')) {
+      if (url.endsWith('/v1/plugin/result')) {
         retained.push(JSON.parse(init.body).operation_id);
         return response({});
       }
-      assert.ok(url.endsWith('/poll'));
+      assert.ok(url.endsWith('/v1/plugin/poll'));
       pollCount++;
       if (pollCount > 2) {
         fixture.elements.disconnect.onclick();
@@ -79,12 +79,12 @@ test('oversized native replies retain a bounded UTF-8 changed-node summary with 
   const maxBytes = 1024, retained = [];
   let pollCount = 0;
   const { elements, sent, deliver } = studioUI(async (url, init, fixture) => {
-    if (url.endsWith('/session')) return sessionResponse(maxBytes);
-    if (url.endsWith('/result')) {
+    if (url.endsWith('/v1/plugin/session')) return sessionResponse(maxBytes);
+    if (url.endsWith('/v1/plugin/result')) {
       retained.push({ bytes: Buffer.byteLength(init.body, 'utf8'), body: JSON.parse(init.body) });
       return response({});
     }
-    assert.ok(url.endsWith('/poll'));
+    assert.ok(url.endsWith('/v1/plugin/poll'));
     if (++pollCount > 1) {
       fixture.elements.disconnect.onclick();
       return response({});
@@ -115,7 +115,7 @@ test('oversized native replies retain a bounded UTF-8 changed-node summary with 
     .map(({ op, node_id }, index) => ({ index, op, node_id })));
   assert.equal(body.payload.details_omitted, true);
   assert.equal(body.session_id, 'session');
-  assert.equal(body.worker_boot_id, 'boot:1');
+  assert.equal(body.service_id, 'boot:1');
   assert.equal(body.operation_id, 'edit:1');
 });
 
@@ -124,12 +124,12 @@ test('an unrepresentable receipt remains visible and does not block a new comman
   let pollCount = 0;
   const retained = [];
   const { elements, sent, deliver } = studioUI(async (url, init, fixture) => {
-    if (url.endsWith('/session')) return sessionResponse(maxBytes);
-    if (url.endsWith('/result')) {
+    if (url.endsWith('/v1/plugin/session')) return sessionResponse(maxBytes);
+    if (url.endsWith('/v1/plugin/result')) {
       retained.push({ bytes: Buffer.byteLength(init.body, 'utf8'), body: JSON.parse(init.body) });
       return response({});
     }
-    assert.ok(url.endsWith('/poll'));
+    assert.ok(url.endsWith('/v1/plugin/poll'));
     if (++pollCount > 2) {
       fixture.elements.disconnect.onclick();
       return response({});
@@ -162,8 +162,8 @@ test('worker restart refusal retains uncertain details, then re-pairs and polls 
   const receipts = [];
   let sessions = 0, polls = 0;
   const { elements, sent, deliver } = studioUI(async (url, init, fixture) => {
-    if (url.endsWith('/session')) return sessionResponse(1000000, ++sessions === 1 ? 'boot:old' : 'boot:new');
-    if (url.endsWith('/result')) {
+    if (url.endsWith('/v1/plugin/session')) return sessionResponse(1000000, ++sessions === 1 ? 'boot:old' : 'boot:new');
+    if (url.endsWith('/v1/plugin/result')) {
       receipts.push(init.body);
       const body = JSON.parse(init.body);
       if (receipts.length === 1)
@@ -172,7 +172,7 @@ test('worker restart refusal retains uncertain details, then re-pairs and polls 
         return refusal(409, { kind: 'application_refused', retryable: false, error: 'Result belongs to another session/worker' });
       return response({});
     }
-    assert.ok(url.endsWith('/poll'));
+    assert.ok(url.endsWith('/v1/plugin/poll'));
     if (++polls > 2) {
       fixture.elements.disconnect.onclick();
       return response({});
@@ -189,7 +189,7 @@ test('worker restart refusal retains uncertain details, then re-pairs and polls 
   } });
   await first;
   assert.equal(polls, 1, 'transport errors preserve the pending delivery');
-  assert.equal(JSON.parse(receipts[0]).worker_boot_id, 'boot:old');
+  assert.equal(JSON.parse(receipts[0]).service_id, 'boot:old');
 
   const second = elements.connect.onclick();
   await tick();
@@ -202,7 +202,7 @@ test('worker restart refusal retains uncertain details, then re-pairs and polls 
   assert.match(elements.uncertain.textContent, /created:1/);
   deliver({ type: 'result', id: 'read:2', session_id: 'session', ok: true, payload: { tree_json: '{}' } });
   await second;
-  assert.equal(JSON.parse(receipts[2]).worker_boot_id, 'boot:new');
+  assert.equal(JSON.parse(receipts[2]).service_id, 'boot:new');
   assert.match(elements.uncertain.textContent, /Operation: edit:1/);
 });
 
@@ -214,8 +214,8 @@ test('only explicitly permanent delivery failures release a pending result', { t
     const receipts = [];
     let polls = 0;
     const { elements, deliver } = studioUI(async (url, init, fixture) => {
-      if (url.endsWith('/session')) return sessionResponse();
-      if (url.endsWith('/result')) {
+      if (url.endsWith('/v1/plugin/session')) return sessionResponse();
+      if (url.endsWith('/v1/plugin/result')) {
         receipts.push(init.body);
         return receipts.length === 1 ? firstReply : response({});
       }
@@ -239,8 +239,8 @@ test('only explicitly permanent delivery failures release a pending result', { t
 test('typed remote receipt-size refusal does not block later polling', { timeout: 2000 }, async () => {
   let polls = 0;
   const { elements, sent, deliver } = studioUI(async (url, init, fixture) => {
-    if (url.endsWith('/session')) return sessionResponse();
-    if (url.endsWith('/result')) return refusal(413, {
+    if (url.endsWith('/v1/plugin/session')) return sessionResponse();
+    if (url.endsWith('/v1/plugin/result')) return refusal(413, {
       kind: 'request_too_large', retryable: false, error: 'MCP envelope cannot hold the receipt',
     });
     if (++polls > 1) {
@@ -264,8 +264,8 @@ test('typed remote receipt-size refusal does not block later polling', { timeout
 test('Disconnect aborts a waiting poll and permits reconnect without a late command', { timeout: 2000 }, async () => {
   let polls = 0, blockedSignal;
   const { elements, sent, deliver } = studioUI(async (url, init, fixture) => {
-    if (url.endsWith('/session')) return sessionResponse();
-    if (url.endsWith('/result')) return response({});
+    if (url.endsWith('/v1/plugin/session')) return sessionResponse();
+    if (url.endsWith('/v1/plugin/result')) return response({});
     if (++polls === 1) {
       blockedSignal = init.signal;
       return new Promise((resolve, reject) => init.signal.addEventListener('abort', () => reject(init.signal.reason), { once: true }));
@@ -294,8 +294,8 @@ test('Disconnect aborts result body consumption and reconnect retries the same r
   const receipts = [];
   let polls = 0, bodySignal;
   const { elements, sent, deliver } = studioUI(async (url, init, fixture) => {
-    if (url.endsWith('/session')) return sessionResponse();
-    if (url.endsWith('/result')) {
+    if (url.endsWith('/v1/plugin/session')) return sessionResponse();
+    if (url.endsWith('/v1/plugin/result')) {
       receipts.push(init.body);
       if (receipts.length > 1) return response({});
       bodySignal = init.signal;
