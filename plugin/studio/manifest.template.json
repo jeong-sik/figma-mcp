@@ -1,5 +1,5 @@
 {
-  "name": "Figma Studio for MASC",
+  "name": "Figma Studio",
   "api": "1.0.0",
   "main": "code.js",
   "ui": "ui.html",
@@ -8,6 +8,6 @@
   "networkAccess": {
     "allowedDomains": ["none"],
     "devAllowedDomains": ["http://127.0.0.1:8941"],
-    "reasoning": "Connect to the operator's local Studio relay; credentials stay on the host."
+    "reasoning": "Connect to the operator's local Studio service; credentials stay on the host."
   }
 }
